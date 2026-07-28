@@ -1,0 +1,117 @@
+// Groups gRPC surface (`v3-deepdive-41-groups.md` §9).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): every response message
+// carries its own `error_code`/`error_detail` pair rather than aborting with a gRPC status.
+//
+// Every mutating and every group-scoped RPC carries `session_id`, never a caller-asserted
+// `user_id`/role/group membership fact — the real session is resolved server-side through
+// `permission_gate.py`, backed by Auth & Tenancy. `user_id` fields below name a *subject*
+// (whose membership is being added/removed/queried), never the *caller* — the caller is
+// always `session_id`.
+
+syntax = "proto3";
+
+package resibo.groups.v1;
+
+service GroupsService {
+  rpc CreateGroup(CreateGroupRequest) returns (GroupResponse);
+  rpc AddGroupMember(AddMemberRequest) returns (MembershipResponse);
+  rpc RemoveGroupMember(RemoveMemberRequest) returns (RemoveMemberResponse);
+  // Toggles is_group_manager. Owner/staff only (deep-dive §11) — a real access-elevation
+  // action, recorded by Audit API as GROUP_MANAGER_TOGGLED.
+  rpc SetGroupManager(SetManagerRequest) returns (MembershipResponse);
+  // §5's ingestion-time hook, called by Execution Core.
+  rpc GetEffectiveGroup(EffectiveGroupRequest) returns (EffectiveGroupResponse);
+  // §4.1/§7's gated read: owner/staff, or this specific group's own is_group_manager member.
+  rpc ListGroupMembers(ListMembersRequest) returns (ListMembersResponse);
+}
+
+message GroupEntry {
+  string group_id = 1;
+  string name = 2;
+  string created_by = 3;
+  string created_at = 4;            // RFC 3339
+}
+
+message MembershipEntry {
+  string group_id = 1;
+  string user_id = 2;
+  bool is_group_manager = 3;
+  string joined_at = 4;             // RFC 3339
+  string added_by = 5;
+}
+
+message CreateGroupRequest {
+  string session_id = 1;            // the caller — owner/staff only
+  string name = 2;
+}
+
+message GroupResponse {
+  GroupEntry group = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message AddMemberRequest {
+  string session_id = 1;            // the caller — owner/staff only
+  string group_id = 2;
+  string user_id = 3;                // the subject being added
+  bool is_group_manager = 4;
+}
+
+message MembershipResponse {
+  MembershipEntry membership = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message RemoveMemberRequest {
+  string session_id = 1;            // the caller — owner/staff only
+  string group_id = 2;
+  string user_id = 3;                // the subject being removed
+}
+
+message RemoveMemberResponse {
+  bool removed = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message SetManagerRequest {
+  string session_id = 1;            // the caller — owner/staff only
+  string group_id = 2;
+  string user_id = 3;                // the subject whose flag is toggled
+  bool is_group_manager = 4;
+  string reason = 5;                 // carried into the Audit entry
+}
+
+message EffectiveGroupRequest {
+  string session_id = 1;            // the caller
+  // The subject whose effective group is wanted. Empty means "myself". A non-empty value
+  // naming someone else requires owner/staff (`permission_gate.authorize_effective_group`).
+  string user_id = 2;
+}
+
+message EffectiveGroupResponse {
+  // proto3 cannot distinguish an empty string from "unset" on its own, and "this user
+  // belongs to no group" is a real, ordinary answer here (§10's isolation-by-default case)
+  // rather than a missing field — `has_group` disambiguates it explicitly.
+  bool has_group = 1;
+  string group_id = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message ListMembersRequest {
+  string session_id = 1;            // the caller
+  string group_id = 2;
+}
+
+message ListMembersResponse {
+  repeated MembershipEntry members = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}

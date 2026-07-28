@@ -1,0 +1,214 @@
+// Health API gRPC surface (`v3-deepdive-20-health-api.md` §8) and its Watchdog sub-API's
+// own surface (`v3-deepdive-34-watchdog.md` §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): every response carries
+// `error_code`/`error_detail` rather than the server aborting with a gRPC status.
+//
+// **A rejected reservation is not an error and leaves those fields empty.** §5.1 is explicit
+// that a rejection means the caller falls back to CPU or queues; `rejection_reason` is the
+// field carrying that, and a client that reads a rejection as a failure has misread the API.
+//
+// Both services live in one file because Watchdog is a sub-API sharing the parent's process,
+// not a separate deployment (`docs/PROCESS_TOPOLOGY.md`) — one `.proto` per process keeps the
+// generated stub layout matching the process layout.
+
+syntax = "proto3";
+
+package resibo.health.v1;
+
+service HealthService {
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  rpc ReportStatus(ReportStatusRequest) returns (ReportStatusAck);
+  rpc ReserveResource(ReserveRequest) returns (ReservationResponse);
+  rpc ReleaseResource(ReleaseRequest) returns (ReleaseAck);
+  // The TTL heartbeat (§5.2). Named separately from Watchdog's Kick because they answer
+  // different questions: this vouches for a reservation, that vouches for a process.
+  rpc RefreshReservation(RefreshRequest) returns (ReservationResponse);
+  rpc GetCapabilityDrift(DriftRequest) returns (DriftResponse);
+  rpc GetLiveDiagnostic(DiagnosticRequest) returns (DiagnosticResponse);
+}
+
+service WatchdogService {
+  rpc Kick(HeartbeatRequest) returns (KickAck);
+  rpc GetSilentServices(SilenceCheckRequest) returns (SilentServicesResponse);
+}
+
+// ---------------------------------------------------------------- status (§1)
+
+message DependencyReachability {
+  string name = 1;
+  bool reachable = 2;
+  string checked_at = 3;           // RFC 3339
+  double latency_ms = 4;
+  string detail = 5;
+}
+
+message ServiceStatus {
+  string service = 1;
+  string instance_id = 2;
+  // One of: UP, DEGRADED, DOWN, UNKNOWN. UNKNOWN is not DOWN — see contracts.py.
+  string state = 3;
+  string version = 4;
+  string version_commit = 5;
+  string reported_at = 6;          // RFC 3339
+  int32 queue_depth = 7;
+  repeated DependencyReachability dependencies = 8;
+  map<string, string> resource_utilization = 9;
+  string detail = 10;
+}
+
+message StatusRequest {
+  string service = 1;
+  // Empty means every instance of `service`; empty `service` too means the whole fleet.
+  string instance_id = 2;
+}
+
+message StatusResponse {
+  repeated ServiceStatus statuses = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ReportStatusRequest {
+  ServiceStatus status = 1;
+}
+
+message ReportStatusAck {
+  bool accepted = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+// ------------------------------------------------------- resource ledger (§5)
+
+message ResourceReservation {
+  string reservation_id = 1;
+  string owning_api = 2;
+  string device_id = 3;
+  int32 reserved_mb = 4;
+  string reserved_at = 5;          // RFC 3339
+  string expires_at = 6;           // RFC 3339 — the §5.2 TTL, on the record deliberately
+  string released_at = 7;          // empty while active
+  string release_reason = 8;
+}
+
+message ReserveRequest {
+  string owning_api = 1;
+  string device_id = 2;
+  int32 requested_mb = 3;
+}
+
+message ReservationResponse {
+  bool granted = 1;
+  ResourceReservation reservation = 2;
+  // One of: INSUFFICIENT_CAPACITY, UNKNOWN_DEVICE, INVALID_REQUEST. Empty when granted.
+  // A rejection is a normal answer, not an error (§5.1).
+  string rejection_reason = 3;
+  int32 device_total_mb = 4;
+  int32 device_committed_mb = 5;
+  string error_code = 6;
+  string error_detail = 7;
+}
+
+message ReleaseRequest {
+  string reservation_id = 1;
+  string reason = 2;
+}
+
+message ReleaseAck {
+  bool released = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message RefreshRequest {
+  string reservation_id = 1;
+}
+
+// ------------------------------------------------------ capability drift (§4)
+
+message CapabilityDriftFinding {
+  string capability = 1;
+  string python_version = 2;
+  string expected_path = 3;
+  string actual_path = 4;
+  bool drifted = 5;
+  string detail = 6;
+}
+
+message DriftRequest {}
+
+message DriftResponse {
+  // Clean findings are included too, deliberately (§4.1): an operator needs to tell
+  // "checked, fine" apart from "never checked".
+  repeated CapabilityDriftFinding findings = 1;
+  bool any_drifted = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+// ------------------------------------------------------ live diagnostic (§3)
+
+message LiveDiagnosticFinding {
+  string service = 1;
+  string operation = 2;
+  string baseline_class = 3;
+  string observed_class = 4;
+  int32 sample_count = 5;
+  bool degraded = 6;
+  string detail = 7;
+}
+
+message DiagnosticRequest {
+  string service = 1;              // empty means every tracked operation
+  string operation = 2;
+}
+
+message DiagnosticResponse {
+  repeated LiveDiagnosticFinding findings = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+// ------------------------------------------------------------- watchdog (§7)
+
+message HeartbeatRequest {
+  string service = 1;
+  string instance_id = 2;
+  // Rides the heartbeat, never every business response (watchdog §5).
+  string version_commit = 3;
+}
+
+message KickAck {
+  bool accepted = 1;
+  string kicked_at = 2;            // RFC 3339, the server's own clock
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message WatchdogState {
+  string service = 1;
+  string instance_id = 2;
+  // One of: ALIVE, SILENT, UNSEEN. UNSEEN is not SILENT — never-started is not stopped.
+  string liveness = 3;
+  string last_kick_at = 4;         // empty when never kicked
+  string version_commit = 5;
+  double silent_for_seconds = 6;
+  int32 timeout_seconds = 7;
+}
+
+message SilenceCheckRequest {}
+
+message SilentServicesResponse {
+  // Every tracked instance, not only the silent ones: the fleet screen renders all of them,
+  // and having it re-derive liveness would be a second opinion about one question.
+  repeated WatchdogState states = 1;
+  repeated string silent_services = 2;
+  string checked_at = 3;           // RFC 3339
+  string error_code = 4;
+  string error_detail = 5;
+}

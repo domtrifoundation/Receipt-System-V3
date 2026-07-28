@@ -1,0 +1,130 @@
+// Notifications/Inbox API gRPC surface (`v3-deepdive-09-notifications-inbox-api.md` §3, §4, §5).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated in
+// a comment; its number is never reused.
+//
+// Errors are data, not gRPC status codes (`docs/PRINCIPLES.md` §4.1): every response carries an
+// error_code/error_detail pair.
+//
+// **Deliberately absent: any "requesting_user_id" field on QueryInbox/MarkRead.** Unlike
+// Logs' own `LogQueryRequest.requesting_user_id` (a wire field), this service resolves the
+// caller's identity server-side from the session before a query is ever built
+// (`service.py`'s `SessionResolver`), so there is no field here a caller could set to assert
+// an identity for itself — see this package's `CLAUDE.md` for why that is deliberately a
+// stronger posture than Logs'.
+
+syntax = "proto3";
+
+package resibo.notifications.v1;
+
+service NotificationsService {
+  // Any consumer API asking for a signal to reach a user — Auth's break-glass, Execution
+  // Core's run completion, Content Security's rejection, Account Guardian's export/deletion
+  // completion, Review/Flagging's new-flag creation (deep-dive §1's own list). This call is
+  // never gated on the caller's own session, since it is a system-to-system request naming
+  // its own recipient, not a read of anyone's own data.
+  rpc Notify(NotifyRequest) returns (NotifyResponse);
+
+  // Own-session inbox reads always succeed structurally; a cross-user read needs an active
+  // break-glass grant, evaluated server-side (§4).
+  rpc QueryInbox(QueryInboxRequest) returns (QueryInboxResponse);
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+
+  // Preferences are always own-session; there is no subject field to assert a second user's
+  // identity through (§5).
+  rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse);
+  rpc SetPreference(SetPreferenceRequest) returns (SetPreferenceResponse);
+}
+
+message NotificationMessage {
+  string notification_id = 1;
+  string user_id = 2;
+  string category = 3;
+  string title = 4;
+  string body = 5;
+  string reference = 6;       // empty when this notification references nothing further
+  string read_at = 7;         // RFC 3339, empty when unread
+  string created_at = 8;      // RFC 3339
+}
+
+message DeliveryStatusMessage {
+  string channel = 1;
+  string outcome = 2;         // "sent" | "failed" | "skipped_disabled" | "skipped_unconfigured"
+  int32 attempt = 3;
+  string error_detail = 4;
+  string delivered_at = 5;    // RFC 3339, empty unless outcome == "sent"
+}
+
+message NotifyRequest {
+  string user_id = 1;
+  string category = 2;
+  string title = 3;
+  string body = 4;
+  string reference = 5;
+}
+
+message NotifyResponse {
+  bool ok = 1;
+  NotificationMessage notification = 2;
+  repeated DeliveryStatusMessage channel_statuses = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message QueryInboxRequest {
+  // The subject whose inbox is wanted. The authenticated caller is resolved server-side from
+  // the session, never taken from a field here (see this file's own header comment).
+  string user_id = 1;
+  bool unread_only = 2;
+  int32 limit = 3;             // 0 defers to the server default
+  int32 offset = 4;
+}
+
+message QueryInboxResponse {
+  repeated NotificationMessage notifications = 1;
+  int32 total_matching = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message MarkReadRequest {
+  // Always the caller's own notification — see this file's own header comment on why no
+  // second user id is accepted here.
+  string notification_id = 1;
+}
+
+message MarkReadResponse {
+  bool ok = 1;
+  string notification_id = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message GetPreferencesRequest {
+}
+
+message ChannelPreferenceMessage {
+  string channel = 1;
+  bool enabled = 2;
+  string contact_override = 3;  // empty means "use the account's own default address"
+}
+
+message GetPreferencesResponse {
+  repeated ChannelPreferenceMessage preferences = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message SetPreferenceRequest {
+  string channel = 1;
+  bool enabled = 2;
+  string contact_override = 3;
+}
+
+message SetPreferenceResponse {
+  bool ok = 1;
+  ChannelPreferenceMessage preference = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
