@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.00`
+`a01.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -45,3 +45,37 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 Fail-closed is a contract-level guarantee, not a caller convention (`docs/PRINCIPLES.md` §4.2): if the scan call fails, times out, or the service is briefly unavailable, every caller treats the file as unscanned and therefore unsafe. Archive-bomb detection reads `zipfile.infolist()` metadata *before* any extraction — never unpack a hostile archive to measure it. Two passes, not one: the container, then each file it yielded.
+
+**The `.proto` has no field capable of expressing "could not check", and that is deliberate.**
+The §4 guarantee is only really enforceable if the protocol gives no way to say anything other
+than safe or not-safe; a future `unknown` or `scan_skipped` field would reopen exactly the hole
+this API exists to close. `tests/unit/core/content_security/test_service_and_contracts.py`
+asserts the field set against the generated descriptor so that change fails before anything can
+depend on it.
+
+**`safe=True` has exactly one origin in this package**: `pipeline.ContentScanner._resolve`,
+reached only when every enabled, *available* provider returned `CLEAN`. Nothing in `service.py`
+constructs it. If you find yourself adding a second place that can set it, that is the bug.
+
+**A provider that ran and failed poisons the whole verdict, not just its own share of it.** A
+caller cannot tell a verdict reached despite a failure apart from one that would have been
+different had that provider actually run, so `SCAN_PROVIDER_FAILED` is a deny even when another
+scanner returned clean. This is stricter than it looks at first glance and it is intentional.
+
+**Three outcomes, not two** (§9's resolved staff-review threshold): unanimous `CLEAN` passes;
+unanimous `MALICIOUS` is an outright reject; *anything else* — a genuine disagreement between
+scanners, or a single scanner's own low-confidence result — is `requires_staff_review`, denied
+but not condemned. `provider_verdicts` publishes each provider's raw answer precisely so the
+conflict is inspectable rather than folded into one boolean (`docs/PRINCIPLES.md` §4.3).
+
+**Files here that the deep-dive's §2 package layout does not list**, added with reasons:
+- `pipeline.py` — the orchestrator composing `scanning/` (pure, synchronous, in-memory) with
+  `providers/` (async, subprocess or network) into the two verdict types. The alternative was
+  putting it in `service.py`, which would have made the fail-closed guarantee a property of the
+  gRPC servicer rather than of the package — and therefore absent for the in-process caller.
+- `service.py` + `content_security.proto` + `generated/` — §7 specifies the surface but the
+  layout predates showing where the `.proto` lives. Regenerate with
+  `python -m grpc_tools.protoc` and re-apply the relative-import fix in
+  `content_security_pb2_grpc.py` (`from . import content_security_pb2`); never hand-edit
+  generated files. `service.py` imports them lazily, so the package stays importable — and its
+  tests still meaningful — on an interpreter with no `grpcio` wheel yet (3.15 today).

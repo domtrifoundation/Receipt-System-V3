@@ -266,13 +266,129 @@ class NoBillingConfiguredGateway:
         return BillingClearance(clear=True, detail=self._DETAIL)
 
 
+@dataclass(frozen=True)
+class AuditOutcome:
+    """What recording a privileged action with Audit actually produced. Deliberately
+    separate from whatever action triggered it (`RevokeResult`, `RecoveryResult`, ...): an
+    action can succeed while its audit write degrades, and the two must stay tellable apart
+    the same way `core.audit.contracts.RecordResult` keeps a degraded mirror distinct from a
+    failed primary write."""
+
+    recorded: bool
+    event_id: str = ""
+    error: str = ""
+    error_detail: str = ""
+
+
+@runtime_checkable
+class AuditGateway(Protocol):
+    async def record(
+        self,
+        operation: str,
+        actor_user_id: str,
+        *,
+        target_user_id: str | None = None,
+        reason: str | None = None,
+        details: dict | None = None,
+    ) -> AuditOutcome: ...
+
+
+#: **A real, current cross-API gap, not a bug in this package.** Audit's own
+#: `contracts.PRIVILEGED_ACTIONS` (`core/audit/contracts.py`) is a deliberately *closed*
+#: vocabulary — `AuditWriter.record_action()` refuses any operation name not registered
+#: there, and the wire `RecordAction` RPC only ever exposes that same operation-name path,
+#: never a raw `AuditEvent`. Of everything this package needs to record, only
+#: `"account_recovery_approve"` (-> `ActionType.ACCOUNT_RECOVERY_APPROVED`) is registered
+#: today. The operation names below for device revocation, SSO provider changes, and
+#: export/deletion request lifecycle events are this package's own documented *proposal*
+#: for what Audit should register next — calling `GrpcAuditGateway.record()` with one of
+#: them against today's real Audit process returns `recorded=False`,
+#: `error="UNKNOWN_ACTION"`, which every caller in this package surfaces on its own result
+#: (`audit_recorded`/`audit_error`) rather than silently swallowing
+#: (`docs/PRINCIPLES.md` §4.3). This package's `CLAUDE.md` and the implementation report
+#: both flag it; `core/audit/contracts.py` is out of scope for this package to edit.
+PROPOSED_AUDIT_OPERATIONS: dict[str, str] = {
+    "device_revoked": "account_guardian_device_revoked",
+    "all_devices_revoked": "account_guardian_all_devices_revoked",
+    "sso_provider_change_requested": "account_guardian_sso_provider_change_requested",
+    "export_requested": "account_guardian_export_requested",
+    "deletion_requested": "account_guardian_deletion_requested",
+    "deletion_cancelled": "account_guardian_deletion_cancelled",
+    "recovery_rejected": "account_guardian_recovery_rejected",
+    "recovery_completed": "account_guardian_recovery_completed",
+    #: The one operation name that genuinely exists in Audit's own registry today.
+    "recovery_approved": "account_recovery_approve",
+}
+
+
+class GrpcAuditGateway:
+    """Implements `AuditGateway` against the real `AuditService` (`core/audit/audit.proto`).
+
+    Unlike `UnavailablePersistenceGateway`, this one is real end to end: Audit's own gRPC
+    surface and generated stubs already exist (`core/audit/generated/`). The gap is not
+    reachability, it is the closed operation vocabulary documented at
+    `PROPOSED_AUDIT_OPERATIONS` above — this adapter still makes the call and reports
+    exactly what Audit says, rather than pretending success for an operation name Audit
+    does not recognise yet.
+    """
+
+    def __init__(self, address: str = "127.0.0.1:50058", channel=None) -> None:
+        self._address = address
+        self._channel = channel
+
+    def _get_channel(self):
+        import grpc
+
+        if self._channel is None:
+            self._channel = grpc.aio.insecure_channel(self._address)
+        return self._channel
+
+    async def record(
+        self,
+        operation: str,
+        actor_user_id: str,
+        *,
+        target_user_id: str | None = None,
+        reason: str | None = None,
+        details: dict | None = None,
+    ) -> AuditOutcome:
+        import json
+
+        import grpc
+
+        from core.audit.generated import audit_pb2 as pb
+        from core.audit.generated import audit_pb2_grpc as pb_grpc
+
+        stub = pb_grpc.AuditServiceStub(self._get_channel())
+        try:
+            resp = await stub.RecordAction(
+                pb.RecordActionRequest(
+                    operation=operation,
+                    actor_user_id=actor_user_id,
+                    target_user_id=target_user_id or "",
+                    reason=reason or "",
+                    details_json=json.dumps(details or {}, default=str),
+                )
+            )
+        except grpc.RpcError as exc:
+            return AuditOutcome(recorded=False, error="DEPENDENCY_UNAVAILABLE", error_detail=str(exc))
+        return AuditOutcome(
+            recorded=resp.recorded, event_id=resp.event_id,
+            error=resp.error_code, error_detail=resp.error_detail,
+        )
+
+
 __all__ = [
+    "AuditGateway",
+    "AuditOutcome",
     "BillingClearance",
     "BillingGateway",
     "DEFAULT_AUTH_ADDRESS",
     "DEFAULT_PERSISTENCE_ADDRESS",
+    "GrpcAuditGateway",
     "GrpcSessionGateway",
     "NoBillingConfiguredGateway",
+    "PROPOSED_AUDIT_OPERATIONS",
     "PersistenceGateway",
     "RawSession",
     "SessionGateway",

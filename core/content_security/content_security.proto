@@ -1,0 +1,88 @@
+// Content Security API gRPC surface (`v3-deepdive-27-content-security-api.md` §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// **There is no field on this surface that can express "could not check".** That is the §4
+// guarantee expressed in the wire format itself: a scan that failed, timed out, or found no
+// available provider comes back with `safe = false` and an `error_code`, never a third state
+// a caller could read as permission. `docs/PRINCIPLES.md` §4.2 — a failed or timed-out
+// content scan means unsafe, never a silent bypass — is only really enforceable if the
+// protocol gives no way to say anything else.
+//
+// `detected_type` is the REAL type from magic bytes and may differ from whatever the client
+// claimed (§1). A caller that trusts `claimed_mime_type` over this field has reintroduced
+// exactly the hole this API exists to close.
+
+syntax = "proto3";
+
+package resibo.content_security.v1;
+
+service ContentSecurityService {
+  rpc ScanFile(ScanRequest) returns (ScanVerdict);
+  rpc ScanContainer(ContainerScanRequest) returns (ContainerScanVerdict);
+}
+
+message ScanRequest {
+  bytes content = 1;
+  // What the client says this is. Recorded, never trusted (§1).
+  string claimed_mime_type = 2;
+  string claimed_filename = 3;
+  // Persistence's own blob identifier, carried for correlation only. It confers no
+  // authority and this service never resolves it to bytes.
+  string blob_ref = 4;
+  string requesting_user_id = 5;
+  string run_id = 6;
+}
+
+message ScanVerdict {
+  // The only field a caller may act on.
+  bool safe = 1;
+  string detected_type = 2;
+  string rejection_reason = 3;
+  // Not safe, but not scanner-confirmed malicious either: a human decides (§9).
+  bool requires_staff_review = 4;
+  // Stable code from errors.py. Empty when safe. Added after the §7 sketch; a caller
+  // matches on this, a person reads rejection_reason.
+  string error_code = 5;
+  // Each enabled provider's own raw outcome, so a disagreement is inspectable rather than
+  // folded into one boolean (`docs/PRINCIPLES.md` §4.3).
+  map<string, string> provider_verdicts = 6;
+}
+
+message ContainerScanRequest {
+  bytes content = 1;
+  string claimed_filename = 2;
+  string blob_ref = 3;
+  string requesting_user_id = 4;
+  string run_id = 5;
+}
+
+message BombCheckResult {
+  bool safe = 1;
+  string reason = 2;
+  double compression_ratio = 3;
+  uint64 uncompressed_total_bytes = 4;
+  uint32 entry_count = 5;
+  uint32 nesting_depth = 6;
+  repeated string bad_entries = 7;
+}
+
+message RemediationResult {
+  // One of: not_needed, stripped_and_extracted, rejected_whole_archive (§3.1).
+  string action = 1;
+  repeated string removed = 2;
+}
+
+message ContainerScanVerdict {
+  bool safe = 1;
+  BombCheckResult bomb_check = 2;
+  // Per-member verdicts from the second pass (§3): a container passing its own bomb check
+  // says nothing about whether an individual extracted file is safe.
+  map<string, ScanVerdict> member_verdicts = 3;
+  RemediationResult remediation = 4;
+  bool requires_staff_review = 5;
+  string rejection_reason = 6;
+  string error_code = 7;
+}

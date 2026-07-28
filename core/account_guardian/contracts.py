@@ -123,10 +123,19 @@ class DeviceListResult:
 
 @dataclass(frozen=True)
 class RevokeResult:
+    """Revocation is a privileged action (deep-dive: device management is a real security
+    surface) — `audit_recorded`/`audit_error` carry whether Audit actually accepted the
+    entry, distinct from `error`/`error_detail`, which describe the revocation itself. A
+    revoke can succeed while its audit write degrades, and the two must stay tellable apart
+    the same way `core.audit.contracts.RecordResult.degraded_sinks` keeps a degraded mirror
+    distinct from a failed primary write (`docs/PRINCIPLES.md` §4.2, §4.4)."""
+
     revoked: bool = False
     sessions_revoked: int = 0
     error: str | None = None
     error_detail: str = ""
+    audit_recorded: bool = True
+    audit_error: str = ""
 
 
 # --------------------------------------------------------------------- account recovery
@@ -199,6 +208,10 @@ class RecoveryResult:
     request: RecoveryRequest | None = None
     error: str | None = None
     error_detail: str = ""
+    #: See `RevokeResult`'s own docstring — the same "the action and its audit write are
+    #: two separately-tellable outcomes" reasoning applies to every privileged action here.
+    audit_recorded: bool = True
+    audit_error: str = ""
 
 
 # --------------------------------------------------------------------- SSO provider change
@@ -233,6 +246,8 @@ class SsoLinkResult:
     request: SsoLinkRequest | None = None
     error: str | None = None
     error_detail: str = ""
+    audit_recorded: bool = True
+    audit_error: str = ""
 
 
 # --------------------------------------------------------------------- data export
@@ -266,6 +281,8 @@ class ExportRequestResult:
     request: DataExportRequest | None = None
     error: str | None = None
     error_detail: str = ""
+    audit_recorded: bool = True
+    audit_error: str = ""
 
 
 @dataclass(frozen=True)
@@ -326,6 +343,8 @@ class DeletionResult:
     request: DeletionRequest | None = None
     error: str | None = None
     error_detail: str = ""
+    audit_recorded: bool = True
+    audit_error: str = ""
 
 
 @dataclass(frozen=True)
