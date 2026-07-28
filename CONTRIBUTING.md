@@ -51,6 +51,41 @@ See [`docs/testing/TOOLKIT.md`](docs/testing/TOOLKIT.md) for the broader set of 
 - Anything touching a real pipeline stage (OCR, Preprocessing, Inference) needs a bench-suite entry — real pipeline, never mocked, per-test process isolation so a native crash doesn't take the whole bench run down.
 - A new menu item is automatically covered by the interface walker (it reads the live menu data) — you don't need to write that test yourself, but don't bypass the menu-data pattern in a way that makes your screen invisible to it either.
 
+## Versioning: every commit ticks a version — this is not optional
+
+This is a standing practice, enforced by review, not something to remember when convenient.
+The full scheme lives in [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) §1; what you actually
+have to *do* is here.
+
+**Two numbers, and they move together.**
+
+1. **The program version** — `PROGRAM_VERSION` in [`common/version.py`](common/version.py).
+   **Every commit ticks its `pp`.** Including a commit that only fixes a typo or reworks a
+   comment. There is no such thing as a commit too small to tick it, because the number's
+   job is to identify a build, and a process-only commit still produces a different build.
+2. **Each touched API's own version** — the value under `## Current API version` in that
+   API's own `CLAUDE.md`. **A commit that changes a given API's own behaviour ticks that
+   API's `pp` too, in the same commit as the behaviour change**, never in a follow-up.
+
+A commit touching three APIs ticks the program version once and each of those three APIs'
+own lines once each. A commit touching no API's behaviour ticks only the program version.
+
+**Before you consider an API-touching commit finished, open that API's `CLAUDE.md` and
+confirm the line actually changed.** This check exists because "I'll tick it at the end" is
+how the number silently stops meaning anything — and a version that's stale is worse than
+no version, since Health API's heartbeat, Watchdog's per-instance version reporting, and
+the TUI's fleet screen all report it as fact.
+
+**Why two lines per `CLAUDE.md`, not one.** Each API's `CLAUDE.md` carries both
+`## API version at x03.00.00 Zircon` (the *target* — where that API lands when Zircon ships,
+with the `MM` lineage determined against real V1/V2 source) and `## Current API version`
+(the *running* counter described above). A target and a running counter genuinely cannot be
+the same line, and collapsing them loses one or the other. The `MM` lineage reasoning under
+the target heading is settled and derived from actual source inspection — don't re-derive it.
+
+**A skipped version tick is an incomplete unit of work**, the same standing as a skipped
+`nox -s forward_compat` checkpoint (`docs/MAINTENANCE.md` §8.3).
+
 ## Pull requests
 
 - **Max 99 commits per PR** — this isn't arbitrary: it's what keeps the API version scheme's `pp` segment safely at 2 digits, and a PR that large is already a reviewability problem independent of versioning. Split it.

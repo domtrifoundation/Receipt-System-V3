@@ -20,7 +20,15 @@ models/*
 
 # Logs are rotated flat files with their own retention policy, deliberately never an
 # events table and never git-tracked (`v3-plan-01-core-apis.md` #13).
-logs/
+#
+# Anchored to the repository root deliberately. An unanchored `logs/` matches a directory
+# named `logs` at *any* depth, which silently swallowed `core/logs/` — the Logs API's own
+# source package — so Phase 1's scaffolding pass created 31 of the 32 Core API packages and
+# nothing reported the 32nd as missing, because `git add` had simply been told to ignore it.
+# The runtime log output this rule is actually for lives under the top-level installation
+# directory (`docs/PRINCIPLES.md` §1.6), a sibling of every release clone, or at the repo
+# root for a local dev run — never nested inside a source package.
+/logs/
 *.log
 
 # Persistence's canonical store and its snapshot checkpoints — never git-tracked; the
