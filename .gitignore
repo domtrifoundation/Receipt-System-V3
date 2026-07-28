@@ -61,6 +61,11 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# nox (noxfile.py — Forward-Compatibility Pattern validation, docs/MAINTENANCE.md) already
+# self-excludes by writing its own `*`-only .gitignore inside .nox/ on first run, but that
+# file doesn't exist until nox has actually run once — an explicit entry here means a fresh
+# clone is protected before that ever happens, not just after.
+.nox/
 
 # Node / webapp
 node_modules/

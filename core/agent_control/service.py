@@ -215,5 +215,11 @@ if __name__ == "__main__":  # pragma: no cover
 
     addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
     srv = serve(addr)
+    # Prints the resolved interpreter, not just a launch message — this is what makes
+    # `PYTHON_BIN=... ./start.sh` (docs/MAINTENANCE.md's Forward-Compatibility Validation
+    # section) independently verifiable from outside the process rather than trusted on
+    # faith. A launcher script can echo which interpreter it *meant* to invoke; only the
+    # running process itself can confirm which one it actually got.
     print(f"AgentControlService listening on {addr}", file=sys.stderr)
+    print(f"running under: {sys.executable} ({sys.version.split()[0]})", file=sys.stderr)
     srv.wait_for_termination()
