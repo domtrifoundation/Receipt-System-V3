@@ -257,6 +257,24 @@ Both would have been committed. A repo-wide scan now confirms no credential patt
 `.sqlite`/`.db`/`.env` files, and no `__pycache__` in what would be committed, and that the
 agent token store resolves outside the repository (`~/.resibo/agent_control.sqlite`).
 
+### `check_grpc_compatibility.yml` had no bootstrap case — fixed
+Caught by CI on this PR, not by inspection. The job runs `buf breaking` against `main`, and
+`main` contains no `.proto` files, so buf failed with `Module "path: "."" had no .proto
+files` — which reads as a compatibility failure but actually means "this is the first one."
+
+Fixed by detecting whether `main` has a `.proto` baseline at all and skipping only the
+comparison when it does not, with a `::notice::` explaining why. Every later PR touching a
+`.proto` has a baseline and is checked normally. Handled explicitly rather than left red,
+since `docs/templates/new_grpc_endpoint.md` says this is the one check that must never be
+skippable — a red X people learn to ignore is how that rule dies quietly.
+
+**Deliberately not added: `buf lint` and a `buf.yaml`.** buf's default
+`PACKAGE_DIRECTORY_MATCH` expects `resibo/agent_control/v1/agent_control.proto`, which
+conflicts with this project's package-per-API layout putting each API's `.proto` inside its
+own package folder. Reconciling those is a real convention decision for a human — either
+relocate protos into a buf-shaped tree or configure the rule off, each with consequences —
+so it is flagged here rather than settled by quietly committing a config that picks one.
+
 ### Everything re-verified after the fixes
 - All 10 workflow YAML files parse.
 - All four `.github/instructions/*.md` `applyTo` globs match real directories that now exist
