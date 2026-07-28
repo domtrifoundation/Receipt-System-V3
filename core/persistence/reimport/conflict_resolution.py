@@ -32,6 +32,7 @@ from ..db.receipts import ReceiptRepository, receipt_to_row
 from ..historian.query import HistorianQuery
 from . import errors
 from .contracts import FieldConflict, ReimportRequest, ReimportResult
+from .field_mapping import coerce_updates, project_row
 from .parser import parse_workbook
 from .three_way_diff import three_way_resolve
 
@@ -115,14 +116,16 @@ class ReimportService:
         applied_total = 0
         all_conflicts: list[FieldConflict] = []
         touched: list[str] = []
+        all_rejected: list[str] = []
 
         for row in parsed.rows:
             outcome = await self._apply_row(row.receipt_id, row.values, snapshot, actor)
             if outcome is None:
                 continue
-            applied_count, conflicts, changed = outcome
+            applied_count, conflicts, changed, rejected = outcome
             applied_total += applied_count
             all_conflicts.extend(conflicts)
+            all_rejected.extend(f"{row.receipt_id}.{name}" for name in rejected)
             if changed:
                 touched.append(row.receipt_id)
 
@@ -133,13 +136,24 @@ class ReimportService:
                 request.user_id, tuple(all_conflicts)
             )
 
+        detail = flag_error
+        if all_rejected:
+            # An edit that cannot be turned into the field's real type is reported, never
+            # written as-is and never quietly dropped (§4.3).
+            rejected_note = (
+                f"{len(all_rejected)} edited cell(s) could not be read as the field's own "
+                f"type and were NOT applied: {', '.join(sorted(all_rejected))}"
+            )
+            detail = f"{detail} {rejected_note}".strip() if detail else rejected_note
+
         return ReimportResult(
             ok=True,
             fields_applied=applied_total,
             conflicts=tuple(all_conflicts),
             flag_id=flag_id,
             receipts_touched=tuple(touched),
-            error_detail=flag_error,
+            rejected_fields=tuple(all_rejected),
+            error_detail=detail,
         )
 
     async def _apply_row(
@@ -152,26 +166,35 @@ class ReimportService:
         receipt = await self._receipts.get(receipt_id)
         if receipt is None:
             return None
-        canonical = FrozenDict(receipt_to_row(receipt))
+        # Both sides are projected into the workbook's own representation before they are
+        # compared. The canonical row image keeps a full ISO datetime and a real `None`; the
+        # workbook only ever carried a date-only string and an empty cell, so diffing the two
+        # directly reported "the user changed this" for every dated receipt in the file —
+        # see `field_mapping`'s own docstring for the crash that produced.
+        canonical = project_row(FrozenDict(receipt_to_row(receipt)))
         # The baseline is reconstructed from the append-only trail as of the export's own
         # timestamp — no second copy of the data stored anywhere to drift from it.
-        original = await self._history.state_as_of("receipts", receipt_id, snapshot.generated_at)
-        if original is None:
+        raw_original = await self._history.state_as_of(
+            "receipts", receipt_id, snapshot.generated_at
+        )
+        if raw_original is None:
             # The receipt has no history at or before the export — it was not in that file,
             # so there is no honest baseline for it. Skipped rather than diffed against
             # whatever happens to be current, which would silently apply every value.
             return None
+        original = project_row(raw_original)
 
         resolution = three_way_resolve(
             original, canonical, reimported, receipt_id=receipt_id
         )
-        updates = {
-            name: resolution.resolved[name]
-            for name in resolution.applied_fields
-        }
+        # Coerced back into the field's real type before it is written — a `str` reaching a
+        # `datetime` column is the failure this guards.
+        updates, rejected = coerce_updates(
+            {name: resolution.resolved[name] for name in resolution.applied_fields}
+        )
         if updates:
-            await self._receipts.apply_field_updates(receipt_id, updates, actor=actor)
-        return len(resolution.applied_fields), resolution.conflicts, bool(updates)
+            await self._receipts.apply_field_updates(receipt_id, dict(updates), actor=actor)
+        return len(updates), resolution.conflicts, bool(updates), rejected
 
     async def _raise_conflict_flag(
         self, user_id: str, conflicts: tuple[FieldConflict, ...]

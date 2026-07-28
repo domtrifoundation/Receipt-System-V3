@@ -301,3 +301,114 @@ def test_single_tenant_validate_returns_the_implicit_owner(single_servicer):
     ))
     assert response.role == Role.OWNER.value
     assert response.user_id == "owner"
+
+
+# --------------------------------------------------------------------------------------
+# Regression: the step-up gate proves *this human is still present*. It says nothing about
+# whose account they may act on. `ConfigureTwoFactor` took `request.user_id` on trust, so any
+# authenticated session — a client's — could name another user and switch that user's second
+# factor off. Gateway structurally cannot catch this: it sees a route, not which account a
+# body field targets.
+# --------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_users(db):
+    from core.auth.store import UserDirectory
+
+    directory = UserDirectory(db)
+    attacker = directory.create_user(User(
+        user_id="u_attacker", role=Role.CLIENT, email="attacker@example.test"
+    ))
+    victim = directory.create_user(User(
+        user_id="u_victim", role=Role.CLIENT, email="victim@example.test"
+    ))
+    return directory, attacker, victim
+
+
+def _enrol_totp(servicer, channel, user) -> str:
+    """Enrol `user` in TOTP through the real RPC path and return their secret."""
+    issued = _login(servicer, channel, user)
+    _satisfy_step_up(servicer, channel, issued.session_id)
+    begun = run(servicer.ConfigureTwoFactor(
+        pb.TwoFactorConfigRequest(
+            session_id=issued.session_id, user_id=user.user_id, enabled=True, method="totp"
+        ),
+        FakeContext(),
+    ))
+    assert begun.totp_secret
+    confirmed = run(servicer.ConfigureTwoFactor(
+        pb.TwoFactorConfigRequest(
+            session_id=issued.session_id, user_id=user.user_id, enabled=True, method="totp",
+            totp_confirmation_code=StdlibTotpEngine().code_at(
+                begun.totp_secret, time.time()
+            ),
+        ),
+        FakeContext(),
+    ))
+    assert confirmed.enabled
+    return begun.totp_secret
+
+
+def _satisfy_step_up(servicer, channel, session_id) -> None:
+    started = run(servicer.InitiateStepUpReauth(
+        pb.StepUpRequest(session_id=session_id, method="email", action="x"), FakeContext()
+    ))
+    assert not started.error_code, started.error_code
+    done = run(servicer.CompleteStepUpReauth(
+        pb.StepUpCompleteRequest(
+            session_id=session_id, challenge_id=started.challenge_id,
+            response=channel.last_code,
+        ),
+        FakeContext(),
+    ))
+    assert done.satisfied
+
+
+def test_a_session_cannot_configure_another_users_second_factor(
+    servicer, channel, two_users
+):
+    directory, attacker, victim = two_users
+    _enrol_totp(servicer, channel, victim)
+    assert directory.get_two_factor(victim.user_id).enabled
+
+    issued = _login(servicer, channel, attacker)
+    _satisfy_step_up(servicer, channel, issued.session_id)
+    with pytest.raises(Aborted) as caught:
+        run(servicer.ConfigureTwoFactor(
+            pb.TwoFactorConfigRequest(
+                session_id=issued.session_id, user_id=victim.user_id, enabled=False
+            ),
+            FakeContext(),
+        ))
+    assert caught.value.code is grpc.StatusCode.PERMISSION_DENIED
+    assert AuthError.ROLE_INSUFFICIENT.value in caught.value.details
+    assert directory.get_two_factor(victim.user_id).enabled
+
+
+def test_starting_an_enrolment_on_another_user_is_refused_too(servicer, channel, two_users):
+    """The enrolment branch is a separate code path inside the same RPC, so it needs its own
+    assertion — writing a fresh secret against someone else's account is exactly as much of
+    a takeover as disabling their existing one."""
+    directory, attacker, victim = two_users
+    secret = _enrol_totp(servicer, channel, victim)
+
+    issued = _login(servicer, channel, attacker)
+    _satisfy_step_up(servicer, channel, issued.session_id)
+    with pytest.raises(Aborted):
+        run(servicer.ConfigureTwoFactor(
+            pb.TwoFactorConfigRequest(
+                session_id=issued.session_id, user_id=victim.user_id, enabled=True,
+                method="totp",
+            ),
+            FakeContext(),
+        ))
+    assert directory.get_totp_secret(victim.user_id) == secret
+    assert directory.get_pending_totp_secret(victim.user_id) is None
+
+
+def test_a_session_may_still_configure_its_own_second_factor(servicer, channel, two_users):
+    """The fix must not close the ordinary self-service case it sits in front of."""
+    directory, attacker, _victim = two_users
+    _enrol_totp(servicer, channel, attacker)
+    assert directory.get_two_factor(attacker.user_id).enabled

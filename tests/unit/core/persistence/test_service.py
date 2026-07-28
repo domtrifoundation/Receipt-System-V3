@@ -73,3 +73,28 @@ def test_archive_sync_is_absent_rather_than_broken_when_unconfigured(db, tmp_pat
     job = run(_service(db, tmp_path).sync_archives(SyncTarget("google_drive", "a", "user-1")))
     assert not job.ok
     assert job.error_detail
+
+
+def test_a_reimport_that_blows_up_returns_a_code_and_does_not_raise(tmp_path, db):
+    """Errors are data at this boundary (`docs/PRINCIPLES.md` §4.1).
+
+    A hand-edited workbook is the least trustworthy input this API takes and `submit`
+    reaches the canonical write path, so an unexpected failure has to become an error code
+    rather than an exception on the wire.
+    """
+    from core.persistence.reimport.contracts import ReimportRequest
+
+    class _Exploding:
+        async def submit(self, request):
+            raise RuntimeError("boom")
+
+    service = PersistenceService("user-1", db=db, blob_root=tmp_path / "blobs")
+    result = run(
+        service.submit_reimport(
+            ReimportRequest("user-1", "x.xlsx", "user-1", content_scan_passed=True),
+            service=_Exploding(),
+        )
+    )
+    assert not result.ok
+    assert result.error_code
+    assert "boom" in result.error_detail

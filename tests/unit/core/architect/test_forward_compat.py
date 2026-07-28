@@ -26,7 +26,12 @@ from core.architect.registry.read import DefinitionRegistry
 from core.architect.temporal_learning.category_defaults import recompute_defaults
 from core.architect.temporal_learning.contracts import Corporation, VendorLayer
 from core.architect.temporal_learning.contribution import contribution_for_correction
-from core.architect.temporal_learning.entities import EntityManager
+from core.architect.temporal_learning.entities import (
+    _ENTITY_CLASSES,
+    _ID_FIELDS,
+    _REQUIRED_FIELDS,
+    EntityManager,
+)
 from core.architect.temporal_learning.errors import LEARNING_ERROR_MESSAGES
 from core.architect.vendor_directory.aliases import CORPORATE_SUFFIXES
 from core.architect.vendor_directory.wikidata_bootstrap import (
@@ -46,6 +51,12 @@ def test_every_module_level_lookup_table_is_a_frozen_dict():
         CORPORATE_SUFFIXES,
         WIKIDATA_CLASS_TO_CATEGORY,
         WIKIDATA_CONFIG_DEFAULTS,
+        # These three were plain dicts: genuine constant lookup tables (entity class,
+        # id field and required fields per type), read from every method in `entities.py`
+        # and never written, which is §2.1.1's case and not its mutable-registry carve-out.
+        _ENTITY_CLASSES,
+        _ID_FIELDS,
+        _REQUIRED_FIELDS,
     ):
         assert isinstance(table, FrozenDict)
         assert isinstance(table, collections.abc.Mapping)

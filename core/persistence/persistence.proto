@@ -247,6 +247,10 @@ message ReimportResultMessage {
   repeated string receipts_touched = 4;
   string error_code = 5;
   string error_detail = 6;
+  // "<receipt_id>.<field>" for every edited cell that could not be read as that field's own
+  // type. Reported rather than applied as-is or silently dropped (PRINCIPLES §4.3). Appended
+  // as a new field number, never renumbering an existing one.
+  repeated string rejected_fields = 7;
 }
 
 // ---------------------------------------------------------------- archive sync

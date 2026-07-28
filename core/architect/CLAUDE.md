@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -43,7 +43,7 @@ valid the moment it is removed, and this file is what future sessions will have 
 
 ## Forward-Compatibility Pattern applicability
 
-Yes, and now with real code behind it. Contracts are `@dataclass(frozen=True)` with `FrozenDict` dict-typed fields (`docs/PRINCIPLES.md` §2.1), and the module-level lookup tables — `errors.ERROR_MESSAGES`, `metrics.COUNTER_DESCRIPTIONS`, `vendor_directory/aliases.CORPORATE_SUFFIXES`, `wikidata_bootstrap.WIKIDATA_CLASS_TO_CATEGORY` and `WIKIDATA_CONFIG_DEFAULTS` — are `FrozenDict` per §2.1.1.
+Yes, and now with real code behind it. Contracts are `@dataclass(frozen=True)` with `FrozenDict` dict-typed fields (`docs/PRINCIPLES.md` §2.1), and the module-level lookup tables — `errors.ERROR_MESSAGES`, `metrics.COUNTER_DESCRIPTIONS`, `vendor_directory/aliases.CORPORATE_SUFFIXES`, `wikidata_bootstrap.WIKIDATA_CLASS_TO_CATEGORY`, `WIKIDATA_CONFIG_DEFAULTS` and `temporal_learning/entities.py`'s `_ENTITY_CLASSES` / `_ID_FIELDS` / `_REQUIRED_FIELDS` — are `FrozenDict` per §2.1.1.
 
 **Four `isinstance` gates in this API decide behaviour on a mapping and every one of them tests `collections.abc.Mapping`, never `dict`**: `registry/read.py`'s definition validator, `temporal_learning/entities.py`'s field validator, `temporal_learning/contribution.py`'s change validator, and `temporal_learning/category_defaults.py`'s `_hashable`. On 3.15+ the builtin `frozendict` is not a `dict` subclass, so a regression to `dict` in any of them silently rejects (or crashes on) a correctly-typed caller. `tests/unit/core/architect/test_forward_compat.py` exercises all four with a real `FrozenDict` and is marked `forward_compat` for `nox -s forward_compat`.
 

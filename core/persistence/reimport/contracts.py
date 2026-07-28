@@ -67,6 +67,11 @@ class ReimportResult:
 
     `flag_id` is populated only when conflicts were found — it is the created
     `reimport_conflict` flag a human resolves through Review/Flagging.
+
+    `rejected_fields` names every `"<receipt_id>.<field>"` whose edited cell could not be
+    read as that field's own type. Reported rather than written as-is (which is how a `str`
+    reached a `datetime` column) and rather than silently discarded (which loses a real user
+    edit without telling anyone) — see `field_mapping.py`.
     """
 
     ok: bool
@@ -74,6 +79,7 @@ class ReimportResult:
     conflicts: tuple[FieldConflict, ...] = ()
     flag_id: str = ""
     receipts_touched: tuple[str, ...] = ()
+    rejected_fields: tuple[str, ...] = ()
     error_code: str = ""
     error_detail: str = ""
 

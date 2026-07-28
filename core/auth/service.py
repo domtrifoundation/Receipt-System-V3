@@ -32,8 +32,14 @@ from .auth_methods.passkey_provider import PasskeyProvider
 from .auth_methods.two_factor import TwoFactorGate
 from .break_glass.grant import BreakGlassLedger
 from .challenges import ChallengeStore
-from .contracts import AuthChallenge, AuthError, AuthMethod, ChallengePurpose, InstallProfile
-from .errors import AuthFailure, RoleInsufficient, StepUpRequired, TwoFactorPolicyFloor
+from .contracts import (
+    AuthChallenge,
+    AuthError,
+    AuthMethod,
+    InstallProfile,
+    Role,
+)
+from .errors import AuthFailure, RoleInsufficient, StepUpRequired
 from .generated import auth_pb2 as pb
 from .generated import auth_pb2_grpc as pb_grpc
 from .login_flow import LoginFlow, LoginOutcome
@@ -48,9 +54,10 @@ from .metrics import (
     VALIDATE_LATENCY,
     AuthMetrics,
 )
-from .roles.role_check import require_step_up
+from .roles.role_check import require_role, require_step_up
 from .session.cookie import check_csrf
 from .session.session_store import SessionStore
+from .step_up import StepUpFlow
 from .store import UserDirectory, in_thread
 from .tenancy import implicit_owner_session
 
@@ -99,6 +106,13 @@ class AuthServicer(pb_grpc.AuthServiceServicer):
         self._metrics = metrics or AuthMetrics()
         self._flow = LoginFlow(
             profile, registry, sessions, directory, two_factor, self._metrics
+        )
+        # Step-up and 2FA configuration live in `step_up.py`, not inlined here: this file is
+        # the thin translation layer the deep-dive's §2 layout calls for, and a second copy
+        # of the "a login challenge must not satisfy a step-up" rule is a second place for it
+        # to drift.
+        self._step_up = StepUpFlow(
+            profile, registry, sessions, directory, two_factor, challenges, self._flow
         )
 
     # ------------------------------------------------------------- helpers
@@ -258,50 +272,37 @@ class AuthServicer(pb_grpc.AuthServiceServicer):
         try:
             session = await self._sessions.validate(request.session_id)
             require_step_up(session, "configure two-factor authentication")
+            user_id = request.user_id or session.user_id
+            # The step-up gate proves *this* human is still present; it says nothing about
+            # whose account they may act on. Without this check any authenticated session
+            # could name someone else's `user_id` and switch their second factor off, which
+            # is a straightforward privilege escalation rather than an authorization detail
+            # deferred to Gateway — Gateway sees a route, not which account a body field
+            # targets, so it structurally cannot make this decision.
+            if user_id != session.user_id:
+                require_role(session, Role.OWNER)
         except AuthFailure as exc:
             await self._abort(context, exc)
             return pb.TwoFactorConfigResponse()
 
-        user_id = request.user_id or session.user_id
         user = await in_thread(self._directory.get, user_id)
         if user is None:
             return pb.TwoFactorConfigResponse(error_code=AuthError.UNKNOWN_USER.value)
-        try:
-            if request.enabled and request.method == "totp":
-                return await self._totp_enrolment(request, user_id, user.email)
-            config = await in_thread(
-                self._two_factor.configure, user_id, user.role, request.enabled,
-                request.method or None,
-            )
-            return pb.TwoFactorConfigResponse(
-                enabled=config.enabled, method=config.method or ""
-            )
-        except TwoFactorPolicyFloor as exc:
-            return pb.TwoFactorConfigResponse(
-                error_code=AuthError.TWO_FACTOR_POLICY_FLOOR.value, error_detail=str(exc)
-            )
-        except ValueError as exc:
-            return pb.TwoFactorConfigResponse(
-                error_code=AuthError.SECOND_FACTOR_INVALID.value, error_detail=str(exc)
-            )
-
-    async def _totp_enrolment(self, request, user_id: str, account_label: str):
-        """Two-step by design: the secret is issued disabled, and only a correct code from
-        the user's own authenticator turns it on. Enabling on an unverified secret is how
-        someone locks themselves out of their own account."""
-        if not request.totp_confirmation_code:
-            secret, uri = await self._two_factor.begin_totp_enrolment(user_id, account_label)
-            return pb.TwoFactorConfigResponse(
-                enabled=False, method="totp", totp_secret=secret, provisioning_uri=uri
-            )
-        confirmed = await self._two_factor.confirm_totp_enrolment(
-            user_id, request.totp_confirmation_code
+        outcome = await self._step_up.configure_two_factor(
+            user_id, user.role, request.enabled, request.method or None,
+            request.totp_confirmation_code, user.email,
         )
-        if not confirmed:
+        if outcome.error is not None:
             return pb.TwoFactorConfigResponse(
-                error_code=AuthError.SECOND_FACTOR_INVALID.value
+                error_code=outcome.error.value, error_detail=outcome.error_detail
             )
-        return pb.TwoFactorConfigResponse(enabled=True, method="totp")
+        config = outcome.config
+        return pb.TwoFactorConfigResponse(
+            enabled=bool(config and config.enabled),
+            method=(config.method if config else "") or "",
+            totp_secret=outcome.totp_secret,
+            provisioning_uri=outcome.provisioning_uri,
+        )
 
     async def InitiateStepUpReauth(self, request, context):
         try:
@@ -309,28 +310,16 @@ class AuthServicer(pb_grpc.AuthServiceServicer):
         except AuthFailure as exc:
             await self._abort(context, exc)
             return pb.StepUpChallengeResponse()
-        try:
-            method = AuthMethod(request.method)
-        except ValueError:
-            # Includes anything password-shaped a caller might try. There is no password
-            # method to fall back to, here or anywhere else (§4.5).
-            return pb.StepUpChallengeResponse(
-                error_code=AuthError.METHOD_NOT_ENABLED.value,
-                error_detail=f"{request.method!r} is not one of the four supported methods",
-            )
-        identifier = session.user_id
-        if method in (AuthMethod.EMAIL, AuthMethod.SMS):
-            user = await in_thread(self._directory.get, session.user_id)
-            if user is None:
-                return pb.StepUpChallengeResponse(error_code=AuthError.UNKNOWN_USER.value)
-            identifier = user.email if method is AuthMethod.EMAIL else (user.phone_number or "")
-        challenge = await self._flow.initiate(method, identifier, ChallengePurpose.STEP_UP)
+        # `request.method` reaches `StepUpFlow` unparsed on purpose: anything that is not one
+        # of the four — anything password-shaped included — is refused there, in the one
+        # place that decision lives (§4.5).
+        challenge = await self._step_up.initiate(session, request.method)
         if not challenge.ok:
             code, detail = _challenge_error(challenge)
             return pb.StepUpChallengeResponse(error_code=code, error_detail=detail)
         self._metrics.increment(STEP_UP_ISSUED)
         return pb.StepUpChallengeResponse(
-            challenge_id=challenge.challenge_id, method=method.value,
+            challenge_id=challenge.challenge_id, method=challenge.method.value,
             parameters_json=json.dumps(dict(challenge.parameters), default=str),
         )
 
@@ -340,39 +329,16 @@ class AuthServicer(pb_grpc.AuthServiceServicer):
         except AuthFailure as exc:
             await self._abort(context, exc)
             return pb.StepUpCompleteResponse()
-        # The challenge itself says which method issued it, and the lookup is filtered to
-        # STEP_UP. Routing this way rather than offering the response to each provider in
-        # turn matters twice over: a login challenge is rejected here instead of being
-        # partially processed, and no provider burns an attempt on a challenge that was
-        # never its own.
-        stored, error = await in_thread(
-            self._challenges.load, request.challenge_id, ChallengePurpose.STEP_UP
+        outcome = await self._step_up.complete(
+            session, request.challenge_id, request.response
         )
-        if error is not None or stored is None:
+        if not outcome.satisfied:
             return pb.StepUpCompleteResponse(
-                error_code=(error or AuthError.CHALLENGE_NOT_FOUND).value
+                error_code=(outcome.error or AuthError.STEP_UP_REQUIRED).value,
+                error_detail=outcome.error_detail,
             )
-        provider = self._registry.get(stored.method)
-        if provider is None:
-            return pb.StepUpCompleteResponse(error_code=AuthError.METHOD_UNAVAILABLE.value)
-        result = await provider.verify(request.challenge_id, request.response)
-        # Two conditions make this gate real rather than decorative: the challenge must have
-        # been issued *for* step-up, and the identity that proved it must be the session's
-        # own. Either one missing and the session stays un-elevated.
-        if not (
-            result.authenticated
-            and result.purpose is ChallengePurpose.STEP_UP
-            and result.user_id == session.user_id
-        ):
-            return pb.StepUpCompleteResponse(
-                error_code=(result.error or AuthError.STEP_UP_REQUIRED).value,
-                error_detail=result.error_detail,
-            )
-        await self._sessions.mark_step_up(session.session_id)
-        refreshed = await self._sessions.get(session.session_id)
         return pb.StepUpCompleteResponse(
-            satisfied=True,
-            satisfied_at_unix=_unix(refreshed.step_up_at if refreshed else None),
+            satisfied=True, satisfied_at_unix=_unix(outcome.satisfied_at)
         )
 
     # ------------------------------------------------------------ sessions

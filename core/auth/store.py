@@ -79,11 +79,18 @@ CREATE TABLE IF NOT EXISTS passkey_credentials (
 );
 CREATE INDEX IF NOT EXISTS idx_passkeys_user ON passkey_credentials(user_id);
 
+-- `pending_totp_secret` is separate from `totp_secret` on purpose. Enrolment is two-step,
+-- and writing an unconfirmed secret over the live one — or flipping `enabled` off to mean
+-- "mid-enrolment" — would let *starting* an enrolment disable a second factor that policy
+-- forbids disabling (deep-dive §4.6.1's floor). A pending secret is inert until a code
+-- from the user's own authenticator promotes it; nothing about the live configuration
+-- moves until then.
 CREATE TABLE IF NOT EXISTS two_factor_configs (
-    user_id     TEXT PRIMARY KEY,
-    enabled     INTEGER NOT NULL DEFAULT 0,
-    method      TEXT,
-    totp_secret TEXT
+    user_id             TEXT PRIMARY KEY,
+    enabled             INTEGER NOT NULL DEFAULT 0,
+    method              TEXT,
+    totp_secret         TEXT,
+    pending_totp_secret TEXT
 );
 
 CREATE TABLE IF NOT EXISTS break_glass_grants (
@@ -161,7 +168,21 @@ class AuthDatabase:
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA)
+        self._ensure_columns()
         self._conn.commit()
+
+    def _ensure_columns(self) -> None:
+        """Add columns `CREATE TABLE IF NOT EXISTS` cannot add to a database that already
+        exists. Idempotent, and deliberately additive only — this is the same field-only-append
+        discipline the `.proto` follows, applied to the schema."""
+        for table, column, decl in (
+            ("two_factor_configs", "pending_totp_secret", "TEXT"),
+        ):
+            existing = {
+                r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     @property
     def path(self) -> Path:
@@ -305,6 +326,36 @@ class UserDirectory:
             "SELECT totp_secret FROM two_factor_configs WHERE user_id = ?", (user_id,)
         )
         return row["totp_secret"] if row else None
+
+    def set_pending_totp_secret(self, user_id: str, secret: str) -> None:
+        """Park an unconfirmed enrolment secret without touching the live configuration.
+
+        Nothing about `enabled`, `method`, or `totp_secret` moves here. That is the whole
+        point: beginning an enrolment must not be a way to switch a second factor off that
+        `TwoFactorGate.configure()` would refuse to switch off (deep-dive §4.6.1).
+        """
+        self._db.write(
+            "INSERT INTO two_factor_configs (user_id, enabled, method, pending_totp_secret)"
+            " VALUES (?,0,NULL,?) ON CONFLICT(user_id) DO UPDATE SET"
+            " pending_totp_secret=excluded.pending_totp_secret",
+            (user_id, secret),
+        )
+
+    def get_pending_totp_secret(self, user_id: str) -> str | None:
+        row = self._db.query_one(
+            "SELECT pending_totp_secret FROM two_factor_configs WHERE user_id = ?", (user_id,)
+        )
+        return row["pending_totp_secret"] if row else None
+
+    def promote_pending_totp_secret(self, user_id: str) -> bool:
+        """Confirmation: the pending secret becomes the live one and 2FA turns on, in one
+        statement so there is no window where the config is enabled against no secret."""
+        return self._db.write(
+            "UPDATE two_factor_configs SET totp_secret = pending_totp_secret,"
+            " pending_totp_secret = NULL, enabled = 1, method = 'totp'"
+            " WHERE user_id = ? AND pending_totp_secret IS NOT NULL",
+            (user_id,),
+        ) == 1
 
     def set_two_factor(self, config: TwoFactorConfig, totp_secret: str | None = None) -> None:
         self._db.write(

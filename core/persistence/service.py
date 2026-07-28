@@ -174,7 +174,15 @@ class PersistenceService:
         self, request: ReimportRequest, service: ReimportService | None = None
     ) -> ReimportResult:
         reimport = service or ReimportService(self.db, self.receipts, self.history)
-        result = await reimport.submit(request)
+        try:
+            result = await reimport.submit(request)
+        except Exception as exc:  # noqa: BLE001 - nothing raises across this boundary
+            # A hand-edited workbook is the least trustworthy input this API takes, and
+            # `submit` reaches the canonical write path. Anything unexpected becomes a code
+            # here rather than an exception on the wire (`docs/PRINCIPLES.md` §4.1).
+            return ReimportResult(
+                ok=False, error_code=errors.code_for(exc), error_detail=str(exc)
+            )
         if result.conflicts:
             self.metrics.increment("reimport_conflicts", len(result.conflicts))
         return result

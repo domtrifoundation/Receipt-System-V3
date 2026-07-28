@@ -20,6 +20,7 @@ direct API call that skips the UI prompt.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from .auth_methods.base import AuthMethodRegistry
 from .auth_methods.two_factor import TwoFactorGate
@@ -42,6 +43,9 @@ from .store import UserDirectory, in_thread
 @dataclass(frozen=True)
 class StepUpOutcome:
     satisfied: bool = False
+    #: The server-side timestamp `require_step_up` will judge freshness against, read back
+    #: after the write rather than assumed — the value that matters is the stored one.
+    satisfied_at: datetime | None = None
     error: AuthError | None = None
     error_detail: str = ""
 
@@ -135,7 +139,10 @@ class StepUpFlow:
                 error_detail=result.error_detail,
             )
         await self._sessions.mark_step_up(session.session_id)
-        return StepUpOutcome(satisfied=True)
+        refreshed = await self._sessions.get(session.session_id)
+        return StepUpOutcome(
+            satisfied=True, satisfied_at=refreshed.step_up_at if refreshed else None
+        )
 
     async def configure_two_factor(
         self, user_id: str, role, enabled: bool, method: str | None,

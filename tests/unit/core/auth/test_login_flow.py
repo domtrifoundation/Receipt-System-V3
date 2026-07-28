@@ -14,7 +14,6 @@ from core.auth.contracts import (
     AuthMethod,
     AuthResult,
     ChallengePurpose,
-    TwoFactorConfig,
 )
 from core.auth.login_flow import LoginFlow
 from core.auth.session.session_store import SessionStore
@@ -81,7 +80,12 @@ def test_a_step_up_challenge_cannot_be_cashed_in_for_a_session(flow, client_user
 def test_an_enrolled_user_must_supply_a_second_factor(flow, channel, directory, client_user):
     gate = TwoFactorGate(directory, flow._profile)  # noqa: SLF001 - fixture wiring
     secret, _ = run(gate.begin_totp_enrolment(client_user.user_id, client_user.email))
-    directory.set_two_factor(TwoFactorConfig(client_user.user_id, True, "totp"))
+    # Enrolled the way a user actually enrols: a pending secret confirmed by a real code.
+    # Writing the config straight to `enabled` would be testing a state the API no longer
+    # produces (see `store.set_pending_totp_secret`'s own reasoning).
+    assert run(gate.confirm_totp_enrolment(
+        client_user.user_id, StdlibTotpEngine().code_at(secret, time.time())
+    ))
 
     owed = run(flow.complete(_login(flow, channel, client_user)))
     assert not owed.ok
@@ -95,8 +99,10 @@ def test_an_enrolled_user_must_supply_a_second_factor(flow, channel, directory, 
 
 def test_a_wrong_second_factor_refuses_the_login(flow, channel, directory, client_user):
     gate = TwoFactorGate(directory, flow._profile)  # noqa: SLF001 - fixture wiring
-    run(gate.begin_totp_enrolment(client_user.user_id, client_user.email))
-    directory.set_two_factor(TwoFactorConfig(client_user.user_id, True, "totp"))
+    secret, _ = run(gate.begin_totp_enrolment(client_user.user_id, client_user.email))
+    assert run(gate.confirm_totp_enrolment(
+        client_user.user_id, StdlibTotpEngine().code_at(secret, time.time())
+    ))
     outcome = run(flow.complete(_login(flow, channel, client_user), "000000"))
     assert not outcome.ok and outcome.error is AuthError.SECOND_FACTOR_INVALID
 

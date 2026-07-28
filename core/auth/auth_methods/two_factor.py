@@ -194,27 +194,28 @@ class TwoFactorGate:
 
     # ----------------------------------------------------------- enrolment
     async def begin_totp_enrolment(self, user_id: str, account_label: str) -> tuple[str, str]:
-        """`(secret, provisioning_uri)`. The secret is stored disabled until a first code is
-        verified — enrolling on an unverified secret is how a user locks themselves out."""
+        """`(secret, provisioning_uri)`. The secret is *pending* until a first code from the
+        user's own authenticator confirms it — enrolling on an unverified secret is how a
+        user locks themselves out.
+
+        It is parked in its own column rather than written over the live configuration, and
+        that is a security property rather than tidiness: writing it live would make
+        *beginning* an enrolment a second path to switching a second factor off, one that
+        skips `configure()`'s policy-floor refusal entirely. On a `public_facing` install
+        that floor is the thing §4.6.1 says cannot be configured back down, so it must not be
+        reachable around the side either. An abandoned enrolment now changes nothing at all.
+        """
         secret = self._engine.generate_secret()
-        await in_thread(
-            self._directory.set_two_factor,
-            TwoFactorConfig(user_id=user_id, enabled=False, method="totp"),
-            secret,
-        )
+        await in_thread(self._directory.set_pending_totp_secret, user_id, secret)
         return secret, self._engine.provisioning_uri(
             secret, account_label, self._profile.totp_issuer_name
         )
 
     async def confirm_totp_enrolment(self, user_id: str, code: str) -> bool:
-        secret = await in_thread(self._directory.get_totp_secret, user_id)
-        if not secret or not self._engine.verify(secret, code):
+        secret = await in_thread(self._directory.get_pending_totp_secret, user_id)
+        if not secret or not await in_thread(self._engine.verify, secret, code):
             return False
-        await in_thread(
-            self._directory.set_two_factor,
-            TwoFactorConfig(user_id=user_id, enabled=True, method="totp"),
-        )
-        return True
+        return await in_thread(self._directory.promote_pending_totp_secret, user_id)
 
     # ----------------------------------------------------------- the gate
     async def verify_second_factor(self, user_id: str, code: str) -> AuthError | None:

@@ -16,7 +16,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.01`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,7 +46,7 @@ valid the moment it is removed, and this file is what future sessions will have 
 
 ## Forward-Compatibility Pattern applicability
 
-Yes. Contracts are `@dataclass(frozen=True)` and `Contribution.proposed_change` / `CategoryDefault.default_value` are `FrozenDict` (`docs/PRINCIPLES.md` §2.1); `errors.LEARNING_ERROR_MESSAGES` is `FrozenDict` per §2.1.1. Three `isinstance` gates in this folder branch on a mapping — `entities.py`'s field validator, `contribution.py`'s change validator, and `category_defaults.py`'s `_hashable` — and all three test `collections.abc.Mapping`, never `dict`, because the 3.15 builtin `frozendict` is not a `dict` subclass and a `dict` check would silently take the wrong branch. Covered by `tests/unit/core/architect/test_forward_compat.py`. No free-threading assumptions and no version-sensitive `asyncio` behaviour: the async surface is `await`-on-I/O only, and §9 of the deep-dive confirms this sub-API introduces no dependency of its own.
+Yes. Contracts are `@dataclass(frozen=True)` and `Contribution.proposed_change` / `CategoryDefault.default_value` are `FrozenDict` (`docs/PRINCIPLES.md` §2.1); `errors.LEARNING_ERROR_MESSAGES` and `entities.py`'s `_ENTITY_CLASSES` / `_ID_FIELDS` / `_REQUIRED_FIELDS` are `FrozenDict` per §2.1.1. Three `isinstance` gates in this folder branch on a mapping — `entities.py`'s field validator, `contribution.py`'s change validator, and `category_defaults.py`'s `_hashable` — and all three test `collections.abc.Mapping`, never `dict`, because the 3.15 builtin `frozendict` is not a `dict` subclass and a `dict` check would silently take the wrong branch. Covered by `tests/unit/core/architect/test_forward_compat.py`. No free-threading assumptions and no version-sensitive `asyncio` behaviour: the async surface is `await`-on-I/O only, and §9 of the deep-dive confirms this sub-API introduces no dependency of its own.
 
 ## Real gotchas specific to this folder
 
@@ -54,7 +54,7 @@ The moderation queue is a plain table (`contributions`: old/new values, status, 
 
 Wikidata bootstrap is a separate concern living in `vendor_directory/`, and its query must traverse subclasses (`wdt:P31/wdt:P279* wd:Q4830453`) — a bare `wdt:P31` match is the confirmed root cause of V2's bootstrap returning ~2,600 entries and missing real PH SMBs. Scope is name and category only; Wikidata is not a trustworthy source for TIN or franchise data.
 
-**The gates are the design; treat any change that softens one as a redesign.** `layering.share_entity` is the only thing that turns a `LOCAL` fact into a queued contribution, and `ModerationQueue.merge` is the only thing that writes to `GLOBAL` — via `EntityManager.apply_contribution`, which nothing else calls. An unavailable prescreen provider keeps a contribution pending rather than waving it through: this is the one place the API deliberately does not degrade in the usual direction.
+**The gates are the design; treat any change that softens one as a redesign.** `layering.share_entity` is the only thing that turns a `LOCAL` fact into a queued contribution, and `ModerationQueue.merge` is the only thing that writes to `GLOBAL` — via `EntityManager.apply_contribution`, which nothing else calls. `apply_contribution` carries two gates of its own that review found missing: it refuses a correction whose target is a never-shared `LOCAL` entity (`NOT_SHARED` — staff's §3.2 path skips the second staff approval, never the owner's own consent), and it forces `owner_user_id=None` on both the create and the correction branch, so nothing that reaches the shared set carries a link back to the contributing user. An unavailable prescreen provider keeps a contribution pending rather than waving it through: this is the one place the API deliberately does not degrade in the usual direction.
 
 **`Franchiser` is standalone and referenced, never embedded on a `Branch`.** One franchiser operating branches under two different corporations is the concrete case; flattening it back would mean applying the same TIN correction once per branch with nothing keeping the copies in agreement. `tests/unit/core/architect/temporal_learning/test_entities.py` fails first if that happens.
 

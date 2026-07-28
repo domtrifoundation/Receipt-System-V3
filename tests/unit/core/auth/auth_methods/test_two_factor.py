@@ -91,13 +91,15 @@ def test_second_factor_verification_is_data_not_an_exception(directory, profile,
     assert run(gate.verify_second_factor(client_user.user_id, "000000")) is (
         AuthError.SECOND_FACTOR_REQUIRED
     )
+    import time
+
     secret, _ = run(gate.begin_totp_enrolment(client_user.user_id, client_user.email))
-    directory.set_two_factor(TwoFactorConfig(client_user.user_id, True, "totp"))
+    assert run(gate.confirm_totp_enrolment(
+        client_user.user_id, StdlibTotpEngine().code_at(secret, time.time())
+    ))
     assert run(gate.verify_second_factor(client_user.user_id, "000000")) is (
         AuthError.SECOND_FACTOR_INVALID
     )
-    import time
-
     code = StdlibTotpEngine().code_at(secret, time.time())
     assert run(gate.verify_second_factor(client_user.user_id, code)) is None
 
@@ -167,3 +169,71 @@ def test_private_install_may_lower_its_policy(directory):
     assert gate.set_policy(TwoFactorPolicy.OPTIONAL).two_factor_policy is (
         TwoFactorPolicy.OPTIONAL
     )
+
+
+# --------------------------------------------------------------------------------------
+# Regression: beginning a TOTP enrolment must not be a second path around the §4.6.1 floor.
+# Before this was fixed, `begin_totp_enrolment` wrote `TwoFactorConfig(enabled=False)`
+# straight through `set_two_factor`, so an owner or staff member on a `public_facing`
+# install could switch their own — or, via the servicer, anyone's — second factor off by
+# *starting* an enrolment they never finished. `configure()` refuses that exact change with
+# `TwoFactorPolicyFloor`; the enrolment path was reaching the same end state around it.
+# --------------------------------------------------------------------------------------
+
+
+def test_beginning_an_enrolment_never_disables_an_existing_second_factor(
+    directory, public_profile, staff_user
+):
+    import time
+
+    gate = TwoFactorGate(directory, public_profile)
+    first, _ = run(gate.begin_totp_enrolment(staff_user.user_id, staff_user.email))
+    assert run(gate.confirm_totp_enrolment(
+        staff_user.user_id, StdlibTotpEngine().code_at(first, time.time())
+    ))
+    assert directory.get_two_factor(staff_user.user_id).enabled
+
+    # The honest path is refused by the floor...
+    with pytest.raises(TwoFactorPolicyFloor):
+        gate.configure(staff_user.user_id, Role.STAFF, False, None)
+    # ...and so, now, is the enrolment path's side effect: 2FA stays on throughout.
+    second, _ = run(gate.begin_totp_enrolment(staff_user.user_id, staff_user.email))
+    assert second != first
+    assert directory.get_two_factor(staff_user.user_id).enabled
+    # The live secret is untouched until the new one is actually confirmed.
+    assert directory.get_totp_secret(staff_user.user_id) == first
+    assert run(gate.verify_second_factor(
+        staff_user.user_id, StdlibTotpEngine().code_at(first, time.time())
+    )) is None
+
+
+def test_an_abandoned_enrolment_leaves_no_usable_secret(directory, profile, client_user):
+    import time
+
+    gate = TwoFactorGate(directory, profile)
+    secret, _ = run(gate.begin_totp_enrolment(client_user.user_id, client_user.email))
+    # Never confirmed: nothing is enabled, and the pending secret cannot satisfy a login.
+    assert not directory.get_two_factor(client_user.user_id).enabled
+    assert directory.get_totp_secret(client_user.user_id) is None
+    assert run(gate.verify_second_factor(
+        client_user.user_id, StdlibTotpEngine().code_at(secret, time.time())
+    )) is AuthError.SECOND_FACTOR_REQUIRED
+
+
+def test_confirmation_promotes_the_pending_secret_and_clears_it(
+    directory, profile, client_user
+):
+    import time
+
+    gate = TwoFactorGate(directory, profile)
+    secret, _ = run(gate.begin_totp_enrolment(client_user.user_id, client_user.email))
+    assert directory.get_pending_totp_secret(client_user.user_id) == secret
+    assert run(gate.confirm_totp_enrolment(
+        client_user.user_id, StdlibTotpEngine().code_at(secret, time.time())
+    ))
+    assert directory.get_totp_secret(client_user.user_id) == secret
+    assert directory.get_pending_totp_secret(client_user.user_id) is None
+    # A replayed confirmation has nothing left to promote.
+    assert not run(gate.confirm_totp_enrolment(
+        client_user.user_id, StdlibTotpEngine().code_at(secret, time.time())
+    ))

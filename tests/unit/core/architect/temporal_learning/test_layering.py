@@ -199,6 +199,57 @@ def test_a_shared_branch_cannot_land_globally_pointing_at_a_local_corporation(pi
     assert pipeline.entities.list_visible("branch", "user-2").entities == ()
 
 
+def test_a_global_entity_never_carries_a_link_back_to_a_contributing_user(pipeline):
+    """A contribution's own `owner_user_id` must not ride into the shared set.
+
+    The vendor facts are shareable; "who submitted this" is not, and that is structural,
+    not a policy patch applied later. `apply_contribution`'s correction branch already
+    excluded `owner_user_id` from what a change may carry — its *create* branch did not,
+    and `owner_user_id` is a real field name, so it passed straight through the
+    `_field_names` filter onto a globally-visible record.
+    """
+    result = asyncio.run(
+        pipeline.layering.staff_create_global(
+            "corporation",
+            {"name": "Chain", "corporate_tin": "111", "owner_user_id": "user-42"},
+            staff_user_id="staff-1",
+        )
+    )
+    assert result.ok and result.contribution.merged
+    created = pipeline.entities.list_visible("corporation", None).entities[0]
+    assert created.layer is VendorLayer.GLOBAL
+    assert created.owner_user_id is None
+
+
+def test_a_never_shared_local_fact_cannot_be_promoted_by_a_staff_correction(pipeline):
+    """The consent gate holds against the staff path too (§3.1 vs §3.2).
+
+    Staff's direct-to-global route skips the *second staff approval*, never the owning
+    user's own share action. Targeting an unshared `LOCAL` entity with a correction used to
+    promote it — `apply_contribution` set `layer=GLOBAL, shared=True` unconditionally — so a
+    user's private fact became everyone's shared truth with no share action anywhere, and it
+    kept its `owner_user_id` on the way through.
+    """
+    private = pipeline.entities.create(
+        "corporation", {"name": "Aling Nena Private", "corporate_tin": "123"},
+        actor_user_id="user-1",
+    ).entity
+
+    result = asyncio.run(
+        pipeline.layering.staff_update_global(
+            "corporation", private.corporation_id, {"name": "Aling Nena Private"},
+            staff_user_id="staff-1",
+        )
+    )
+    assert result.error is not None
+    assert result.error.code == LearningErrorCode.NOT_SHARED
+
+    unchanged = pipeline.entities.get("corporation", private.corporation_id).entity
+    assert unchanged.layer is VendorLayer.LOCAL
+    assert unchanged.shared is False
+    assert pipeline.entities.list_visible("corporation", "user-2").entities == ()
+
+
 def test_a_staff_correction_cannot_reassign_ownership_of_a_global_entity(pipeline):
     """`owner_user_id` is placement, not a fact — a contribution may not carry it."""
     asyncio.run(

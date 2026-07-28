@@ -29,6 +29,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Protocol
 
+from common.frozen_dict import FrozenDict
+
 from .contracts import (
     Branch,
     Corporation,
@@ -43,23 +45,24 @@ from .contracts import (
 from .errors import LearningErrorCode, learning_message_for
 
 #: Which contract class implements each entity type, and which field is its id. Kept in
-#: one place so a new caller cannot get the pairing subtly wrong.
-_ENTITY_CLASSES: dict[str, type] = {
-    "corporation": Corporation,
-    "branch": Branch,
-    "franchiser": Franchiser,
-}
-_ID_FIELDS: dict[str, str] = {
-    "corporation": "corporation_id",
-    "branch": "branch_id",
-    "franchiser": "franchiser_id",
-}
+#: one place so a new caller cannot get the pairing subtly wrong. `FrozenDict`, not plain
+#: dict: constant lookup tables read from every method here and never written are exactly
+#: `docs/PRINCIPLES.md` §2.1.1's case — its mutable carve-out is for genuine runtime
+#: registries (`InMemoryEntityStore`'s own tables), and the difference belongs in the type.
+_ENTITY_CLASSES: FrozenDict = FrozenDict(
+    {"corporation": Corporation, "branch": Branch, "franchiser": Franchiser}
+)
+_ID_FIELDS: FrozenDict = FrozenDict(
+    {"corporation": "corporation_id", "branch": "branch_id", "franchiser": "franchiser_id"}
+)
 #: Fields a caller must supply per type. Everything else has a contract default.
-_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
-    "corporation": ("name", "corporate_tin"),
-    "branch": ("corporation_id", "address"),
-    "franchiser": ("name", "franchiser_tin"),
-}
+_REQUIRED_FIELDS: FrozenDict = FrozenDict(
+    {
+        "corporation": ("name", "corporate_tin"),
+        "branch": ("corporation_id", "address"),
+        "franchiser": ("name", "franchiser_tin"),
+    }
+)
 
 
 def _error(code: str, detail: str = "") -> LearningError:
@@ -216,6 +219,11 @@ class EntityManager:
             payload[_ID_FIELDS[entity_type]] = f"{entity_type[:4]}-{uuid.uuid4().hex[:12]}"
             payload["layer"] = VendorLayer.GLOBAL
             payload["shared"] = True
+            # Scrubbed, not merely absent by default: `owner_user_id` is a link back to the
+            # contributing user, the vendor facts are shareable and "who submitted this" is
+            # not. It is a real field name, so a `proposed_change` carrying one rode straight
+            # through the `_field_names` filter onto a globally-visible record.
+            payload["owner_user_id"] = None
             entity = cls(**payload)
             self._store.put(entity)
             return EntityResult(entity=entity)
@@ -223,6 +231,19 @@ class EntityManager:
         existing = self._store.get(entity_type, entity_id)
         if existing is None:
             return EntityResult(error=_error(LearningErrorCode.UNKNOWN_ENTITY, entity_id))
+        # §3.1's consent gate, enforced where the promotion actually happens. A correction
+        # targeting a never-shared `LOCAL` entity promoted it to `GLOBAL` as a side effect of
+        # the write below — publishing a user's private fact with no share action anywhere in
+        # the story. Staff's path (§3.2) skips the *second staff approval*, never the owner's
+        # own consent, so this refuses a staff-authored contribution too.
+        if existing.layer is VendorLayer.LOCAL and not existing.shared:
+            return EntityResult(
+                error=_error(
+                    LearningErrorCode.NOT_SHARED,
+                    f"{entity_type} {entity_id} is a private local fact; it must be shared "
+                    "by its own owner before any contribution may promote it",
+                )
+            )
         # `layer` and `shared` are excluded from what a change may carry and then set
         # explicitly below — a contribution proposing its own layer would be proposing to
         # skip the gate that approved it.
@@ -237,6 +258,10 @@ class EntityManager:
             **{k: v for k, v in change.items() if k in allowed},
             layer=VendorLayer.GLOBAL,
             shared=True,
+            # Cleared, not merely un-settable from the change: an entity that has reached the
+            # global layer belongs to no one user, and carrying the previous owner's id
+            # forward would leave the same contributor link the create branch scrubs.
+            owner_user_id=None,
         )
         self._store.put(updated)
         return EntityResult(entity=updated)
