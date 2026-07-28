@@ -1,0 +1,257 @@
+// Account Guardian API gRPC surface (`v3-deepdive-06-account-guardian-api.md` §9, §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// **Errors are data here** (`docs/PRINCIPLES.md` §4.1): every response carries
+// error_code/error_detail. The one thing this surface does NOT do is translate Auth's own
+// raise-loudly carve-out into a data field — an unresolvable `session_id` aborts the RPC
+// with UNAUTHENTICATED, exactly like `auth.proto`'s own `ValidateSession`, so a caller
+// cannot silently proceed on a session that was never actually valid.
+//
+// Every mutating RPC below carries a `session_id` naming the caller's own session — never a
+// `user_id` a client could simply assert. Whose account an action applies to is always
+// derived server-side from that session, then compared against whatever the RPC's own
+// target names (a device's session id, a case id, a request id) before anything happens.
+
+syntax = "proto3";
+
+package resibo.account_guardian.v1;
+
+service AccountGuardianService {
+  // --- Devices/sessions (deep-dive §4) ---
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeResponse);
+  rpc RevokeAllSessions(RevokeAllSessionsRequest) returns (RevokeResponse);
+
+  // --- Account recovery (deep-dive §5) — staff-mediated, not self-service ---
+  rpc RequestAccountRecovery(RequestRecoveryRequest) returns (RecoveryResponse);
+  rpc UpdateRecoveryChecklist(UpdateChecklistRequest) returns (RecoveryResponse);
+  rpc ApproveRecovery(ResolveRecoveryRequest) returns (RecoveryResponse);
+  rpc RejectRecovery(ResolveRecoveryRequest) returns (RecoveryResponse);
+  rpc CompleteRecovery(CompleteRecoveryRequest) returns (RecoveryResponse);
+  rpc CancelRecovery(CancelCaseRequest) returns (RecoveryResponse);
+  rpc GetRecovery(GetCaseRequest) returns (RecoveryResponse);
+  rpc ListRecoveryForUser(ListForUserRequest) returns (ListRecoveryResponse);
+
+  // --- SSO provider change (deep-dive §2 — intake half of a "future" feature) ---
+  rpc RequestSsoLink(RequestSsoLinkRequest) returns (SsoLinkResponse);
+  rpc CancelSsoLink(CancelCaseRequest) returns (SsoLinkResponse);
+
+  // --- Data portability (deep-dive §6.2) ---
+  rpc RequestDataExport(RequestExportRequest) returns (ExportResponse);
+  rpc GetExportStatus(GetCaseRequest) returns (ExportResponse);
+
+  // --- Erasure (deep-dive §6.3) ---
+  rpc RequestDeletion(RequestDeletionRequest) returns (DeletionResponse);
+  rpc CancelDeletion(CancelCaseRequest) returns (DeletionResponse);
+  rpc GetDeletionStatus(GetCaseRequest) returns (DeletionResponse);
+
+  // --- Consent (deep-dive §7) ---
+  rpc GetCurrentPolicyVersion(PolicyVersionRequest) returns (PolicyVersionResponse);
+  rpc RecordConsent(RecordConsentRequest) returns (ConsentResponse);
+}
+
+// --------------------------------------------------------------------- devices
+
+message ListSessionsRequest {
+  string session_id = 1;   // the caller's own session — also marks is_current on the match
+}
+
+message DeviceSessionMessage {
+  string session_id = 1;
+  string created_at = 2;        // RFC 3339
+  string last_seen_at = 3;      // RFC 3339
+  string user_agent_summary = 4;
+  bool is_current = 5;
+}
+
+message ListSessionsResponse {
+  repeated DeviceSessionMessage devices = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message RevokeSessionRequest {
+  string session_id = 1;          // the caller's own session, for authentication
+  string target_session_id = 2;   // the device being logged out — may equal session_id
+}
+
+message RevokeAllSessionsRequest {
+  string session_id = 1;
+}
+
+message RevokeResponse {
+  bool revoked = 1;
+  int32 sessions_revoked = 2;
+  string error_code = 3;
+  string error_detail = 4;
+  bool audit_recorded = 5;
+  string audit_error = 6;
+}
+
+// --------------------------------------------------------------------- account recovery
+
+message RequestRecoveryRequest {
+  // No session_id: a user filing this has, by definition, potentially lost every
+  // authentication method they had (deep-dive §5) — this is the one RPC in this service
+  // that may be called with no valid session at all.
+  string user_id = 1;
+  string lost_method = 2;   // "sso" | "passkey" | "email" | "sms" | "" (unspecified)
+}
+
+message UpdateChecklistRequest {
+  string request_id = 1;
+  // The reviewing staff/owner's own session — same role-check reasoning as
+  // ResolveRecoveryRequest above.
+  string session_id = 6;
+  bool knowledge_check_passed = 2;
+  string knowledge_check_note = 3;
+  // Tri-state over the wire: recovery_contact_state 0=unset/no contact on file,
+  // 1=verified, 2=not verified. contracts.RecoveryVerificationChecklist keeps this as an
+  // Optional[bool] internally; proto3 has no native optional bool without extra ceremony.
+  int32 recovery_contact_state = 4;
+  string vouched_by_user_id = 5;
+}
+
+message ResolveRecoveryRequest {
+  string request_id = 1;
+  // The reviewer's own session — staff/owner role is checked server-side against this
+  // session, never taken from a caller-asserted user id (the same "Auth produces the role
+  // claim, each API acts on it" division `docs/PRINCIPLES.md` §4.2 requires everywhere a
+  // privileged action's actor identity actually matters).
+  string session_id = 2;
+  string reason = 3;   // required — Audit's own REASON_REQUIRED_ACTIONS for approval
+}
+
+message CompleteRecoveryRequest {
+  string request_id = 1;
+  string session_id = 2;
+  string notes = 3;
+}
+
+message CancelCaseRequest {
+  string request_id = 1;
+  string acting_user_id = 2;
+}
+
+message GetCaseRequest {
+  string request_id = 1;
+}
+
+message ListForUserRequest {
+  string user_id = 1;
+}
+
+message RecoveryResponse {
+  string request_id = 1;
+  string user_id = 2;
+  string requested_at = 3;
+  string stage = 4;
+  string lost_method = 5;
+  bool knowledge_check_passed = 6;
+  string knowledge_check_note = 7;
+  int32 recovery_contact_state = 8;
+  string vouched_by_user_id = 9;
+  string reviewed_by = 10;
+  string resolved_at = 11;
+  string notes = 12;
+  string error_code = 13;
+  string error_detail = 14;
+  bool audit_recorded = 15;
+  string audit_error = 16;
+}
+
+message ListRecoveryResponse {
+  repeated RecoveryResponse requests = 1;
+}
+
+// --------------------------------------------------------------------- SSO link
+
+message RequestSsoLinkRequest {
+  string session_id = 1;
+  string provider = 2;
+  bool step_up_confirmed = 3;   // service.py's own job to have actually driven this to true
+}
+
+message SsoLinkResponse {
+  string request_id = 1;
+  string user_id = 2;
+  string provider = 3;
+  string requested_at = 4;
+  string stage = 5;
+  string completed_at = 6;
+  string error_code = 7;
+  string error_detail = 8;
+  bool audit_recorded = 9;
+  string audit_error = 10;
+}
+
+// --------------------------------------------------------------------- export
+
+message RequestExportRequest {
+  string session_id = 1;
+  string provider_name = 2;   // empty means the default "data_portability" provider
+}
+
+message ExportResponse {
+  string request_id = 1;
+  string user_id = 2;
+  string requested_at = 3;
+  string status = 4;
+  string export_logical_id = 5;
+  string error_code = 6;
+  string error_detail = 7;
+  bool audit_recorded = 8;
+  string audit_error = 9;
+}
+
+// --------------------------------------------------------------------- deletion
+
+message RequestDeletionRequest {
+  string session_id = 1;
+  int32 grace_period_days = 2;   // 0 means the configured default
+}
+
+message DeletionResponse {
+  string request_id = 1;
+  string user_id = 2;
+  string requested_at = 3;
+  string stage = 4;
+  int64 grace_period_ends_at_unix = 5;
+  int64 completed_at_unix = 6;
+  string error_code = 7;
+  string error_detail = 8;
+  bool audit_recorded = 9;
+  string audit_error = 10;
+}
+
+// --------------------------------------------------------------------- consent
+
+message PolicyVersionRequest {
+  string document_type = 1;   // "terms_of_service" | "privacy_policy"
+}
+
+message PolicyVersionResponse {
+  string document_type = 1;
+  string version = 2;
+  string published_at = 3;
+  string text_ref = 4;
+  bool requires_reconsent = 5;
+  bool published = 6;   // false when no version has ever been published for this document
+}
+
+message RecordConsentRequest {
+  string user_id = 1;
+  string document_type = 2;
+  string document_version = 3;
+  string ip_address = 4;   // evidentiary value for the hosted service only, §7.2
+}
+
+message ConsentResponse {
+  bool has_valid_consent = 1;
+  string current_version = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}

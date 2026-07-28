@@ -314,6 +314,7 @@ PROPOSED_AUDIT_OPERATIONS: dict[str, str] = {
     "export_requested": "account_guardian_export_requested",
     "deletion_requested": "account_guardian_deletion_requested",
     "deletion_cancelled": "account_guardian_deletion_cancelled",
+    "deletion_completed": "account_guardian_deletion_completed",
     "recovery_rejected": "account_guardian_recovery_rejected",
     "recovery_completed": "account_guardian_recovery_completed",
     #: The one operation name that genuinely exists in Audit's own registry today.

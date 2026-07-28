@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,3 +46,47 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 V2's propose-then-confirm pattern for mutating tools is deliberately *not* carried forward (`docs/MAINTENANCE.md` §4): V3 has no interactive chat surface during automated processing, so there is no live user to confirm with. Safety comes from *which* tools are offered — only ones staging into an existing review gate — not from a confirmation step with nothing to confirm against. The `DEV_OBSERVABILITY` category is defined here and consumed by Agent Control; it is not Agent Control's own private category.
+
+**`ToolContext` carries no `role` field, and that absence is the guarantee.** Permission
+resolution happens server-side from the caller's session through Auth & Tenancy; a `role` field
+on the context would be a caller-asserted role, and the gate would be checking the caller's own
+claim about itself. `session_id` is an addition beyond the deep-dive's own §5 sketch for exactly
+this reason — a session is the one thing Auth can resolve a real `Role` from.
+
+**The two gates are independent and both must pass, in this order**: the calling-context gate
+first (`CALLING_API_ALLOWED_CATEGORIES`), then the role gate (`CATEGORY_ALLOWED_ROLES`). The
+order is asserted in the tests, not incidental — if the role gate ran first, an owner-role
+reconciliation run denied a `TEST_EXECUTION` tool would get `PERMISSION_DENIED`, implying the
+right role would unlock it. `CONTEXT_NOT_ENABLED` says the correct thing instead: this surface
+does not offer that tool at all, to anyone.
+
+**Everything unresolvable is a denial.** A resolver that raises (Auth unreachable), a resolver
+that returns `None`, an availability check that throws, an unknown `calling_api` — all four
+deny (`docs/PRINCIPLES.md` §4.2). The default resolver, `deny_all_permissions`, denies
+unconditionally, so a caller that forgets to wire Auth in gets a closed gate rather than a
+silently permissive one.
+
+**`MUTATING_DIRECT` deliberately does not exist as a category.** §4 of the deep-dive is
+structural about this: an unattended pipeline has no confirmation mechanism to gate such a tool
+*with*, so an ungated mutation is simply never on the menu rather than existing-but-restricted.
+A test asserts the enum's exact membership so adding one has to be deliberate.
+
+**A denied privileged attempt is audited, not just a successful one.** An audit trail showing
+only what succeeded cannot answer "did something try", which is where an investigation starts.
+This is why `dispatch` looks the entry up once *before* the enforcement gate — so a refused
+`MUTATING_STAGED` call still has a known category to record against.
+
+**Files here that the deep-dive's §2 package layout does not list**, added with reasons:
+- `metrics.py` — listed in the layout but with no design behind it; the counters are shaped to
+  make one specific degradation visible: a gap between privileged `invocations_total` and
+  `audit_records_written` is the operator-facing signal that the audit sink is failing, since
+  an audit-sink outage must not corrupt a tool result already computed (§4.4) and therefore
+  cannot announce itself by failing the call.
+
+**Known gap, flagged rather than silently filled**: this API has no `.proto` yet. Its own
+deep-dive specifies no gRPC surface — unusually, its §7 is testing hooks rather than a wire
+contract — while `docs/PROCESS_TOPOLOGY.md` establishes that every Core API runs as its own
+process reachable only over internal gRPC. Those two cannot both be right. Inventing a surface
+the deep-dive never specified is a design decision, not an implementation detail, so it is
+recorded here for the PR that resolves it rather than guessed at. The in-process entry point
+(`dispatch.dispatch`) is complete and tested in the meantime.

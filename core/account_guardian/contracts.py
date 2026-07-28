@@ -37,6 +37,7 @@ from core.auth.contracts import AuthMethod, Role
 from core.persistence.contracts import BlobRef
 
 __all__ = [
+    "AccountGuardianMetrics",
     "AuthMethod",
     "BlobRef",
     "CANCELLABLE_DELETION_STAGES",
@@ -409,6 +410,33 @@ class ConsentCheckResult:
     current_version: PolicyVersion | None = None
     error: str | None = None
     error_detail: str = ""
+
+
+@dataclass(frozen=True)
+class AccountGuardianMetrics:
+    """What Health and Telemetrees can ask this API about itself (`metrics.py`).
+
+    Every field is a genuinely mutable counter behind `metrics.AccountGuardianMetricsCollector`
+    — this frozen type is only the immutable snapshot handed out, the same split
+    `core/health/metrics.py` and `core/audit/metrics.py` both use: a caller can never be
+    holding a view that mutates under it mid-read.
+    """
+
+    devices_listed: int = 0
+    devices_revoked: int = 0
+    all_devices_revoked_calls: int = 0
+    recovery_requests_created: int = 0
+    recovery_approved: int = 0
+    recovery_rejected: int = 0
+    recovery_completed: int = 0
+    recovery_cancelled: int = 0
+    sso_link_requests: int = 0
+    export_requests: int = 0
+    deletion_requests: int = 0
+    deletion_cancelled: int = 0
+    deletion_completed: int = 0
+    consent_recorded: int = 0
+    audit_write_failures: int = 0
 
 
 #: The SSO providers this package knows how to validate a link request against — a small,
