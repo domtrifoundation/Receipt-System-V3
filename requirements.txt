@@ -1,0 +1,24 @@
+# Runtime dependencies.
+#
+# Environment markers are the first point of the Forward-Compatibility Pattern
+# (docs/PRINCIPLES.md §3.3): on a newer interpreter the older dependency is not merely
+# unused, it is never installed at all.
+#
+# Deliberately minimal. Phase 1 implements only Agent Control (docs/PHASE_1_KICKOFF.md
+# §1.5); every other API is scaffolding, and its dependencies arrive with its real
+# implementation in Phase 2 rather than being declared ahead of the code that needs them.
+
+# --- gRPC: the process-separation substrate (docs/PRINCIPLES.md §1.7) ---------
+grpcio>=1.60
+grpcio-tools>=1.60
+
+# --- FrozenDict (docs/PRINCIPLES.md §2.1) ------------------------------------
+# Python 3.15 makes frozendict a builtin (PEP 814). common/frozen_dict.py feature-detects
+# it; this marker is what stops the external package being installed alongside it.
+frozendict; python_version < '3.15'
+
+# --- Fuzzy matching ----------------------------------------------------------
+# Used by Interface's find_setting, and by Matching API in Phase 2. Optional in the strict
+# sense — find_setting degrades to substring matching without it (§4.4) — but wanted by
+# default, since the degraded path is meaningfully worse at natural-language lookup.
+rapidfuzz>=3.0

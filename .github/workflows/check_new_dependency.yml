@@ -1,0 +1,27 @@
+name: New Dependency Checklist
+
+on:
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+
+jobs:
+  check-new-dependency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest tomli --break-system-packages
+      - name: Diff dependency manifest against previous commit
+        run: |
+          if [ -f tests/ci/test_new_dependency.py ]; then
+            pytest tests/ci/test_new_dependency.py -v
+          else
+            echo "::warning::tests/ci/test_new_dependency.py doesn't exist yet. See docs/templates/new_dependency.md."
+          fi

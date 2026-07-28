@@ -1,0 +1,30 @@
+name: New Provider Checklist
+
+# The check you'll hit most often in this project, per new_provider.md
+# itself — provider additions are the single most common change shape.
+
+on:
+  pull_request:
+    paths:
+      - '**/providers/**'
+      - '**/engines/**'
+
+jobs:
+  check-new-provider:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest --break-system-packages
+      - name: Run new-provider Protocol-conformance check
+        run: |
+          if [ -f tests/ci/test_new_provider.py ]; then
+            pytest tests/ci/test_new_provider.py -v
+          else
+            echo "::warning::tests/ci/test_new_provider.py doesn't exist yet. See docs/templates/new_provider.md."
+          fi

@@ -1,0 +1,26 @@
+name: gRPC Compatibility Check
+
+# Per new_grpc_endpoint.md itself: "never skippable via a label or
+# override, given what a silent break here actually costs." This one
+# is deliberately NOT scaffolded-pending-real-code the way the others
+# are — buf breaking works against .proto files directly, which can
+# exist and be meaningfully checked well before the Python service
+# code behind them does.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.proto'
+
+jobs:
+  check-grpc-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-setup-action@v1
+      - name: Check for breaking changes against the previous release
+        uses: bufbuild/buf-breaking-action@v1
+        with:
+          against: 'https://github.com/${{ github.repository }}.git#branch=main'

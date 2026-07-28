@@ -1,0 +1,35 @@
+Copyright (c) 2026 DOMTRI Foundation. All rights reserved.
+
+This software and its accompanying documentation are proprietary and confidential to
+DOMTRI Foundation.
+
+No licence, express or implied, is granted by the publication of this source code. No
+permission is given to use, copy, modify, merge, publish, distribute, sublicense, sell,
+or create derivative works from any part of it, except under a separate written agreement
+signed by DOMTRI Foundation.
+
+This repository being publicly readable is not a grant of any right to use what it
+contains. It is public so the project's engineering discipline can be inspected and so
+its issue tracker and release process work in the open.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---
+
+Third-party components
+
+This software depends on third-party open-source packages distributed under their own
+licences (MIT, BSD, Apache-2.0 and others). Those licences govern those components, not
+this one, and several of them require their copyright and licence notices to be included
+in redistributed software. That obligation is real once this product is distributed
+commercially, and it is met through the application's own credits screen, which carries
+open-source attribution alongside publisher and developer credits — see
+`v3-plan-01-core-apis.md` #6 for the design and `docs/MAINTENANCE.md` for release process.
+
+Nothing in this notice limits any right you hold under those third-party licences with
+respect to those third-party components.

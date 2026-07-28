@@ -1,0 +1,28 @@
+name: Config Schema Check
+
+on:
+  pull_request:
+    paths:
+      - '**/config*.py'
+      - '**/*.yaml'
+      - '**/*.toml'
+
+jobs:
+  check-config-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest --break-system-packages
+      - name: Validate config schema against documented config blocks
+        run: |
+          if [ -f tests/ci/test_config_schema.py ]; then
+            pytest tests/ci/test_config_schema.py -v
+          else
+            echo "::warning::tests/ci/test_config_schema.py doesn't exist yet. See docs/templates/new_config_key.md."
+          fi

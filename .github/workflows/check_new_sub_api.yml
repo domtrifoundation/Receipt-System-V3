@@ -1,0 +1,26 @@
+name: New Sub-API Checklist
+
+on:
+  pull_request:
+    paths:
+      - 'core/**/contracts.py'
+
+jobs:
+  check-new-sub-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest --break-system-packages
+      - name: Run new-sub-API documentation-linkage check
+        run: |
+          if [ -f tests/ci/test_new_sub_api.py ]; then
+            pytest tests/ci/test_new_sub_api.py -v
+          else
+            echo "::warning::tests/ci/test_new_sub_api.py doesn't exist yet. See docs/templates/new_sub_api.md."
+          fi

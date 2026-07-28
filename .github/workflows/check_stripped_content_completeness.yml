@@ -1,0 +1,24 @@
+name: Stripped Content Completeness Check
+
+# Runs on every PR — deliberately not path-scoped, since the whole
+# point is catching a NEW top-level entry that nobody thought to
+# classify, which by definition won't match a predictable path filter.
+# See .github/scripts/check_stripped_content_list.py for the actual
+# check, and docs/MAINTENANCE.md §7 for why this exists.
+
+on:
+  pull_request:
+
+jobs:
+  check-classification:
+    name: Every top-level entry is classified shipped or dev-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check every top-level entry is classified
+        run: python .github/scripts/check_stripped_content_list.py

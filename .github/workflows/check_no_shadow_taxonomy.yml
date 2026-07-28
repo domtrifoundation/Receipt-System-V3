@@ -1,0 +1,29 @@
+name: No Shadow Taxonomy Check
+
+# Heuristic, not authoritative — will occasionally flag a false
+# positive. Per new_taxonomy_type.md: read the flag, confirm
+# deliberately, and if it's a false positive, add it to this check's
+# own allowlist with a one-line reason in the same PR.
+
+on:
+  pull_request:
+
+jobs:
+  check-no-shadow-taxonomy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest --break-system-packages
+      - name: Scan for taxonomy-shaped code living outside Architect API
+        run: |
+          if [ -f tests/ci/test_no_shadow_taxonomy.py ]; then
+            pytest tests/ci/test_no_shadow_taxonomy.py -v
+          else
+            echo "::warning::tests/ci/test_no_shadow_taxonomy.py doesn't exist yet. See docs/templates/new_taxonomy_type.md."
+          fi

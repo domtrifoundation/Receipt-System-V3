@@ -1,0 +1,78 @@
+# Receipt-System-V3 — .gitignore
+#
+# The first rule below is not routine hygiene. V2 committed real financial data
+# (receipt images, TINs, a live workbook) into source git history because its setup
+# wizard defaulted every data path inside the program's own directory
+# (`docs/apis/v3-plan-04-v2-audit-findings.md`). V3's answer is structural, not
+# procedural: per-user data lives in the top-level installation directory, a sibling
+# of every release clone and therefore outside this repository entirely
+# (`docs/PRINCIPLES.md` §1.6, §2.4). The `config/`, `data/`, and `models/` directories
+# present here are empty scaffolding that mirrors that top-level shape for local
+# development — their *contents* are ignored unconditionally so a local dev run can
+# never put real data somewhere `git add -A` would pick it up.
+
+config/*
+data/*
+models/*
+!config/.gitkeep
+!data/.gitkeep
+!models/.gitkeep
+
+# Logs are rotated flat files with their own retention policy, deliberately never an
+# events table and never git-tracked (`v3-plan-01-core-apis.md` #13).
+logs/
+*.log
+
+# Persistence's canonical store and its snapshot checkpoints — never git-tracked; the
+# live SQLite file being untrackable is precisely why Historian is an in-database
+# append-only table rather than a parallel git-committed event log
+# (`docs/MAINTENANCE.md` §4).
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# Sensitive internal documents that must never re-enter this public repository.
+# LEGAL_REVIEW_NEEDED.md is a formal compliance memorandum covering real penalty exposure
+# and unresolved legal risk; it was deliberately moved out of the tree in Phase 1 per
+# docs/WIKI_MIGRATION_PLAN.md §3, and docs/index.md carries a stub recording that. This
+# entry exists so a stray copy can never be committed by an untargeted `git add -A`.
+LEGAL_REVIEW_NEEDED.md
+**/LEGAL_REVIEW_NEEDED.md
+
+# Credentials. These live in the top-level config directory, never inside a release
+# clone (`v3-plan-01-core-apis.md` #27).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service_account*.json
+credentials*.json
+token*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / webapp
+node_modules/
+webapp/dist/
+webapp/.vite/
+
+# Release directories. Every update is a fresh clone into `<version>_<commit-hash>`,
+# never a pull and never in-place mutation (`docs/MAINTENANCE.md` §2) — a clone that
+# lands beside a dev checkout is not part of this repository.
+x[0-9][0-9].[0-9][0-9].[0-9][0-9]_*/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
