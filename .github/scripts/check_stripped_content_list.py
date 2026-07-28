@@ -72,6 +72,13 @@ DEV_ONLY_STRIP_LIST = {
                     # makes these files the artifact that survives the deep-dive corpus
                     # being removed — important to development, irrelevant at runtime, and
                     # those are different questions.
+    # --- classified in Phase 1.5, when multi-version validation was set up ---------
+    "noxfile.py",   # drives `nox -s forward_compat` (docs/MAINTENANCE.md's
+                    # Forward-Compatibility Validation section) — a dev-time test-runner
+                    # invocation, same category as pytest.ini, never invoked by the shipped
+                    # program itself. `.nox/`'s own venv cache never reaches git at all
+                    # (self-ignoring on top of an explicit root .gitignore entry), so it was
+                    # never a classification question the way this file is.
 }
 
 # A real gap this top-level check cannot see, recorded here rather than left implicit:
