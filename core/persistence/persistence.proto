@@ -1,0 +1,320 @@
+// Persistence API gRPC surface.
+//
+// Assembled from the RPCs the parent deep-dive and each sub-API's own §7/§12 name:
+// Historian's `GetReceiptHistory`, Reimport's `SubmitReimport`, Archive Sync's
+// `EnableSync`/`GetSyncStatus`, and Disaster Recovery's `StartRestore`/`GetRestoreStatus`/
+// `VerifyIntegrity`. Placed here because the package layout predates naming a home for the
+// `.proto` itself.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair. Persistence has no "fail loudly" exception — that is
+// Auth's alone.
+//
+// **BlobRef carries logical_id and nothing else.** A physical path or a physical hash never
+// crosses this boundary. Resolution through `blob_locations` is server-side, always, so that
+// retention purging an original upload or an owner-initiated codec migration changes nothing
+// any client ever saw.
+
+syntax = "proto3";
+
+package resibo.persistence.v1;
+
+service PersistenceService {
+  // --- canonical data ---
+  rpc GetReceipt(GetReceiptRequest) returns (ReceiptResponse);
+  rpc SaveReceipt(SaveReceiptRequest) returns (SaveReceiptResponse);
+  rpc ListReceipts(ListReceiptsRequest) returns (ListReceiptsResponse);
+
+  // --- blob store ---
+  rpc PutBlob(PutBlobRequest) returns (PutBlobResponse);
+  rpc GetBlob(GetBlobRequest) returns (GetBlobResponse);
+
+  // --- Historian: both tracks, interleaved chronologically ---
+  rpc GetReceiptHistory(ReceiptHistoryRequest) returns (ReceiptHistoryResponse);
+
+  // --- Export Framework ---
+  rpc ListExportProviders(ListExportProvidersRequest) returns (ListExportProvidersResponse);
+  rpc GenerateExport(GenerateExportRequest) returns (GenerateExportResponse);
+
+  // --- Reimport ---
+  rpc SubmitReimport(ReimportUpload) returns (ReimportResultMessage);
+
+  // --- Archive Sync ---
+  rpc EnableSync(EnableSyncRequest) returns (SyncStatusResponse);
+  rpc GetSyncStatus(SyncStatusRequest) returns (SyncStatusResponse);
+
+  // --- Disaster Recovery ---
+  rpc StartRestore(RestoreRequest) returns (RestoreJobResponse);
+  rpc GetRestoreStatus(RestoreStatusRequest) returns (RestoreJobResponse);
+  // Callable standalone, not only after a restore — the weekly integrity spot-check on an
+  // otherwise-healthy instance uses this same RPC.
+  rpc VerifyIntegrity(VerifyRequest) returns (VerificationReportResponse);
+}
+
+// ---------------------------------------------------------------- canonical data
+
+message BlobRefMessage {
+  // SHA-256 of the ORIGINAL uploaded bytes. Permanent identity, never a file address.
+  string logical_id = 1;
+}
+
+message ReferenceIdentifierMessage {
+  // `kind` names an Architect-registered type. Persistence never defines kinds.
+  string kind = 1;
+  string value = 2;
+  string normalized = 3;
+}
+
+message ReceiptMessage {
+  string receipt_id = 1;
+  string user_id = 2;
+  BlobRefMessage blob = 3;
+  string group_id = 4;
+  string vendor_id = 5;
+  string vendor_name = 6;
+  string transaction_date = 7;   // RFC 3339, empty when unknown
+  string currency = 8;
+  string total_amount = 9;       // decimal as string — never a float on the wire
+  string vat_amount = 10;
+  repeated ReferenceIdentifierMessage identifiers = 11;
+  string fields_json = 12;
+  string created_at = 13;        // RFC 3339
+  string updated_at = 14;        // RFC 3339
+  int32 schema_version = 15;
+}
+
+message GetReceiptRequest {
+  string user_id = 1;
+  string receipt_id = 2;
+}
+
+message ReceiptResponse {
+  ReceiptMessage receipt = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message SaveReceiptRequest {
+  ReceiptMessage receipt = 1;
+  // "worker" | "llm" | "human:<user_id>" | "human:<user_id>-via-reimport". Required.
+  string actor = 2;
+}
+
+message SaveReceiptResponse {
+  string receipt_id = 1;
+  // Populated on success — the caller-visible evidence that the row and its Historian event
+  // committed in the same transaction.
+  string historian_event_id = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message ListReceiptsRequest {
+  string user_id = 1;
+  string after_receipt_id = 2;   // cursor, not an offset
+  int32 limit = 3;
+}
+
+message ListReceiptsResponse {
+  repeated ReceiptMessage receipts = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+// ---------------------------------------------------------------------- blobs
+
+message PutBlobRequest {
+  bytes original_bytes = 1;      // what logical_id is computed from, always
+  bytes stored_bytes = 2;        // the re-encoded archival copy; empty means store original
+  string codec = 3;              // "original" | "webp" | "avif"
+}
+
+message PutBlobResponse {
+  BlobRefMessage blob = 1;
+  bool deduplicated = 2;
+  // One-of-N confirmed. This is what gates the write path.
+  bool durably_backed_up = 3;
+  // All-of-N confirmed. Operator visibility only — never a gate.
+  bool fully_synced = 4;
+  repeated string confirmed_targets = 5;
+  repeated string failed_targets = 6;
+  string error_code = 7;
+  string error_detail = 8;
+}
+
+message GetBlobRequest {
+  string logical_id = 1;
+  // Recompute the stored file's SHA-256 and compare it to its own physical_hash.
+  bool verify = 2;
+}
+
+message GetBlobResponse {
+  bytes data = 1;
+  string codec = 2;
+  int64 byte_size = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+// ------------------------------------------------------------------- Historian
+
+message HistoryEntry {
+  // "data_change" or "narrative" — a union kept flat rather than a oneof so a client that
+  // only renders the timeline needs no per-track branching.
+  string track = 1;
+  string event_id = 2;
+  string occurred_at = 3;        // RFC 3339
+  // data_change only
+  string table_name = 4;
+  string row_id = 5;
+  string before_json = 6;
+  string after_json = 7;
+  string actor = 8;
+  string program_version = 9;
+  // narrative only
+  string receipt_id = 10;
+  string run_id = 11;
+  string stage = 12;
+  string summary = 13;
+  // Quantized by design — never raw OCR text, prompts, or timing detail.
+  string detail_json = 14;
+  string triggered_by = 15;
+}
+
+message ReceiptHistoryRequest {
+  string user_id = 1;
+  string receipt_id = 2;
+}
+
+message ReceiptHistoryResponse {
+  repeated HistoryEntry entries = 1;   // both tracks, sorted chronologically
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+// --------------------------------------------------------------------- exports
+
+message ListExportProvidersRequest {}
+
+message ListExportProvidersResponse {
+  repeated string provider_names = 1;
+}
+
+message GenerateExportRequest {
+  string user_id = 1;
+  string provider_name = 2;
+  string params_json = 3;
+}
+
+message GenerateExportResponse {
+  BlobRefMessage export_blob = 1;
+  string format = 2;
+  string generated_at = 3;       // RFC 3339
+  string export_id = 4;
+  string extra_artifacts_json = 5;
+  string error_code = 6;
+  string error_detail = 7;
+}
+
+// -------------------------------------------------------------------- reimport
+
+message FieldConflictMessage {
+  string receipt_id = 1;
+  string field = 2;
+  string original_value = 3;
+  string canonical_value = 4;
+  string reimported_value = 5;
+}
+
+message ReimportUpload {
+  string user_id = 1;
+  string file_path = 2;
+  string actor_user_id = 3;
+  // Content Security's verdict. False means unscanned, which means unsafe — this is a
+  // fail-closed gate, never a hint the server may override.
+  bool content_scan_passed = 4;
+}
+
+message ReimportResultMessage {
+  int32 fields_applied = 1;
+  repeated FieldConflictMessage conflicts = 2;
+  // Populated when conflicts were found — the created reimport_conflict flag.
+  string flag_id = 3;
+  repeated string receipts_touched = 4;
+  string error_code = 5;
+  string error_detail = 6;
+}
+
+// ---------------------------------------------------------------- archive sync
+
+message EnableSyncRequest {
+  string user_id = 1;
+  string provider_name = 2;
+  string target_path = 3;
+  bool enabled = 4;
+}
+
+message SyncStatusRequest {
+  string user_id = 1;
+  string provider_name = 2;
+}
+
+message SyncStatusResponse {
+  // "disabled" | "active" | "paused"
+  string state = 1;
+  string last_receipt_id = 2;
+  string last_synced_at = 3;     // RFC 3339
+  string paused_reason = 4;
+  int32 mirrored = 5;
+  string error_code = 6;
+  string error_detail = 7;
+}
+
+// ----------------------------------------------------------- disaster recovery
+
+message RestoreRequest {
+  string snapshot_id = 1;
+  string target_dir = 2;
+  string snapshot_source = 3;
+  // "full_instance" | "single_user"
+  string scope = 4;
+  string user_id = 5;            // required when scope is single_user
+}
+
+message RestoreStatusRequest {
+  string job_id = 1;
+}
+
+message RestoreJobResponse {
+  string job_id = 1;
+  string snapshot_id = 2;
+  string scope = 3;
+  // "pending" | "restoring_blobs" | "restoring_database" | "verifying" | "complete" |
+  // "complete_with_issues" | "failed"
+  string stage = 4;
+  string started_at = 5;         // RFC 3339
+  int32 blobs_restored = 6;
+  VerificationReportResponse report = 7;
+  string error_code = 8;
+  string error_detail = 9;
+}
+
+message VerifyRequest {
+  string target_dir = 1;
+  bool require_blobs_present = 2;
+}
+
+message VerificationReportResponse {
+  int32 total_refs_checked = 1;
+  // Three separate lists on purpose — they imply three different repairs.
+  repeated string orphaned_logical_ids = 2;
+  repeated string orphaned_physical_files = 3;
+  repeated string hash_mismatches = 4;
+  bool clean = 5;
+  string error_code = 6;
+  string error_detail = 7;
+}

@@ -18,7 +18,7 @@ The `.00.00` tail matches the same deliberate-jump discipline `x03.00.00` itself
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -42,16 +42,29 @@ valid the moment it is removed, and this file is what future sessions will have 
 - **storage through Persistence's Historian** — Logs are gitignored, rotated flat files with their own retention policy, never an events table. Historian is the *data-change* audit trail; Logs is *operational* trace, a genuinely different volume and purpose that does not belong in Historian's atomic-transaction-per-write model.
 - **Audit's privileged-action record** — a receipt's OCR timing is Logs' job; a staff member's break-glass grant is Audit's, never both.
 - **any rendering or presentation logic** — a `LogEntry`'s level carries a `suggested_style` hint (`LEVEL_STYLE_HINT`) precisely so a renderer does not maintain its own drifting opinion about severity, but Logs itself never renders anything. It is a client-agnostic data service, the same way Persistence is.
-- **its own permission model** — cross-user reads go through Auth's existing `check_access()` break-glass gate (`v3-deepdive-05-auth-tenancy-api.md` §6.3), never a second mechanism invented here.
+- **its own permission model** — cross-user reads go through Auth's existing `check_access()` break-glass gate (`v3-deepdive-05-auth-tenancy-api.md` §6.3), never a second mechanism invented here. `query.py` reaches it through one `AccessChecker` adapter and holds no notion of roles or grants itself.
+- **deciding whether a failure is survivable** — `writer.guarded_call` records the traceback and re-raises. Logs records what happened; what to do about it belongs to the caller.
+- **running the retention sweep** — `retention.py` implements the policy, but it is invoked by a Background Workers idle-time job (§5), never from the write path, which stays a pure append.
 
 ## Forward-Compatibility Pattern applicability
 
-Yes. `LEVEL_STYLE_HINT` is a module-level lookup table and is therefore `FrozenDict`, not a
-plain `dict` — `docs/PRINCIPLES.md` §2.1.1 covers this case specifically, and this module is
-one of the two instances that section was written from. Any `isinstance` check against it must
-test `collections.abc.Mapping`, never `dict`: the 3.15 builtin is not a `dict` subclass. This
-API is pure async I/O (`v3-plan-02-architecture.md`'s concurrency table, #13) with no
-compute-bound work, so it carries no GIL-protected assumptions of its own.
+Yes. `LEVEL_STYLE_HINT` and `LEVEL_SEVERITY` in `contracts.py` are module-level lookup tables
+and are therefore `FrozenDict`, not plain `dict` — `docs/PRINCIPLES.md` §2.1.1 covers this case
+specifically, and this module is one of the two instances that section was written from.
+`LogEntry.context` and `Verbosity.per_service` are `FrozenDict`-typed contract fields for the
+same reason. Any `isinstance` check against any of them must test `collections.abc.Mapping`,
+never `dict`: the 3.15 builtin is not a `dict` subclass, so `isinstance(x, dict)` silently
+returns False and the wrong branch is taken. `tests/unit/core/logs/test_contracts.py` carries
+the one `@pytest.mark.forward_compat` test in this package, asserting exactly that.
+
+The mutable structures here are deliberately **not** `FrozenDict` and the distinction is
+visible in the type: `SinkRegistry`'s own sink map (populated at startup) and
+`LogsMetricsCollector`'s counters are genuinely mutable internal state, which §2.1.1 does not
+reach. The counters are guarded by a real lock rather than relying on the GIL making `+=`
+atomic — this project targets free-threaded 3.14t, where that assumption does not hold.
+
+This API is pure async I/O (`v3-plan-02-architecture.md`'s concurrency table, #13) with no
+compute-bound work; `writer.py` is the only module that knows about the event loop.
 
 ## Real gotchas specific to this folder
 
@@ -62,4 +75,31 @@ find yourself writing log *content* that exists only in the index, that is the b
 
 Full tracebacks are captured unconditionally, independent of verbosity tier. Tiers control the
 volume of routine logging; they never gate whether a failure's traceback is recorded. This is a
-direct correction of a real V2 bug, not a preference.
+direct correction of a real V2 bug, not a preference. In the code that is `writer.should_write`,
+where the traceback branch runs *before* the tier is consulted; `guarded_call` is the helper for
+the case the deep-dive names specifically — an exception raised inside a
+`run_in_executor`-dispatched call, formatted while its `__traceback__` still reaches back through
+the executor frames. Catching such a failure further out and logging `str(e)` is the exact
+regression this is here to prevent.
+
+**TRACE entries are written to a sibling `<day>.trace.jsonl` file**, not mixed into the day's
+main file. §10 gives TRACE its own 7-day window against everything else's 90, and purging only
+the trace lines out of a mixed file would mean an in-place rewrite — which §3.1's whole storage
+argument rules out. Splitting the tier keeps the shorter TTL a plain file delete. Rotation is
+still one file per service per day, only two tracks of it.
+
+**Files here that the deep-dive's §2 package layout does not list**, added with reasons:
+- `paths.py` — `writer`, `index`, `query` and `retention` all need the same answer to "which
+  file does this belong in", and the alternative was three of them importing it from the fourth.
+- `jsonl.py` — one codec, both directions. Splitting encode into `writer.py` and decode into
+  `query.py` would be two independently-maintained opinions about one file format.
+- `sinks.py` — the Provider Registry for destinations (`docs/PRINCIPLES.md` §1.2, §1.3). The
+  JSONL files stay the canonical one; the registry is what lets a live-tail buffer or a
+  self-hosted forwarder run *alongside* it rather than instead of it. A failing sink degrades
+  alone: logging must never be able to fail the thing being logged.
+- `retention.py` — §5's policy, kept off both the append-only write path and the index.
+- `logs.proto` + `generated/` — §7 specifies the surface but the layout predates showing where
+  the `.proto` lives. Regenerate with `python -m grpc_tools.protoc` and re-apply the
+  relative-import fix in `logs_pb2_grpc.py` (`from . import logs_pb2`); never hand-edit
+  generated files. `service.py` imports them lazily, so the package stays importable — and its
+  tests still meaningful — on an interpreter with no `grpcio` wheel yet (3.15 today).
