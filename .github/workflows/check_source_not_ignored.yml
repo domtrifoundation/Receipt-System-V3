@@ -1,0 +1,28 @@
+name: Source Not Ignored Check
+
+# Runs on every PR, deliberately unscoped. A path filter cannot work here: the failure
+# this catches is a source directory being INVISIBLE to git, and an invisible directory
+# produces no diff for a path filter to match against. It is also cheap — one
+# `git check-ignore` call — so there is no cost argument for scoping it.
+#
+# It is safe to register as a required status check (docs/MAINTENANCE.md §7.1's own
+# criteria): it runs unconditionally, always reports, and verifies something real today
+# rather than no-opping until application code exists.
+#
+# See .github/scripts/check_source_not_ignored.py for the real, already-happened bug this
+# exists because of.
+
+on:
+  pull_request:
+
+jobs:
+  check-source-not-ignored:
+    name: Every source directory is committable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check no source directory is gitignored
+        run: python .github/scripts/check_source_not_ignored.py
