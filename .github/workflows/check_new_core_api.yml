@@ -1,0 +1,34 @@
+name: New Core API Checklist
+
+# Real trigger paths, real invocation — the one thing NOT yet real is
+# tests/ci/test_new_core_api.py itself, since it inspects application
+# code that doesn't exist yet in this planning-stage repo. Wiring this
+# now means the check activates the moment that test file is written,
+# rather than being one more thing someone has to remember to add
+# later. See docs/templates/new_core_api.md for the full spec.
+
+on:
+  pull_request:
+    paths:
+      - 'core/**'
+      - 'services/**'
+
+jobs:
+  check-new-core-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest --break-system-packages
+      - name: Run new-Core-API structural checks
+        run: |
+          if [ -f tests/ci/test_new_core_api.py ]; then
+            pytest tests/ci/test_new_core_api.py -v
+          else
+            echo "::warning::tests/ci/test_new_core_api.py doesn't exist yet — this check is wired but has nothing to run against. See docs/templates/new_core_api.md for what it should verify once real code exists."
+          fi

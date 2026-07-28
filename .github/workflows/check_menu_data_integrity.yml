@@ -1,0 +1,32 @@
+name: Menu Data Integrity Check
+
+# This is also the interface walker (docs/PRINCIPLES.md §3.2) — it
+# can never go stale itself, since it reads what the app actually
+# renders from, not a separately-maintained list.
+
+on:
+  pull_request:
+    # Deliberately not path-scoped, per new_menu_item.md: a gRPC
+    # rename anywhere can silently break a menu entry pointing at the
+    # old name, so this runs on every PR, not just ones that "look"
+    # menu-related.
+
+jobs:
+  check-menu-data-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest --break-system-packages
+      - name: Walk live menu data, confirm every target resolves
+        run: |
+          if [ -f tests/ci/test_menu_data_integrity.py ]; then
+            pytest tests/ci/test_menu_data_integrity.py -v
+          else
+            echo "::warning::tests/ci/test_menu_data_integrity.py doesn't exist yet. See docs/templates/new_menu_item.md."
+          fi

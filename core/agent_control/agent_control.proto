@@ -1,0 +1,95 @@
+// Agent Control API gRPC surface (`v3-deepdive-55-agent-control-api.md` §9).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair rather than raising across the boundary. The one
+// deliberate exception is token authentication, which fails loudly — a caller silently
+// ignoring an auth failure is worse than one ignoring a business error.
+
+syntax = "proto3";
+
+package resibo.agent_control.v1;
+
+service AgentControlService {
+  // owner/staff only — enforced server-side against the caller's own session, never
+  // against a claim the caller supplies about itself.
+  rpc IssueAgentToken(IssueTokenRequest) returns (AgentTokenResponse);
+  rpc RevokeAgentToken(RevokeTokenRequest) returns (RevokeResponse);
+  rpc ListAgentTokens(ListTokensRequest) returns (ListTokensResponse);
+
+  // The actual MCP/CLI call path. Both surfaces are clients of this one RPC.
+  rpc ExecuteAgentAction(AgentActionRequest) returns (AgentActionResponse);
+}
+
+message AgentTokenInfo {
+  string token_id = 1;
+  string issued_by = 2;
+  string issued_to_label = 3;
+  repeated string scopes = 4;
+  // "client" or "staff" only. "owner" is structurally unrepresentable here — see §3.1.
+  string role = 5;
+  string issued_at = 6;      // RFC 3339
+  string expires_at = 7;     // RFC 3339, empty when the token does not expire
+  string revoked_at = 8;     // RFC 3339, empty while active
+  bool active = 9;
+}
+
+message IssueTokenRequest {
+  string issued_by = 1;
+  string issued_to_label = 2;
+  repeated string scopes = 3;
+  string role = 4;
+  int64 expires_in_seconds = 5;  // 0 means no expiry
+}
+
+message AgentTokenResponse {
+  AgentTokenInfo token = 1;
+  // Returned exactly once, at issue time. The server stores only a SHA-256 hash, so this
+  // value cannot be recovered later — by design, not as a limitation.
+  string plaintext_token = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message RevokeTokenRequest {
+  string token_id = 1;
+  string revoked_by = 2;
+}
+
+message RevokeResponse {
+  bool revoked = 1;
+  string revoked_at = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message ListTokensRequest {
+  bool include_inactive = 1;
+}
+
+message ListTokensResponse {
+  repeated AgentTokenInfo tokens = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message AgentActionRequest {
+  // The bearer secret, not the token_id. Authenticated by hash comparison.
+  string token = 1;
+  string tool_name = 2;
+  // JSON object. Kept as an opaque string rather than a Struct so the tool argument schema
+  // stays owned by Tool Call API's own registry rather than being duplicated into this
+  // .proto, where it would become a second source of truth that could drift.
+  string arguments_json = 3;
+}
+
+message AgentActionResponse {
+  bool ok = 1;
+  string payload_json = 2;
+  string error_code = 3;
+  string error_detail = 4;
+  string tool_category = 5;
+}

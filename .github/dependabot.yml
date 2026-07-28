@@ -1,11 +1,38 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# Dependabot configuration.
+#
+# The previous version of this file was a non-functional stub — it carried
+# `package-ecosystem: ""`, which is not a valid value, so Dependabot errored on it rather
+# than doing anything. Repaired in Phase 1 to a minimal, genuinely working config.
+#
+# **Deliberately scoped to GitHub Actions only, and that scoping is the interesting part.**
+# This project already has a designed dependency lifecycle for its own runtime dependencies
+# (docs/MAINTENANCE.md §3): Dependencies Warden monitors every tracked dependency
+# continuously, a human decides whether a change is program-important, Proving Grounds tests
+# the candidate against the real bench workload it actually affects, and only a pass gates
+# promotion to a channel. Pointing Dependabot at `pip` would stand a second, parallel
+# mechanism next to that one — raising PRs that bypass the bench-test gate and arrive
+# without the human program-importance judgment the policy deliberately does not automate.
+#
+# Whether the two should coexist is a real call for the maintainer, not something to settle
+# by leaving a config pointed at `pip` and seeing what happens. Flagged in
+# docs/PHASE_1_COMPLETE.md rather than decided here.
+#
+# CI action versions are a different question with no such conflict: nothing in §3 covers
+# them, they never reach the running program, and stale action versions are a genuine
+# supply-chain concern. That half is enabled.
+#
+# `npm` for webapp/ is deliberately absent too — webapp/package.json is an empty Phase 1
+# scaffold, and pointing Dependabot at a manifest with no contents just produces errors.
+# Add it in Phase 2, when the webapp has a real dependency set.
 
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
       interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"

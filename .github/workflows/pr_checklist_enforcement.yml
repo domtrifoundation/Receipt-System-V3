@@ -1,0 +1,39 @@
+name: PR Checklist Enforcement
+
+# Runs on every PR, regardless of which template category it used —
+# this is the ONE check that's genuinely functional from day one,
+# since it only reads PR description text, not application code.
+# The per-category checks (check_new_core_api.yml and its seven
+# siblings) additionally run when their own trigger paths match, but
+# depend on real source files existing to have anything to inspect.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  verify-checklist:
+    name: Verify PR checklist is genuinely complete
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the checklist-verification script and the PR templates
+        uses: actions/checkout@v4
+        with:
+          # The templates are not optional here. The script distinguishes an author's own
+          # justification from the template's shipped wording by comparing against it — see
+          # load_template_boilerplate(). Without this path the script exits 1 by design
+          # rather than silently falling back to a weaker check, which would block every PR.
+          sparse-checkout: |
+            .github/scripts/check_pr_checklist.py
+            .github/PULL_REQUEST_TEMPLATE
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run checklist verification
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python .github/scripts/check_pr_checklist.py

@@ -1,0 +1,38 @@
+# Support Ticketing API
+
+Support Ticketing owns a real ticket lifecycle — a user or staff member opens a ticket, staff responds, it resolves — genuinely in-app, not a wrapper around an external tool.
+
+## API version at x03.00.00 Zircon
+
+`a01.00.00`
+
+`MM` is this API's real generation count, determined against actual V1 and V2 source rather
+than asserted (`docs/MAINTENANCE.md` §1). Genuinely new — surfaced when a sweep found Auth's break-glass `reason` field had referenced "a support ticket ref" all along without anything ever building one. No V1 or V2 equivalent. The `.00.00` tail matches the same
+deliberate-jump discipline `x03.00.00` itself follows: Zircon is the first stable release of
+this generation, not a running total of the commits that got there. `MM` increments again on
+any subsequent breaking change to this API within V3's lifetime.
+
+## Full design
+
+**During development (deep-dive corpus still present)**: [`docs/apis/v3-deepdive-52-support-ticketing.md`](../../docs/apis/v3-deepdive-52-support-ticketing.md) —
+read this before making any non-trivial change. This file is a working summary, not a
+replacement for it.
+
+**Before x03.00.00 ships** (`docs/CLAUDE_MD_GUIDE.md` §2.1): this section gets rewritten to a
+self-contained summary plus a pointer to `contracts.py`/`service.py` as the living source of
+truth. The deep-dive corpus does not ship with the program — the pointer above stops being
+valid the moment it is removed, and this file is what future sessions will have instead.
+
+## What this API explicitly does NOT own
+
+- **own notification delivery** — a new ticket message triggers a Notifications API entry (its deep-dive) the same way any other in-app event does; this API owns ticket state and conversation content, not how a user gets told about it.
+- **replace break-glass's own reason field** — break-glass (`v3-deepdive-05-auth-tenancy-api.md` §6) still just takes a free-text reason; this API gives that reason field somewhere real to *point at* when the underlying context is a genuine support interaction, but doesn't require every break-glass grant to have a formal ticket behind it.
+- **handle account-recovery case intake** — Account Guardian's own `account_recovery.py` (its deep-dive §5) already owns that specific, higher-stakes staff-mediated queue; a garden-variety support question ("why was my receipt flagged") is this API's job, an identity-verification case is Account Guardian's.
+
+## Forward-Compatibility Pattern applicability
+
+Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed fields, so they use `common/frozen_dict.py`'s `FrozenDict` rather than a plain `dict` (`docs/PRINCIPLES.md` §2.1). Any `isinstance` check against one must test `collections.abc.Mapping`, never `dict` — the 3.15 builtin is not a `dict` subclass. Module-level lookup tables in this folder are `FrozenDict` too, per §2.1.1.
+
+## Real gotchas specific to this folder
+
+Deliberately simple: open → in progress → resolved → closed, with no routing or SLA machinery, because this project's actual scale does not need it. An identity-verification case is Account Guardian's queue, not this one — the distinction is the stakes, not the format.
