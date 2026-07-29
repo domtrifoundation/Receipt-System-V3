@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.00`
+`a01.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -47,3 +47,62 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 Self-hosted licensing is deliberately *not* here. Putting license validation inside this API would ship it inside every self-hosted release clone, on the exact machine it is meant to check, fully readable and patchable by the person it validates — a check that is not a check. That is Keymaster, a separate closed system.
+
+**Billing is off by default, and that is the ordinary state rather than an edge case** (§3.1).
+A fresh install runs every tier free with no PSP configured; `BillingNotConfigured` is what a
+correct install looks like before an owner opts in. Any code path treating it as a failure
+breaks the common case rather than an exceptional one. `BillingConfig.configured` exists because
+enabled-without-credentials is a real misconfiguration — it would gate paid tiers while no
+charge could ever be taken — so callers check that rather than `enabled` alone. What billing
+being off removes is *charging*, not the concept of a tier: subscription creation still works,
+because §1 explicitly supports an owner running every tier free indefinitely.
+
+**Webhook verification is the one place this package fails closed hard** (§5), and the deep-dive
+is blunt about why: an unverified endpoint means "anyone who discovers the URL could fake a
+'payment succeeded' event". So verification runs first with no path around it, signatures are
+compared in constant time (`hmac.compare_digest` — a byte-by-byte `==` leaks the correct
+signature one character at a time to anyone who can call the endpoint repeatedly), a verifier
+that raises counts as unverified, and an install with no webhook secret verifies nothing rather
+than skipping the check. **Duplicate detection deliberately runs after verification**: an
+unsigned duplicate is still an unsigned payload, and reporting it as a duplicate would tell
+someone probing the endpoint which event ids exist. The two rejections stay distinct in metrics
+for the same reason — duplicates are every PSP's normal retry behaviour, signature failures are
+someone probing.
+
+**`PENDING_DELETION_HOLD` is a status this API owns on behalf of a contract Account Guardian's
+document specified** (§4). New charges stop immediately while the final invoice still settles,
+which is exactly why it is not a variant of `CANCELLED` — a cancelled subscription is finished,
+this one still has money to resolve. Releasing the hold lands in `CANCELLED`, never back in
+`ACTIVE`: the user asked to be deleted, and reactivating a paid subscription after settling
+would start charging them again. Account Guardian polls `billing_resolved()` rather than reading
+the enum, so renaming a status member cannot silently change when deletions proceed.
+
+**Upgrade and downgrade proration are two independent axes** (§3.3), not one policy. An upgrade
+gives the user something; a downgrade takes something away, and generosity means a different
+thing in each direction. `GENEROUS_DEFERRED` and `IMMEDIATE_REFUND` exist because a self-hosted
+owner running this for their own company or community may want a more generous posture than the
+industry default — the same owner-decides-their-own-posture principle applied to 2FA enforcement
+and session TTL. Amounts are signed minor units: negative means owed back, so a caller summing
+outcomes gets the right answer without knowing which direction produced each one. Minor units
+rather than a decimal because a currency amount in binary floating point is a rounding bug
+waiting for a real invoice.
+
+**Both PSPs are real** (§3 resolves the either/or explicitly). Implementing only the default
+would make "never requiring a rewrite to switch" false the moment anyone tried. They keep
+*separate* status vocabularies — Xendit says `settled` where PayMongo says `paid` — because one
+merged table would quietly accept a status from the wrong provider as valid. An unrecognised
+status is `UNKNOWN`, never guessed: an unreachable PSP treated as a failed charge would either
+refund money that was taken or re-charge a card that already paid.
+
+**Credentials are per-instance, never module globals.** §3's requirement is architectural: a
+hardcoded merchant account would route every self-hosted buyer's payments through the reference
+deployment's own account. A module-level secret would violate that silently.
+
+**Files here that the deep-dive's §2 package layout does not list**: none — every module matches
+§2, and `psp/base.py` holds the Provider Registry §3 asks for.
+
+**Known gaps, flagged rather than silently filled**: §7 specifies a four-RPC surface and there is
+no `.proto` yet, and `SubscriptionService` keeps subscriptions in memory rather than in its own
+store. Every behaviour above is implemented and tested; what is missing is the wire translation
+and the persistence adapter. This joins the same open `.proto` question `core/tool_call/`,
+`core/background_workers/`, `core/migration/` and `core/support_ticketing/` each record.
