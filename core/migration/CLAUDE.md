@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -44,4 +44,46 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 
 ## Real gotchas specific to this folder
 
-N→N+2 is always N→N+1→N+2. A shortcut migration means two code paths can produce the same end state, which is a real correctness risk, not a performance trade. V2's explicit-user-confirmation UX is deliberately not carried forward: migrations write through Persistence's normal path, so each one is already atomic and Historian-revertable.
+N→N+2 is always N→N+1→N+2. A shortcut migration means two code paths can produce the same end state, which is a real correctness risk, not a performance trade. **Rejected at registration, not at run time** (`MultiVersionStep`): the two paths only disagree once someone edits one of them, which is far too late to discover the shortcut exists. V2's explicit-user-confirmation UX is deliberately not carried forward: migrations write through Persistence's normal path, so each one is already atomic and Historian-revertable.
+
+**This package fails closed harder than most of the repo, and deliberately.** Everywhere else
+§4.4's degrade-gracefully posture dominates. Here a missing step **stops the walk**, because a
+structure left half migrated — some steps applied, one skipped, later ones applied on top — is
+in a state no version number describes and no step was written to expect. The whole value of a
+chained registry evaporates the moment a gap is stepped over. `MigrationResult.reached_version`
+reports how far it actually got, which is the honest answer to "what state is this structure in
+now" and matters more here than almost anywhere: a caller that assumed the target was reached
+would then run code against a schema that does not exist.
+
+**Idempotency is the step's contract, not the runner's.** A step returns `True` for "I did real
+work" and `False` for "this structure already carried the change". The runner cannot determine
+that — only the step knows what to look for — so a step that unconditionally returned `True`
+would make an interrupted batch's re-run report a full migration it never performed. That is
+the mistake §8's idempotency hook exists to catch, and `steps/v1_to_v2.py` is the worked example
+spelling the shape out before anyone has to write the first real one under release pressure.
+
+**Downgrades are refused rather than attempted.** This registry holds forward N→N+1 steps only,
+so walking backwards would need inverse steps nobody wrote, and guessing at one is how a
+"rollback" silently destroys data. Reverting is Persistence's own Historian-backed job.
+
+**Bulk parallelism is deliberately absent from this package.** §4 routes a multi-tenant batch
+through Background Workers' `CPU_PROCESS` class rather than having this API build its own
+dispatch, so `migrate_many` is a plain sequential loop such a job calls per structure — not a
+pool this module manages (`docs/PRINCIPLES.md` §1.5). One structure failing never stops the
+others: a batch halting on the first bad database would leave every user after it un-migrated
+with nothing to say which ones those were.
+
+**`steps/` is empty of real steps today, and that is correct rather than unfinished.** Every
+structure kind is at version 1 (`contracts.CURRENT_VERSIONS`), so there is no bump to write a
+step for. The chain-integrity test asserts the shipped registry against those versions, so the
+moment `CURRENT_VERSIONS` moves to 2 without a registered 1→2 step, CI fails — which is exactly
+what §8 asks for, rather than the gap being found mid-migration on a live system.
+
+**Files here that the deep-dive's §2 package layout does not list**: none. Every module matches
+§2 exactly. `steps/v1_to_v2.py` is named there and is present, deliberately unregistered.
+
+**Known gap, flagged rather than silently filled**: §7 specifies a two-RPC surface
+(`RunMigration`, `GetCurrentVersion`) and there is no `.proto` here yet. Every behaviour those
+RPCs would translate is implemented and tested at the in-process layer; the wire translation is
+what is missing. This joins the same open question `core/tool_call/CLAUDE.md` and
+`core/background_workers/CLAUDE.md` record.
