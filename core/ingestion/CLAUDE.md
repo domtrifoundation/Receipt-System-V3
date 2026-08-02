@@ -46,3 +46,17 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 Every source is an independently enableable Provider Registry entry. A self-hosted install with no Drive configured must degrade to direct-upload-only cleanly, never error. Drive credentials go through a swappable credential-provider interface: service account is the only strategy usable today, per-user OAuth is built behind the same interface and switches on by config once Google's verification clears — not a rewrite at that point, and not something to hardcode around now.
+
+## Implementation status
+
+**Not implemented.** Every `.py` file in this folder is a 0-byte scaffold created by the Phase-1
+commit that laid out the repository, and no commit since has put a line of logic into any of
+them. Everything above this section describes the design this package will have, not code that
+exists — a distinction worth stating in the one file a future session is most likely to read
+first, because the folder's file list looks exactly like an implemented package from the
+outside.
+
+Nothing outside this folder imports from it yet, so the emptiness is inert rather than a broken
+dependency. Building it is a full Core API pass against the deep-dive linked above, with the
+`new_core_api` and `new_provider` templates in `docs/templates/`. **Delete this section in the
+commit that implements the package** — a stale "not implemented" note is worse than none.

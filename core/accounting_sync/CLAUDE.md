@@ -46,3 +46,17 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 One-way push only. Bidirectional sync against an external system's own schema is a real problem that is explicitly deferred, not overlooked. OAuth connections are per-user, never system-wide, and tokens are stored encrypted and structurally separate from queryable business data. The no-OAuth file exports for the same two platforms are Export Framework providers, not this API.
+
+## Implementation status
+
+**Not implemented.** Every `.py` file in this folder is a 0-byte scaffold created by the Phase-1
+commit that laid out the repository, and no commit since has put a line of logic into any of
+them. Everything above this section describes the design this package will have, not code that
+exists — a distinction worth stating in the one file a future session is most likely to read
+first, because the folder's file list looks exactly like an implemented package from the
+outside.
+
+Nothing outside this folder imports from it yet, so the emptiness is inert rather than a broken
+dependency. Building it is a full Core API pass against the deep-dive linked above, with the
+`new_core_api` and `new_provider` templates in `docs/templates/`. **Delete this section in the
+commit that implements the package** — a stale "not implemented" note is worse than none.

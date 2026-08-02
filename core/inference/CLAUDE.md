@@ -46,3 +46,17 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 `PresetWorker` is a handle to a real `multiprocessing.Process`, not a thread — corrected in `docs/PROCESS_TOPOLOGY.md` §5 after the original design was isolated in name only. The `og.Model`/`og.Generator` objects live entirely in that child process; this service's own process never imports `onnxruntime_genai`'s native bindings. Preserve that: a crash in generation must stay contained to one preset's worker. Lazy model loading also needs its own lock, separate from the generation lock, or two concurrent first-calls race.
+
+## Implementation status
+
+**Not implemented.** Every `.py` file in this folder is a 0-byte scaffold created by the Phase-1
+commit that laid out the repository, and no commit since has put a line of logic into any of
+them. Everything above this section describes the design this package will have, not code that
+exists — a distinction worth stating in the one file a future session is most likely to read
+first, because the folder's file list looks exactly like an implemented package from the
+outside.
+
+Nothing outside this folder imports from it yet, so the emptiness is inert rather than a broken
+dependency. Building it is a full Core API pass against the deep-dive linked above, with the
+`new_core_api` and `new_provider` templates in `docs/templates/`. **Delete this section in the
+commit that implements the package** — a stale "not implemented" note is worse than none.
