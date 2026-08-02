@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.00`
+`a03.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -47,3 +47,14 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 `logical_id` (SHA-256 of the *original uploaded bytes*, before any re-encoding) and `physical_hash` (the hash of whatever is actually stored right now) are deliberately two different values, resolved through a mapping table. Collapsing them back into one is the exact bug that was caught before it shipped: retention deletes the original upload, so a storage filename derived from the identity hash would stop matching its own contents. Nothing else in the system touches disk — if you are reaching for `open()` outside this package, that is the bug.
+
+**A WAL database's `.sqlite` file is not a backup.** Copying it alone produces a snapshot that opens without error and is missing every committed transaction still sitting in the `-wal` file. `Database.snapshot_to()` uses SQLite's own online-backup API for exactly this reason; Disaster Recovery restores from what that produces, never from a plain file copy.
+
+**`common/async_sqlite.py` does not exist yet.** The deep-dive's §3.1 is right that the `run_in_executor` SQLite wrapper wants exactly one shared implementation rather than one each in Auth, Audit, Logs and here. It currently lives in `db/connection.py` because `common/` was outside this package's write boundary while several APIs were being implemented in parallel. When the shared version lands, `Database` becomes a thin subclass adding this API's own schema and PRAGMAs — nothing outside that one file changes.
+
+**Files here that the deep-dive's §2 package layout does not list**, added with reasons:
+- `db/receipts.py` — the canonical receipt repository. The layout jumps from `db/schema.py` straight to `service.py`, which is specified as a *thin* servicer; the row mapping and write path have to live somewhere that is not it. **Every write method here takes its `DataChange` and goes through `write_with_history`** — a "just write the row" shortcut is deliberately absent, not missing.
+- `exports/providers/common.py` — the shared fetch/build-workbook/store-artifact plumbing all seven providers use. Format logic stays in each provider; only the mechanism is shared.
+- `persistence.proto` — the gRPC surface the sub-APIs' own §7/§12 sections each specify a piece of. The layout predates naming a home for the `.proto` itself. `service.py` is transport-agnostic on purpose: the generated servicer is a one-line-per-RPC adapter over it, so behaviour cannot diverge between the gRPC path and an in-process caller.
+
+**Optional dependencies are all lazily imported and all degrade.** `openpyxl` (Excel export and reimport parsing), `b2sdk`, `boto3`, and the Google API client are each imported inside the one adapter that uses them; none is declared in `requirements.txt` yet, and every one of them being absent is a capability reporting itself unavailable, never a crash.

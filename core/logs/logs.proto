@@ -1,0 +1,68 @@
+// Logs API gRPC surface (`v3-deepdive-18-logs-api.md` §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): the stream carries a
+// terminal `LogQueryError` frame rather than aborting with a gRPC status, so a client that
+// was denied a cross-user read gets a reason it can show rather than an exception.
+//
+// Server-streaming is the point (§1.7): a live tail and a large historical pull are the same
+// RPC, and the server keeps writing whether or not any client is attached to consume it.
+
+syntax = "proto3";
+
+package resibo.logs.v1;
+
+service LogsService {
+  // A live tail view and a large historical pull both want this shape.
+  rpc Query(LogQueryRequest) returns (stream LogRecord);
+}
+
+message LogQueryRequest {
+  string run_id = 1;
+  // The subject whose logs are wanted. Empty means "all users", which is itself a
+  // cross-user read and gated the same way (§4).
+  string user_id = 2;
+  // One of: trace, debug, info, warning, error, attention. Empty defaults to info.
+  string min_level = 3;
+  // Added after the §7 sketch; every field below is additive and optional.
+  string service = 4;
+  string since = 5;                // RFC 3339, empty for unbounded
+  string until = 6;                // RFC 3339, empty for unbounded
+  int32 limit = 7;                 // 0 defers to the server default
+  // The authenticated caller, for the §4 permission check. Distinct from user_id: equal
+  // means an own-user read, different means a cross-user read needing a break-glass grant.
+  string requesting_user_id = 8;
+}
+
+// One streamed frame: either an entry or the terminal error. Never both.
+message LogRecord {
+  LogEntry entry = 1;
+  LogQueryError error = 2;
+}
+
+message LogEntry {
+  string timestamp = 1;            // RFC 3339, always timezone-aware
+  string run_id = 2;               // empty when the entry belongs to no run
+  string user_id = 3;              // empty when the entry belongs to no user
+  string service = 4;              // "ocr" | "inference" | "preprocessing" | ...
+  string level = 5;
+  string message = 6;
+  // The FULL formatted traceback, never str(e), and captured at every verbosity tier
+  // without exception (§3.3). Empty only when the entry is not a failure.
+  string traceback = 7;
+  // The rendering hint for this entry's level (§3.1, LEVEL_STYLE_HINT). Published so a
+  // client does not maintain a second, drifting opinion about severity. Logs API never
+  // renders anything itself and this is not a client-specific format string.
+  string suggested_style = 8;
+  // Structured per-entry key/values (OCR timings and the like), JSON-encoded. Kept opaque
+  // rather than a Struct so each service's own context schema stays owned by that service.
+  string context_json = 9;
+}
+
+message LogQueryError {
+  string error_code = 1;
+  string error_detail = 2;
+}
