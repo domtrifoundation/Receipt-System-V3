@@ -1,0 +1,126 @@
+// Architect API gRPC surface (`v3-deepdive-26-architect-api.md` §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused. This matters more here than almost anywhere
+// else in the system — Persistence, Matching, Review/Flagging, Billing and Execution Core
+// all consume these messages, so a renumbering is five APIs' problem, not one.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair, matching `contracts.ArchitectError`'s own two fields.
+// Architect has no equivalent of Auth's deliberate raise-loudly exception; none of its
+// failures are security decisions.
+
+syntax = "proto3";
+
+package resibo.architect.v1;
+
+service ArchitectService {
+  rpc GetTaxonomy(TaxonomyRequest) returns (TaxonomyResponse);
+  rpc SubmitContribution(ContributionRequest) returns (ContributionResponse);
+  rpc ReviewContribution(ReviewRequest) returns (ContributionResponse);
+  rpc SearchVendorDirectory(VendorSearchRequest) returns (VendorSearchResponse);
+}
+
+// One registered definition of any kind. Deliberately one message rather than one per
+// kind: the kind-specific fields are few, and a single message means a consumer that only
+// cares about `code` and `label` needs no knowledge of the kinds it does not use.
+message Definition {
+  string code = 1;
+  string label = 2;
+  // "taxonomy_category" | "reference_identifier_type" | "flag_type" | "tier_profile" |
+  // "menu_data_schema" — DefinitionKind's own values.
+  string kind = 3;
+  string description = 4;
+  bool deprecated = 5;
+  map<string, string> attributes = 6;
+
+  // taxonomy_category only
+  string parent_code = 7;
+
+  // reference_identifier_type only. Structural validation, never a validity check
+  // against an issuing authority's records.
+  string value_pattern = 8;
+  string example = 9;
+  bool multi_valued = 10;
+
+  // flag_type only
+  string default_severity = 11;
+  repeated string raised_by = 12;
+}
+
+message TaxonomyRequest {
+  string kind = 1;
+  bool include_deprecated = 2;
+  // Optional: restrict to the subtree under this code. taxonomy_category only.
+  string parent_code = 3;
+}
+
+message TaxonomyResponse {
+  repeated Definition definitions = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ContributionRequest {
+  string contributor = 1;                 // "worker" | "llm" | "human:<user_id>"
+  string target_entity_type = 2;          // corporation | branch | franchiser
+  string target_entity_id = 3;            // empty for a genuinely new entity
+  map<string, string> proposed_change = 4;
+  // Set only by a caller the server has already resolved as staff. Never trusted from a
+  // claim the caller makes about itself — the server checks the session's own role.
+  bool staff_authored = 5;
+}
+
+message ContributionInfo {
+  string contribution_id = 1;
+  string contributor = 2;
+  string target_entity_type = 3;
+  string target_entity_id = 4;
+  map<string, string> proposed_change = 5;
+  string target_layer = 6;                // "local" | "global"
+  string llm_prescreen_verdict = 7;       // empty until prescreen has run
+  string staff_review_status = 8;         // not_applicable | pending | approved | rejected
+  bool merged = 9;
+  string submitted_at = 10;               // RFC 3339
+  string curation_type = 11;              // empty unless this came from Curate
+}
+
+message ContributionResponse {
+  ContributionInfo contribution = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ReviewRequest {
+  string contribution_id = 1;
+  string reviewer = 2;
+  bool approved = 3;
+  string reason = 4;
+}
+
+message VendorSearchRequest {
+  string query = 1;
+  // Resolved server-side from the session. Local-layer entities are visible only to their
+  // own owner, and that rule is applied on read rather than trusted to the caller.
+  string user_id = 2;
+  int32 limit = 3;
+}
+
+message VendorRecordInfo {
+  string corporation_id = 1;
+  string name = 2;
+  string corporate_tin = 3;
+  string layer = 4;
+  string category_code = 5;
+  repeated string aliases = 6;
+  // Count rather than the branch list: a search response must not drag an entire branch
+  // table across the wire. Branches are fetched per corporation when actually wanted.
+  int32 branch_count = 7;
+}
+
+message VendorSearchResponse {
+  repeated VendorRecordInfo records = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}

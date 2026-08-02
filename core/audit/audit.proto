@@ -1,0 +1,151 @@
+// Audit/Event Log API gRPC surface (`v3-deepdive-08-audit-event-log-api.md` §3.2, §4, §5).
+//
+// **The most important property of this file is what it does not contain.** There is no
+// UpdateAuditEvent, no DeleteAuditEvent, and no PurgeEvents-by-id. Append-only is a
+// structural property of the published surface, not a policy the server happens to follow
+// (§3.2) — a wire contract that cannot express "modify this row" is a guarantee that
+// survives a careless future server implementation. ApplyRetentionPolicy is the single
+// deletion path and it takes no event id: it applies the configured age horizon or nothing.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused. The same applies to the action_type strings
+// carried below, which are stored verbatim in ten-year-old rows.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): every response carries an
+// error_code/error_detail pair. Audit has no equivalent of Auth's raise-loudly carve-out —
+// a caller here is reporting that a privileged action already happened, and failing its
+// call stack afterwards does not un-happen it.
+
+syntax = "proto3";
+
+package resibo.audit.v1;
+
+service AuditService {
+  // Any Core API reporting a privileged action it just performed.
+  rpc RecordAction(RecordActionRequest) returns (RecordActionResponse);
+
+  // Staff/owner only. The role is resolved server-side from the caller's own session,
+  // never taken from a claim the caller makes about itself (§4).
+  rpc QueryEvents(QueryEventsRequest) returns (QueryEventsResponse);
+  rpc GetEvent(GetEventRequest) returns (QueryEventsResponse);
+
+  // Retention (§5). Resolve reports what the configured policy actually is; Apply performs
+  // the one deletion this API permits, bounded by that policy's age horizon.
+  rpc ResolveRetentionPolicy(ResolveRetentionPolicyRequest) returns (RetentionPolicyResponse);
+  rpc ApplyRetentionPolicy(ApplyRetentionPolicyRequest) returns (ApplyRetentionPolicyResponse);
+
+  rpc GetMetrics(GetMetricsRequest) returns (MetricsResponse);
+}
+
+message AuditEventMessage {
+  string event_id = 1;
+  string action_type = 2;          // ActionType value, e.g. "break_glass_granted"
+  string actor_user_id = 3;
+  string target_user_id = 4;       // empty when not applicable
+  string reason = 5;               // required for break-glass and other §4 actions
+  // JSON object. Kept as an opaque string rather than a Struct because the payload shape is
+  // owned by whichever API performed the action, and pinning it here would make this file a
+  // second source of truth for every one of those shapes.
+  string details_json = 6;
+  string occurred_at = 7;          // RFC 3339
+  string corrects_event_id = 8;    // set when this event corrects an earlier one (§3.2)
+}
+
+message RecordActionRequest {
+  // A canonical operation name from contracts.PRIVILEGED_ACTIONS, not a free-form label.
+  // The closed set is what makes §7's coverage test meaningful.
+  string operation = 1;
+  string actor_user_id = 2;
+  string target_user_id = 3;
+  string reason = 4;
+  string details_json = 5;
+  string corrects_event_id = 6;
+  string occurred_at = 7;          // RFC 3339; empty means "now", set by the server
+}
+
+message RecordActionResponse {
+  bool recorded = 1;
+  string event_id = 2;
+  // Mirror sinks that failed while the primary write succeeded. Populated with a name and
+  // reason; the write still counts as recorded (`docs/PRINCIPLES.md` §4.4).
+  repeated string degraded_sinks = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message QueryEventsRequest {
+  repeated string action_types = 1;
+  string actor_user_id = 2;
+  string target_user_id = 3;
+  string occurred_after = 4;       // RFC 3339, inclusive
+  string occurred_before = 5;      // RFC 3339, exclusive
+  int32 limit = 6;                 // server-capped; see query.MAX_LIMIT
+  int32 offset = 7;
+}
+
+message QueryEventsResponse {
+  repeated AuditEventMessage events = 1;
+  int32 total_matching = 2;        // unpaged total
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message GetEventRequest {
+  // Returns the event plus every event that corrects it, oldest first — a corrected entry
+  // read without its corrections is misleading evidence.
+  string event_id = 1;
+}
+
+message ResolveRetentionPolicyRequest {
+  int32 retention_days = 1;        // 0 means "the 10-year BIR default"
+  string retention_mode = 2;       // "fixed" | "indefinite"
+  bool shorten_override = 3;
+  string shorten_override_reason = 4;
+}
+
+message RetentionPolicyResponse {
+  int32 retention_days = 1;
+  string retention_mode = 2;
+  bool shorten_override = 3;
+  string shorten_override_reason = 4;
+  // The regulation the default is derived from, carried on the wire so a client rendering a
+  // settings screen shows the real legal context rather than a bare number (§5).
+  string baseline_citation = 5;
+  string error_code = 6;
+  string error_detail = 7;
+}
+
+message ApplyRetentionPolicyRequest {
+  // Deliberately no event id and no predicate: the only thing expressible here is "apply
+  // the configured policy." See retention.py.
+  int32 retention_days = 1;
+  string retention_mode = 2;
+  bool shorten_override = 3;
+  string shorten_override_reason = 4;
+  string actor_user_id = 5;
+}
+
+message ApplyRetentionPolicyResponse {
+  int32 purged = 1;
+  string horizon = 2;              // RFC 3339 cutoff actually applied
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message GetMetricsRequest {
+  int32 retention_days = 1;        // 0 means the default; used for events_past_horizon
+  string retention_mode = 2;
+}
+
+message MetricsResponse {
+  int32 total_events = 1;
+  // action_type -> count
+  map<string, int32> events_by_action = 2;
+  string oldest_occurred_at = 3;
+  string newest_occurred_at = 4;
+  int32 events_past_horizon = 5;
+  int64 database_bytes = 6;
+  string error_code = 7;
+  string error_detail = 8;
+}

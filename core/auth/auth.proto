@@ -1,0 +1,264 @@
+// Auth & Tenancy API gRPC surface (`v3-deepdive-05-auth-tenancy-api.md` §9).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// **Error handling here is the inverse of every other API in this repo, deliberately.**
+// `docs/PRINCIPLES.md` §4.1 makes Auth the one documented exception: session and role
+// failures are returned as real gRPC error statuses (UNAUTHENTICATED / PERMISSION_DENIED)
+// which Gateway turns into a 401/403, precisely so a caller cannot ignore them by forgetting
+// to read a field. Everything else — a wrong code, an unreachable SMS gateway, a mismatched
+// OIDC state — carries an `error_code`/`error_detail` pair as data, because a failed login
+// attempt yields no session and ignoring it grants nothing.
+//
+// `ValidateSession` is the highest-volume call in the entire system: effectively every
+// authenticated request in the cluster passes through it. Its response shape is kept minimal
+// on purpose — anything added to it is paid on every request everywhere.
+
+syntax = "proto3";
+
+package resibo.auth.v1;
+
+service AuthService {
+  // --- SSO/OIDC (§4.2) ---
+  rpc InitiateOIDCLogin(InitiateLoginRequest) returns (InitiateLoginResponse);
+  rpc CompleteOIDCLogin(CompleteLoginRequest) returns (SessionResponse);
+
+  // --- Passkeys (§4.3) ---
+  rpc RegisterPasskey(RegisterPasskeyRequest) returns (RegisterPasskeyResponse);
+  rpc CompletePasskeyRegistration(PasskeyAssertionRequest) returns (RegisterPasskeyResponse);
+  rpc InitiatePasskeyLogin(PasskeyLoginRequest) returns (PasskeyChallengeResponse);
+  rpc CompletePasskeyLogin(PasskeyAssertionRequest) returns (SessionResponse);
+
+  // --- One-time codes (§4.4) ---
+  rpc InitiateEmailLogin(EmailLoginRequest) returns (OtpSentResponse);
+  rpc VerifyEmailLogin(OtpVerifyRequest) returns (SessionResponse);
+  rpc InitiateSmsLogin(SmsLoginRequest) returns (OtpSentResponse);
+  rpc VerifySmsLogin(OtpVerifyRequest) returns (SessionResponse);
+
+  // --- Second factor and step-up (§4.5, §4.6) ---
+  rpc ConfigureTwoFactor(TwoFactorConfigRequest) returns (TwoFactorConfigResponse);
+  rpc InitiateStepUpReauth(StepUpRequest) returns (StepUpChallengeResponse);
+  // Added beyond §9's own list: the sketch names only the initiating half, and a step-up
+  // gate with no way to complete the challenge cannot actually gate anything.
+  rpc CompleteStepUpReauth(StepUpCompleteRequest) returns (StepUpCompleteResponse);
+
+  // --- Sessions (§5) ---
+  rpc ValidateSession(ValidateSessionRequest) returns (SessionResponse);
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeResponse);
+
+  // --- Break-glass (§6.3) ---
+  rpc RequestBreakGlassGrant(BreakGlassRequest) returns (BreakGlassResponse);
+  rpc CheckBreakGlassAccess(BreakGlassCheckRequest) returns (BreakGlassCheckResponse);
+
+  // Added beyond §9: the login screen has to know which of the four methods to show, and
+  // the answer is per-install and live (an SMS gateway can be down right now). Without
+  // this, every client would have to hard-code the method list, which is exactly the
+  // hardcoding §4.1's registry exists to prevent.
+  rpc ListAuthMethods(ListAuthMethodsRequest) returns (ListAuthMethodsResponse);
+}
+
+// Group management RPCs live in `GroupsService` (`v3-deepdive-41-groups.md` §9). Groups was
+// extracted from this API and must not be folded back in here.
+
+message SessionResponse {
+  string session_id = 1;
+  string user_id = 2;
+  string role = 3;
+  int64 expires_at_unix = 4;
+  string error_code = 5;
+  // Added: the §5.4 synchronizer token, returned once alongside the session cookie.
+  string csrf_token = 6;
+  // Added: set when the primary method succeeded but a second factor is still owed. The
+  // caller holds this and calls the matching Verify RPC again with the second-factor code.
+  string second_factor_challenge_id = 7;
+  string second_factor_method = 8;
+  string error_detail = 9;
+}
+
+message InitiateLoginRequest {
+  string provider = 1;   // "google" — the entry in oidc.providers_enabled
+}
+
+message InitiateLoginResponse {
+  string challenge_id = 1;
+  string redirect_url = 2;
+  string state = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message CompleteLoginRequest {
+  string challenge_id = 1;
+  // The callback, as either a raw query string or a JSON object. Opaque here so Gateway's
+  // own edge shape is not baked into this contract.
+  string callback = 2;
+  // Answers a second-factor challenge the first attempt reported as owed. Present on every
+  // completion message for the same reason: 2FA is composable over *any* primary method
+  // (§4.6), so a field only on the OTP messages would have made it composable over two.
+  string second_factor_code = 3;
+}
+
+message RegisterPasskeyRequest {
+  string user_id = 1;
+}
+
+message RegisterPasskeyResponse {
+  string challenge_id = 1;
+  string options_json = 2;     // WebAuthn creation options, passed through to the browser
+  string credential_id = 3;    // set only on the completion call
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message PasskeyLoginRequest {
+  string user_id = 1;
+}
+
+message PasskeyChallengeResponse {
+  string challenge_id = 1;
+  string options_json = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message PasskeyAssertionRequest {
+  string challenge_id = 1;
+  string assertion_json = 2;
+  string second_factor_code = 3;
+}
+
+message EmailLoginRequest {
+  string email = 1;
+}
+
+message SmsLoginRequest {
+  string phone_number = 1;
+}
+
+message OtpSentResponse {
+  string challenge_id = 1;
+  string channel = 2;
+  int32 code_length = 3;
+  int64 expires_at_unix = 4;
+  string error_code = 5;
+  string error_detail = 6;
+}
+
+message OtpVerifyRequest {
+  string challenge_id = 1;
+  string code = 2;
+  // Set when answering a second-factor challenge rather than a primary login.
+  string second_factor_code = 3;
+}
+
+message TwoFactorConfigRequest {
+  string session_id = 1;       // must carry a fresh step-up (§4.5)
+  string user_id = 2;
+  bool enabled = 3;
+  string method = 4;           // "totp" | "sms" | "email"
+  string totp_confirmation_code = 5;
+}
+
+message TwoFactorConfigResponse {
+  bool enabled = 1;
+  string method = 2;
+  string totp_secret = 3;          // returned only during enrolment, once
+  string provisioning_uri = 4;     // otpauth:// URI for the authenticator app
+  string error_code = 5;
+  string error_detail = 6;
+}
+
+message StepUpRequest {
+  string session_id = 1;
+  string method = 2;      // one of the four primary methods — never a password
+  string action = 3;      // what is being gated, for the audit trail
+}
+
+message StepUpChallengeResponse {
+  string challenge_id = 1;
+  string method = 2;
+  string parameters_json = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message StepUpCompleteRequest {
+  string session_id = 1;
+  string challenge_id = 2;
+  string response = 3;
+}
+
+message StepUpCompleteResponse {
+  bool satisfied = 1;
+  int64 satisfied_at_unix = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message ValidateSessionRequest {
+  string session_id = 1;
+  // Set for a state-changing request so the §5.4 synchronizer token is checked in the same
+  // call that validates the session, rather than in a second round trip Gateway could skip.
+  string http_method = 2;
+  string csrf_token = 3;
+}
+
+message RevokeSessionRequest {
+  string session_id = 1;
+  // Revokes every session this user holds — "log out everywhere", and the mandatory
+  // companion of any role change (§5.3).
+  bool all_for_user = 2;
+  string user_id = 3;
+}
+
+message RevokeResponse {
+  bool revoked = 1;
+  int32 sessions_revoked = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message BreakGlassRequest {
+  string staff_user_id = 1;
+  string target_client_user_id = 2;
+  string reason = 3;              // required, non-empty
+  int32 duration_minutes = 4;     // 0 uses the configured default
+}
+
+message BreakGlassResponse {
+  string grant_id = 1;
+  int64 granted_at_unix = 2;
+  int64 expires_at_unix = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message BreakGlassCheckRequest {
+  string staff_user_id = 1;
+  string target_client_user_id = 2;
+}
+
+message BreakGlassCheckResponse {
+  bool allowed = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ListAuthMethodsRequest {}
+
+message AuthMethodStatus {
+  string method = 1;      // sso | passkey | email | sms
+  bool enabled = 2;       // owner has this method switched on for the install
+  bool available = 3;     // the provider is reachable right now
+  string detail = 4;
+}
+
+message ListAuthMethodsResponse {
+  repeated AuthMethodStatus methods = 1;
+  string tenancy_mode = 2;
+  string two_factor_policy = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
