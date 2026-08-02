@@ -19,82 +19,28 @@ Exit code 0 = every top-level entry classified, 1 = something isn't.
 """
 import subprocess
 import sys
+from pathlib import Path
 
-# Present in a normal end-user install. Anything genuinely new and
-# user-facing (a new top-level data directory, a new launcher script)
-# gets added here explicitly, in the same PR that adds it.
-SHIPPED_ALLOWLIST = {
-    "core",
-    "services",
-    "webapp",
-    "config",
-    "data",
-    "models",
-    "start.bat",
-    "start.sh",
-    "LICENSE",
-    "README.md",
-    ".gitignore",
-    # --- classified in Phase 1, when the real tree first existed -------------
-    "supervisor",       # Supervisor is *deployed* outside every release clone
-                        # (docs/PROCESS_TOPOLOGY.md §1), but its source still ships inside
-                        # the clone the installer pulls — that is where the top-level copy
-                        # is placed from. Stripping it would leave nothing to launch with.
-    "common",           # runtime code imported by services (common/frozen_dict.py is the
-                        # one centralized FrozenDict shim, docs/PRINCIPLES.md §2.1).
-    "assets",           # codename ASCII art, rendered at runtime by the Boot Sequence
-                        # screen and the persistent TUI header, and retained for every
-                        # codename indefinitely (docs/MAINTENANCE.md §1) — a running
-                        # instance genuinely needs its own version's banner.
-    "requirements.txt", # the aggregate/dev-convenience set — what a contributor installs into
-                        # one venv so the whole test suite runs in a single environment.
-                        # Production venvs are NOT built from this: per-service venvs compose
-                        # common/requirements.txt plus each service's own requirements.txt
-                        # (docs/VENV_AND_IMPORTS.md §4), which ship inside core/ and services/
-                        # and are therefore already covered by those entries above. Still
-                        # classified shipped because a running instance is a clone, and a clone
-                        # is also where a re-provision would be run from. Note
-                        # requirements-dev.txt and pyproject.toml are dev-only below — that
-                        # split is the point.
-}
+# The lists live in services/setup/dev_mode_strip.py and are imported from there, so there is
+# exactly one place they are actually defined.
+#
+# This direction is the reverse of what this script originally claimed ("Setup API's own
+# dev_mode_strip.py imports these same constants"). The goal was right, the direction could not
+# work: `.github/` is itself in DEV_ONLY_STRIP_LIST, so strip_development_content() would have
+# been importing its own strip list out of the directory it is about to delete — and Setup is
+# idempotent by design while Update API strips every fresh clone, so the second run would find
+# the import target gone. `services/` ships, so the definition lives there instead.
+#
+# sys.path needs the repo root explicitly: this script is executed by path
+# (`python .github/scripts/check_stripped_content_list.py`), which puts `.github/scripts/` on
+# sys.path[0], not the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-# Stripped by strip_development_content() in normal mode. This is the
-# authoritative list — Setup API's own dev_mode_strip.py imports these
-# same constants rather than this script importing a separate copy,
-# so there is exactly one place this list is actually defined.
-DEV_ONLY_STRIP_LIST = {
-    "CONTRIBUTING.md",
-    "docs",
-    "tests",
-    ".github",  # covers PULL_REQUEST_TEMPLATE/, workflows/, scripts/, instructions/ —
-                # entire directory tree, not enumerated file-by-file, so a NEW file added
-                # anywhere under .github/ is automatically covered without a list update
-    "pyproject.toml",  # dev/build tooling config, not runtime code
-    "requirements-dev.txt",
-    # --- classified in Phase 1, when the real tree first existed -------------
-    "pytest.ini",   # test-runner config; meaningless without tests/, already dev-only.
-    "CLAUDE.md",    # development guidance for LLM-assisted sessions. Nothing in a running
-                    # end-user instance reads it. Worth being explicit about *why* this is
-                    # dev-only despite being load-bearing: docs/CLAUDE_MD_GUIDE.md §2.1
-                    # makes these files the artifact that survives the deep-dive corpus
-                    # being removed — important to development, irrelevant at runtime, and
-                    # those are different questions.
-    # --- classified in Phase 1.5, when multi-version validation was set up ---------
-    "noxfile.py",   # drives `nox -s forward_compat` (docs/MAINTENANCE.md's
-                    # Forward-Compatibility Validation section) — a dev-time test-runner
-                    # invocation, same category as pytest.ini, never invoked by the shipped
-                    # program itself. `.nox/`'s own venv cache never reaches git at all
-                    # (self-ignoring on top of an explicit root .gitignore entry), so it was
-                    # never a classification question the way this file is.
-}
-
-# A real gap this top-level check cannot see, recorded here rather than left implicit:
-# CLAUDE.md files also exist in every API and sub-API folder (52 of them as of Phase 1),
-# nested under core/, services/, webapp/, and supervisor/ — all of which ship. A top-level
-# entry name cannot express "strip this filename wherever it appears," so
-# strip_development_content() needs an explicit nested-pattern rule for CLAUDE.md, not just
-# the top-level list. Flagged for whoever implements Setup API's own dev_mode_strip.py:
-# without it, every end-user install carries 52 development-only files it will never read.
+from services.setup.dev_mode_strip import (  # noqa: E402
+    DEV_ONLY_STRIP_LIST,
+    NESTED_STRIP_FILENAMES,
+    SHIPPED_ALLOWLIST,
+)
 
 
 def get_toplevel_entries() -> set[str]:
@@ -124,6 +70,18 @@ def main() -> int:
 
     if overlap:
         print(f"::error::These entries are in BOTH lists, which is itself a bug: {sorted(overlap)}")
+        failed = True
+
+    # A nested-strip filename is removed *wherever it appears* beneath the clone root, so one
+    # that is also shipped would delete shipped content everywhere it occurs — a far worse
+    # failure than the top-level overlap above, and invisible to that check because the two
+    # lists genuinely do not intersect for it.
+    nested_shipped = NESTED_STRIP_FILENAMES & SHIPPED_ALLOWLIST
+    if nested_shipped:
+        print(
+            "::error::These are stripped from every directory but also classified shipped, "
+            f"which would delete shipped content repo-wide: {sorted(nested_shipped)}"
+        )
         failed = True
 
     if unclassified:

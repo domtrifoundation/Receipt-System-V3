@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.01`
+`a03.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,10 +46,14 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 
 ## Real gotchas specific to this folder
 
-**Partially implemented.** `contracts.py` and `venv_provisioning.py` are real; hardware detection (§5), the wizard (§7), `bootstrap.py`, and `dev_mode_strip.py` are still 0-byte scaffolding. `contracts.py` says so at the top so a future session does not mistake it for a finished file.
+**Partially implemented — 4 of 13 files.** Real: `contracts.py` (provisioning types only), `venv_provisioning.py`, `dev_mode_strip.py`, `errors.py`. Still 0-byte scaffolding: `bootstrap.py` (§4), `dev_fixtures.py` (§4.1), all of `hardware/` (§5), `wizard.py` (§7 — the entire first-run UX, whose word-for-word script is `docs/SETUP_WIZARD_SCRIPT.md`), and `metrics.py`. `contracts.py` states its own partial status at the top so a future session does not mistake it for finished.
 
 **Files here that the deep-dive's §2 package layout does not list**, with the reason:
 - `venv_provisioning.py` — per-service venv creation, the mechanism behind the "dependency installation" this API's own §1 has always claimed to own but never described. Full design in [`docs/VENV_AND_IMPORTS.md`](../../docs/VENV_AND_IMPORTS.md). It sits here rather than in Update API for the same reason `dev_mode_strip.py` does: Setup provisions the *first* clone, Update's `release_manager.py` provisions every subsequent one, and one shared implementation is what stops the two drifting (`docs/PRINCIPLES.md` §1.5).
+
+**`dev_mode_strip.py` owns the classification lists; `.github/scripts/check_stripped_content_list.py` imports them from here.** That is the reverse of what the CI script originally claimed, and the reversal is not stylistic: `.github/` is itself in `DEV_ONLY_STRIP_LIST`, so the old direction had `strip_development_content()` importing its own strip list out of the directory it deletes — fine on a first run, broken on the second, and Setup is explicitly re-runnable while Update strips every fresh clone. `services/` ships, so the definition lives here where it stays reachable. Do not move it back.
+
+**`NESTED_STRIP_FILENAMES` is why `CLAUDE.md` is stripped from all 52 nested locations, not just the root.** A top-level entry name cannot express "strip this filename wherever it appears"; the CI script flagged that gap explicitly for whoever implemented this module. A nested-strip name that is also in `SHIPPED_ALLOWLIST` would delete shipped content repo-wide, so CI now guards that intersection separately — the two top-level lists can be perfectly disjoint while this one is still wrong.
 
 **Venvs hold third-party packages only.** First-party code resolves from the clone root on `PYTHONPATH` — nothing installs this project into a venv. If you are tempted to add `pip install -e .`, read `docs/VENV_AND_IMPORTS.md` §3 first: across N clones × 32 venvs, editable installs' failure mode is importing *another clone's* code, which is exactly what the clone-per-release model exists to prevent.
 
