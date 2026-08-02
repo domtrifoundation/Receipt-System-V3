@@ -1,0 +1,76 @@
+// Reconciliation API gRPC surface (`v3-deepdive-17-reconciliation-api.md` §6).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated in
+// a comment; its number is never reused.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1). Nothing in this API is a
+// security decision — §4.9 is a routing step for a verdict Content Security already reached,
+// not a scan performed here — so there is no raise-loudly carve-out anywhere on this surface.
+//
+// `outcome` carries the third state §6's own sketch could not express. That sketch comments
+// "empty flag_type = passed", which is true and insufficient: a check that could not run also
+// has an empty flag_type, and §4.12 is explicit that conflating "could not check" with "checked
+// and clean" "would misrepresent the actual finding". The empty-flag_type convention is kept
+// exactly as specified; `outcome` sits beside it rather than replacing it.
+
+syntax = "proto3";
+
+package resibo.reconciliation.v1;
+
+service ReconciliationService {
+  // Run the full check inventory against one receipt (§6). Every registered check runs — a
+  // receipt with bad VAT math and a malformed TIN has two problems, and stopping at the first
+  // would hide the second until the first was fixed.
+  rpc RunChecks(RunChecksRequest) returns (RunChecksResponse);
+
+  // §3's correction propagation. Dispatched by Background Workers, which owns scheduling —
+  // §1 is explicit that Reconciliation never runs as a competing scheduler.
+  rpc PropagateCorrection(PropagateRequest) returns (PropagationJobResponse);
+}
+
+message RunChecksRequest {
+  string receipt_id = 1;
+  // Empty means the whole inventory. Named checks let a caller run the cheap ones in bulk and
+  // the network-bound geo cross-reference (§5's budget gate) only where it is worth paying for.
+  repeated string check_names = 2;
+}
+
+message CheckResult {
+  string check_name = 1;
+  // Empty when the check passed or could not run — §6's own convention, preserved.
+  string flag_type = 2;
+  string severity = 3;                // low | medium | high
+  // passed | flagged | inconclusive. See this file's header.
+  string outcome = 4;
+  string detail = 5;
+}
+
+message RunChecksResponse {
+  // One per check that ran (§6).
+  repeated CheckResult results = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message PropagateRequest {
+  string entity_type = 1;
+  string entity_id = 2;
+  // The correction itself, as field name to new value. Strings on the wire because the
+  // canonical types live in Persistence's schema, not in this API's vocabulary.
+  map<string, string> change = 3;
+}
+
+message PropagationJobResponse {
+  string job_id = 1;
+  int32 receipts_total = 2;
+  int32 receipts_propagated = 3;
+  // How many were already done and were skipped rather than reapplied — §8's resume mechanism,
+  // made observable. A batch that always reports zero here is restarting, not resuming.
+  int32 receipts_resumed = 4;
+  // Receipts whose current value disagreed with the correction. Left for a human rather than
+  // overwritten (`docs/PRINCIPLES.md` §4.3).
+  repeated string conflicted_receipt_ids = 5;
+  string error_code = 6;
+  string error_detail = 7;
+}
