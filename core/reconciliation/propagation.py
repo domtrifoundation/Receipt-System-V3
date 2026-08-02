@@ -13,7 +13,7 @@ successfully-propagated receipt rather than restarting or silently skipping ones
 
 That function arrives here injected rather than imported. `contracts.py` is the only module other
 packages import from (`docs/PRINCIPLES.md` §1.1), and a direct import of
-`core.execution_core.checkpointing` would both breach that and make this package unimportable
+`services.execution_core.checkpointing` would both breach that and make this package unimportable
 wherever Execution Core is not installed (§1.3). What §1.9 actually demands is that the function
 *be* the identical one — which is a property of the wiring, pinned by a test asserting object
 identity, not a property this file can assert about itself.

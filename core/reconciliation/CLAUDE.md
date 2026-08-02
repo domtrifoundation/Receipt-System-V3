@@ -89,7 +89,7 @@ of them, each named by the deep-dive: §4.11's geo cross-reference reaches
 `core.geo_address.reverse_check.reverse_check` — "the identical underlying Geo/Address function
 Execution Core's own GEOD stage calls for new receipts, not a separate 'old receipt'
 implementation"; §4.10's archive check reaches Disaster Recovery's own `BlobLocation` verification;
-and §8's propagation atomicity reuses `core.execution_core.checkpointing.run_stage`, "the same
+and §8's propagation atomicity reuses `services.execution_core.checkpointing.run_stage`, "the same
 mechanism, not a second implementation of 'resume after a crash.'" All three arrive by injection
 rather than import, because `contracts.py` is the only module other packages import from (§1.1)
 and a direct import would make this package unimportable wherever those APIs are not installed

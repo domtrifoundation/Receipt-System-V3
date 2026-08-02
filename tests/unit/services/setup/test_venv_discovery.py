@@ -55,17 +55,20 @@ def test_a_service_in_each_tree_is_discovered_not_just_the_core_one(tmp_path):
 
 
 def test_the_same_leaf_name_in_both_trees_yields_two_distinct_venvs(tmp_path):
-    """`execution_core` genuinely exists under both `core/` and `services/` in this repo today.
+    """Nothing structurally stops `core/` and `services/` holding the same leaf name.
 
-    If the venv directory were named for the bare leaf, those two would collide on one path and
-    the second provisioned would silently overwrite the first's environment — a corruption whose
-    symptom appears in whichever service was unlucky, not in the one that caused it.
+    `execution_core` was in both trees until it was consolidated into `services/` to match its
+    own deep-dive §2 — so this is a collision this repo has actually had, not an invented one.
+    If the venv directory were named for the bare leaf, two such packages would collide on one
+    path and whichever provisioned second would silently overwrite the first's environment — a
+    corruption whose symptom shows up in whichever service was unlucky, not in the one that
+    caused it. The dotted `import_path` naming is what prevents that.
     """
     root = _clone(
         tmp_path,
         packages={
-            "core.execution_core": {"__init__.py": ""},
-            "services.execution_core": {"__init__.py": ""},
+            "core.shared_name": {"__init__.py": ""},
+            "services.shared_name": {"__init__.py": ""},
         },
     )
     specs = discover_services(root)
@@ -73,7 +76,7 @@ def test_the_same_leaf_name_in_both_trees_yields_two_distinct_venvs(tmp_path):
 
     assert len(specs) == 2
     assert len(venv_dirs) == 2, "leaf-name collision would have merged these into one venv"
-    assert {s.venv_dir.name for s in specs} == {"core.execution_core", "services.execution_core"}
+    assert {s.venv_dir.name for s in specs} == {"core.shared_name", "services.shared_name"}
 
 
 def test_requirement_files_put_the_shared_base_before_the_services_own(tmp_path):

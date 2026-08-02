@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from core.execution_core.contracts import (
+from services.execution_core.contracts import (
     ReceiptStage,
     Run,
     RunState,

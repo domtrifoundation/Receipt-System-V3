@@ -10,8 +10,8 @@ hold that correction in place.
 from __future__ import annotations
 
 
-from core.execution_core.contracts import ReceiptStage, StageOutcome
-from core.execution_core.retry_policy import PROCESSING_FAILED_FLAG, attempt_stage
+from services.execution_core.contracts import ReceiptStage, StageOutcome
+from services.execution_core.retry_policy import PROCESSING_FAILED_FLAG, attempt_stage
 
 from ._doubles import (
     FakeAttemptCounter,

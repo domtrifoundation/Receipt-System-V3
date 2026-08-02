@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from core.execution_core.contracts import ReceiptStage, RunState, StageOutcome
-from core.execution_core.metrics import ExecutionMetricsCollector
-from core.execution_core.service import ExecutionCoreServicer, RunRegistry
+from services.execution_core.contracts import ReceiptStage, RunState, StageOutcome
+from services.execution_core.metrics import ExecutionMetricsCollector
+from services.execution_core.service import ExecutionCoreServicer, RunRegistry
 
 from ._doubles import make_run, run
 
@@ -34,7 +34,7 @@ def test_starting_a_run_without_a_user_id_returns_an_error_field_rather_than_rai
     pytest.importorskip("grpc")
     servicer = ExecutionCoreServicer()
 
-    from core.execution_core.generated import execution_core_pb2
+    from services.execution_core.generated import execution_core_pb2
 
     response = run(servicer.StartRun(execution_core_pb2.StartRunRequest(user_id="")))
     assert response.error_code == "invalid_request"
@@ -45,7 +45,7 @@ def test_cancelling_an_unknown_run_is_an_error_payload_not_an_exception():
     pytest.importorskip("grpc")
     servicer = ExecutionCoreServicer()
 
-    from core.execution_core.generated import execution_core_pb2
+    from services.execution_core.generated import execution_core_pb2
 
     response = run(
         servicer.CancelRun(execution_core_pb2.CancelRunRequest(run_id="nope"))
@@ -62,7 +62,7 @@ def test_a_trigger_reports_whether_it_opened_a_new_run_or_joined_an_open_one():
     pytest.importorskip("grpc")
     servicer = ExecutionCoreServicer()
 
-    from core.execution_core.generated import execution_core_pb2
+    from services.execution_core.generated import execution_core_pb2
 
     first = run(
         servicer.StartRun(execution_core_pb2.StartRunRequest(user_id="u-1", file_count=2))
@@ -102,7 +102,7 @@ def test_the_wire_never_reports_a_run_as_running():
     pytest.importorskip("grpc")
     servicer = ExecutionCoreServicer()
 
-    from core.execution_core.generated import execution_core_pb2
+    from services.execution_core.generated import execution_core_pb2
 
     response = run(
         servicer.StartRun(execution_core_pb2.StartRunRequest(user_id="u-1", file_count=1))
@@ -119,7 +119,7 @@ def test_a_status_stream_for_an_unknown_run_yields_one_error_frame_rather_than_n
     pytest.importorskip("grpc")
     servicer = ExecutionCoreServicer()
 
-    from core.execution_core.generated import execution_core_pb2
+    from services.execution_core.generated import execution_core_pb2
 
     async def _collect():
         frames = []
@@ -141,7 +141,7 @@ def test_get_run_status_is_server_streaming_on_the_wire():
     exact defect the choice of gRPC was made to fix — so the descriptor itself is pinned.
     """
     pytest.importorskip("grpc")
-    from core.execution_core.generated import execution_core_pb2
+    from services.execution_core.generated import execution_core_pb2
 
     service = execution_core_pb2.DESCRIPTOR.services_by_name["ExecutionCoreService"]
     method = service.methods_by_name["GetRunStatus"]
@@ -196,7 +196,7 @@ def test_the_stage_output_retention_job_is_registered_with_background_workers():
     accumulate forever.
     """
     from core.background_workers.registry import KNOWN_JOBS
-    from core.execution_core.contracts import STAGE_OUTPUT_RETENTION_DAYS
+    from services.execution_core.contracts import STAGE_OUTPUT_RETENTION_DAYS
 
     assert STAGE_OUTPUT_RETENTION_DAYS == 30
     assert "stage_checkpoint_purge" in KNOWN_JOBS

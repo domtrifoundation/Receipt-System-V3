@@ -27,6 +27,30 @@ All 32 Core APIs (OCR, Preprocessing, Inference, Persistence, Execution Core, Au
 ### Layer 3 — The browser (external, not managed by this system at all)
 The webapp's actual **runtime** — the React application executing — runs entirely on the end user's own machine, inside their own browser. This project doesn't run, host, or manage this process in any sense; it's genuinely external, the same way any web application's client-side code runs on a machine the server operator doesn't control.
 
+### 2.1 Which tree a Core API's package lives in — `core/` vs `services/`
+
+Layer 1 vs Layer 2 is about *runtime*. It is not the same question as which source tree a
+package sits in, and conflating the two is what let five packages drift. Stated here because it
+was previously nowhere: every package re-derived it from whichever neighbour it happened to look
+at, and `services/execution_core/`'s own `CLAUDE.md` justified its (wrong) location with the
+claim that "every Core API in this repo lives under `core/`" — which was never true.
+
+- **`core/`** — continuously-running Layer 1 domain services. The pipeline and everything it
+  calls: OCR, Preprocessing, Inference, Persistence, Auth, Audit, Logs, Health, Architect,
+  Matching, Reconciliation, Content Security, Telemetrees, Account Guardian, and the rest.
+- **`services/`** — the five Core APIs that are *not* continuously-running domain services:
+  the detachable Layer 2 clients (**Interface** #6, **Gateway** #16), the lifecycle/one-shot
+  APIs (**Setup** #23 — its own §1 says it "does not run on every launch"; **Update** #21), and
+  the externally-facing **Status Page** #30 — plus **Execution Core** #24, whose own deep-dive
+  §2 places it here.
+
+**The authority for any individual package's path is that API's own deep-dive §2**, not
+`v3-plan-01-core-apis.md`'s parenthetical. `v3-plan-00-index.md` says so directly — the
+deep-dives own "package layout, data contracts, dependencies…" and the instruction is to "check
+that document for the real detail, not just this summary line." Four entries in file 01
+(Architect, Content Security, Telemetrees, Account Guardian) said `services/` while all four
+deep-dives said `core/`; file 01 was the stale one and has been corrected to match.
+
 ---
 
 ## 3. Where the webapp actually lives — the two different senses of "hosted"

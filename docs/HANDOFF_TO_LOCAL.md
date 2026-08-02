@@ -83,7 +83,7 @@ available and it could not be done remotely.
 Deep-dives: `v3-deepdive-02-ocr-api.md`, `-03-preprocessing-api.md`, `-05-inference-api.md`
 (check exact filenames in `docs/apis/`).
 
-**Execution Core is already built and waiting for them.** `core/execution_core/pipeline.py`
+**Execution Core is already built and waiting for them.** `services/execution_core/pipeline.py`
 takes stages as a mapping of `ReceiptStage` → zero-argument awaitable, so wiring OCR in is
 supplying a callable, not modifying Execution Core. `ReceiptStage` already has `PREPROCESSED`,
 `OCRD` and `INFERRED` in `STAGE_SEQUENCE`.

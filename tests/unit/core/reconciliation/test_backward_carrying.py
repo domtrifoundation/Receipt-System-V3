@@ -28,7 +28,7 @@ from __future__ import annotations
 import inspect
 
 from common.frozen_dict import FrozenDict
-from core.execution_core.checkpointing import run_stage
+from services.execution_core.checkpointing import run_stage
 from core.geo_address.reverse_check import reverse_check
 from core.reconciliation.checks.geo_vendor_cross_reference import GeoVendorCrossReferenceCheck
 from core.reconciliation.contracts import CheckOutcome
@@ -134,7 +134,7 @@ def test_propagation_resumes_through_execution_cores_own_run_stage_and_not_a_loc
 
     §7's propagation-atomicity hook asks that an interrupted batch not "leave some receipts
     corrected and others silently skipped without a retry". This wires in the genuine
-    `core.execution_core.checkpointing.run_stage` — the same function the live pipeline uses for
+    `services.execution_core.checkpointing.run_stage` — the same function the live pipeline uses for
     every OCR and Inference call — and proves a second pass over the same batch resumes rather
     than reapplying.
     """

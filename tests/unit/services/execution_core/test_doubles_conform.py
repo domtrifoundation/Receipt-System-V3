@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.execution_core.contracts import (
+from services.execution_core.contracts import (
     AttemptCounter,
     CheckpointStore,
     HistorianNarrator,

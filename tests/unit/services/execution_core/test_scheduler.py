@@ -12,8 +12,8 @@ from datetime import timedelta
 
 import pytest
 
-from core.execution_core.contracts import DebounceConfig, RunState
-from core.execution_core.scheduler import RunCoalescer, RunScheduler
+from services.execution_core.contracts import DebounceConfig, RunState
+from services.execution_core.scheduler import RunCoalescer, RunScheduler
 
 from ._doubles import ManualClock, run
 

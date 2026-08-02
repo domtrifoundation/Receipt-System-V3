@@ -15,16 +15,16 @@ from datetime import datetime, timezone
 
 import pytest
 
-from core.execution_core.checkpointing import already_written, completed_stages, run_stage
-from core.execution_core.contracts import (
+from services.execution_core.checkpointing import already_written, completed_stages, run_stage
+from services.execution_core.contracts import (
     ReceiptStage,
     STAGE_SEQUENCE,
     StageCheckpoint,
     StageOutcome,
     TERMINAL_STAGE,
 )
-from core.execution_core.errors import CheckpointWriteFailed
-from core.execution_core.pipeline import Pipeline, ReceiptWork
+from services.execution_core.errors import CheckpointWriteFailed
+from services.execution_core.pipeline import Pipeline, ReceiptWork
 
 from ._doubles import (
     FakeAttemptCounter,

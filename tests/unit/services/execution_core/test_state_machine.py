@@ -9,8 +9,8 @@ implementer; the transition table and these tests are what do.
 from __future__ import annotations
 
 
-from core.execution_core.contracts import ACTIVE_STATES, RunState
-from core.execution_core.state_machine import (
+from services.execution_core.contracts import ACTIVE_STATES, RunState
+from services.execution_core.state_machine import (
     ALLOWED_TRANSITIONS,
     ASSIGNABLE_STATES,
     accepts_new_files,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 
 from common.frozen_dict import FrozenDict
-from core.execution_core.contracts import (
+from services.execution_core.contracts import (
     ExecutionConfig,
     ReceiptStage,
     RetryConfig,
@@ -18,9 +18,9 @@ from core.execution_core.contracts import (
     STAGE_SEQUENCE,
     StageOutcome,
 )
-from core.execution_core.pipeline import Pipeline, ReceiptWork
-from core.execution_core.retry_policy import PROCESSING_FAILED_FLAG
-from core.execution_core.watchdog_hooks import ConfigReloader, SERVICE_NAME, WatchdogHooks
+from services.execution_core.pipeline import Pipeline, ReceiptWork
+from services.execution_core.retry_policy import PROCESSING_FAILED_FLAG
+from services.execution_core.watchdog_hooks import ConfigReloader, SERVICE_NAME, WatchdogHooks
 
 from ._doubles import (
     FakeAttemptCounter,
