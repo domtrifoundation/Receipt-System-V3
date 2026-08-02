@@ -1,0 +1,13 @@
+# Agent Control API — third-party runtime dependencies beyond `common/requirements.txt`.
+
+# --- Fuzzy matching ----------------------------------------------------------
+# Optional in the strict sense, unlike `core/matching/` and `core/geo_address/` where this same
+# package is a module-scope import and those packages will not import at all without it. Here
+# it is guarded (`backends/local.py` — `try: from rapidfuzz import fuzz as _fuzz`), and
+# `find_setting` falls back to plain substring matching when it is absent, reporting
+# `matcher: "substring-fallback"` in its own output so the degraded path stays visible rather
+# than silent (`docs/PRINCIPLES.md` §4.4).
+#
+# Declared anyway, and wanted by default: the degraded path is meaningfully worse at the
+# natural-language setting lookup this feature exists to provide.
+rapidfuzz>=3.0

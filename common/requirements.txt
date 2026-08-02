@@ -1,0 +1,33 @@
+# Shared runtime base — installed into EVERY service venv, before that service's own
+# `requirements.txt` (`docs/VENV_AND_IMPORTS.md` §4).
+#
+# The unit of this file is deliberately `common/`, not the repo root: `common/` is the one
+# package every service actually imports, so its dependency footprint is exactly the set every
+# service genuinely needs. A root-level "install everything" list is what this whole per-service
+# split exists to avoid (`docs/PROCESS_TOPOLOGY.md` §1 — OCR's OpenCV/Tesseract/Paddle stack has
+# no business in Auth's venv).
+#
+# Environment markers are the first point of the Forward-Compatibility Pattern
+# (`docs/PRINCIPLES.md` §3.3): on a newer interpreter the older dependency is not merely unused,
+# it is never installed at all.
+
+# --- gRPC: the process-separation substrate (docs/PRINCIPLES.md §1.7) ---------
+grpcio>=1.60
+
+# --- protobuf: required at RUNTIME by the generated `*_pb2.py` stubs ----------
+# Declared explicitly rather than inherited. Verified rather than assumed: `grpcio` does NOT
+# depend on protobuf (its only protobuf link is the optional `[protobuf]` extra, which pulls
+# `grpcio-tools`); the reason `google.protobuf` imports work in a normal dev checkout is that
+# `grpcio-tools` drags protobuf in as a side effect. A service venv that installed `grpcio`
+# alone would import-fail on its own generated stubs at startup — so this line is load-bearing,
+# not redundant with the line above it.
+#
+# `grpcio-tools` itself is deliberately NOT here: it is the protoc code generator, a build-time
+# tool, and belongs in the developer environment (`requirements-dev.txt`), not in the runtime
+# venv of all 32 services × every active release clone.
+protobuf>=5.26
+
+# --- FrozenDict (docs/PRINCIPLES.md §2.1) ------------------------------------
+# Python 3.15 makes frozendict a builtin (PEP 814). common/frozen_dict.py feature-detects it;
+# this marker is what stops the external package being installed alongside it.
+frozendict; python_version < '3.15'

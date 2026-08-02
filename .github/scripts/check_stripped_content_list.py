@@ -46,9 +46,16 @@ SHIPPED_ALLOWLIST = {
                         # screen and the persistent TUI header, and retained for every
                         # codename indefinitely (docs/MAINTENANCE.md §1) — a running
                         # instance genuinely needs its own version's banner.
-    "requirements.txt", # runtime dependency set; Update API installs per-service venvs
-                        # from it on every clone. Note requirements-dev.txt and
-                        # pyproject.toml are dev-only below — that split is the point.
+    "requirements.txt", # the aggregate/dev-convenience set — what a contributor installs into
+                        # one venv so the whole test suite runs in a single environment.
+                        # Production venvs are NOT built from this: per-service venvs compose
+                        # common/requirements.txt plus each service's own requirements.txt
+                        # (docs/VENV_AND_IMPORTS.md §4), which ship inside core/ and services/
+                        # and are therefore already covered by those entries above. Still
+                        # classified shipped because a running instance is a clone, and a clone
+                        # is also where a re-provision would be run from. Note
+                        # requirements-dev.txt and pyproject.toml are dev-only below — that
+                        # split is the point.
 }
 
 # Stripped by strip_development_content() in normal mode. This is the

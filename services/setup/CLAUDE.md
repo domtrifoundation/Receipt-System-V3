@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.00`
+`a03.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -45,5 +45,14 @@ valid the moment it is removed, and this file is what future sessions will have 
 Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed fields, so they use `common/frozen_dict.py`'s `FrozenDict` rather than a plain `dict` (`docs/PRINCIPLES.md` §2.1). Any `isinstance` check against one must test `collections.abc.Mapping`, never `dict` — the 3.15 builtin is not a `dict` subclass. Module-level lookup tables in this folder are `FrozenDict` too, per §2.1.1.
 
 ## Real gotchas specific to this folder
+
+**Partially implemented.** `contracts.py` and `venv_provisioning.py` are real; hardware detection (§5), the wizard (§7), `bootstrap.py`, and `dev_mode_strip.py` are still 0-byte scaffolding. `contracts.py` says so at the top so a future session does not mistake it for a finished file.
+
+**Files here that the deep-dive's §2 package layout does not list**, with the reason:
+- `venv_provisioning.py` — per-service venv creation, the mechanism behind the "dependency installation" this API's own §1 has always claimed to own but never described. Full design in [`docs/VENV_AND_IMPORTS.md`](../../docs/VENV_AND_IMPORTS.md). It sits here rather than in Update API for the same reason `dev_mode_strip.py` does: Setup provisions the *first* clone, Update's `release_manager.py` provisions every subsequent one, and one shared implementation is what stops the two drifting (`docs/PRINCIPLES.md` §1.5).
+
+**Venvs hold third-party packages only.** First-party code resolves from the clone root on `PYTHONPATH` — nothing installs this project into a venv. If you are tempted to add `pip install -e .`, read `docs/VENV_AND_IMPORTS.md` §3 first: across N clones × 32 venvs, editable installs' failure mode is importing *another clone's* code, which is exactly what the clone-per-release model exists to prevent.
+
+**Per-service venvs isolate dependencies, not namespaces.** The whole clone is on `PYTHONPATH`, so a service *can* physically import a sibling's modules. The rule that it must not — gRPC and injected `Protocol` seams, never a direct `core.x` import — stays enforced by review and the `contracts.py`-only convention. Do not assume the venv boundary is enforcing it.
 
 Idempotent, safely re-runnable *is* the fix for V2's sprawl — not a nicer wrapper around the same fragility. A self-referential script must never move or delete itself while running (fragile everywhere, worse on Windows with locked executing files): the setup script's last action hands off to this API's own Python finalize routine. `strip_development_content()` is shared with Update API's `release_manager.py` rather than reimplemented, so the two strip lists cannot drift.

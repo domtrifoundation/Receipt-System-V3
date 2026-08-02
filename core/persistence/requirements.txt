@@ -1,0 +1,23 @@
+# Persistence API — third-party runtime dependencies beyond `common/requirements.txt`.
+#
+# This package has the widest third-party footprint of any Core API, and it is the clearest
+# single argument for the per-service venv split (`docs/PROCESS_TOPOLOGY.md` §1): none of these
+# belong anywhere near Auth's or OCR's environment, and bundling them all into one shared venv
+# is a real version-pinning conflict surface, not a hypothetical one.
+#
+# All are imported lazily inside the provider that needs them, so a target left unconfigured
+# degrades to unavailable rather than failing the service (`docs/PRINCIPLES.md` §4.4).
+
+# --- Blob backup targets, both genuinely active at once (deep-dive §5) -------
+# Per `docs/PRINCIPLES.md` §1.2, B2 and Storj run in parallel as corroborating targets rather
+# than one being swapped for the other — so both are real requirements, not alternatives.
+b2sdk>=2.0
+boto3>=1.34                  # Storj's S3-compatible endpoint
+
+# --- Archive Sync: Google Drive provider -------------------------------------
+google-api-python-client>=2.100        # imported as `googleapiclient`
+
+# --- Export Framework + Reimport: real .xlsx read/write ----------------------
+# Both the live-formula summary-sheet export and the reimport parser depend on this; it is not
+# an optional nicety for either path.
+openpyxl>=3.1
