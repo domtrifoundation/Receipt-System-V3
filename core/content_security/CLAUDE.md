@@ -12,6 +12,16 @@ deliberate-jump discipline `x03.00.00` itself follows: Zircon is the first stabl
 this generation, not a running total of the commits that got there. `MM` increments again on
 any subsequent breaking change to this API within V3's lifetime.
 
+## Current API version
+
+`a01.00.00`
+
+The **running** value, distinct from the Zircon target above. The target states where this
+API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
+in the same commit as any change to this API's own behaviour, alongside the program's own
+`pp` in `common/version.py` — see `CONTRIBUTING.md`'s versioning section for the standing
+practice and why both move together.
+
 ## Full design
 
 **During development (deep-dive corpus still present)**: [`docs/apis/v3-deepdive-27-content-security-api.md`](../../docs/apis/v3-deepdive-27-content-security-api.md) —

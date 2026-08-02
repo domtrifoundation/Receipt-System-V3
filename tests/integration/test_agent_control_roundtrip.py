@@ -14,8 +14,17 @@ from __future__ import annotations
 import io
 import json
 
-import grpc
 import pytest
+
+# grpc is a hard, real dependency for this specific test module — not a genuinely optional
+# one — but `nox -s forward_compat` (noxfile.py) deliberately runs marker-selected tests in
+# a minimal venv that doesn't install it (grpcio-tools has no prebuilt wheel yet for 3.15;
+# see the noxfile's own docstring). A bare `import grpc` here would crash pytest's
+# *collection* pass before marker filtering ever runs, since pytest must import every module
+# under `testpaths` to discover what's in it. `importorskip` fails collection of this module
+# alone, cleanly, when grpc is absent — every other test file collects and runs normally,
+# and on a real dev environment (grpc installed) nothing here changes at all.
+grpc = pytest.importorskip("grpc")
 
 from common.frozen_dict import FrozenDict
 from core.agent_control.contracts import AgentAction, AgentRateLimit, ToolCategory, utcnow
