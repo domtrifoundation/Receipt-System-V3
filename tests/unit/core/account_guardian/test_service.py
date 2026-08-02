@@ -11,13 +11,22 @@ for a client-role caller, never quietly allow it.
 
 from __future__ import annotations
 
-import grpc
 import pytest
 
-from core.account_guardian.contracts import Role
-from core.account_guardian.service import AccountGuardianServicer
+# `nox -s forward_compat` deliberately installs a narrow dependency set that excludes grpcio,
+# because grpcio has no prebuilt wheel for 3.15 yet (noxfile.py's own module docstring, and
+# `docs/MAINTENANCE.md` §8.1). A bare module-level `import grpc` here does not just skip these
+# tests under that session — it breaks *collection*, which fails the whole forward_compat gate
+# on both interpreters including 3.14, where grpcio is fine. Skip rather than break, the same
+# graceful-degradation posture the rest of the project takes toward an unavailable optional
+# dependency (`docs/PRINCIPLES.md` §4.4), and the same guard `core/auth/`'s and `core/audit/`'s
+# own servicer tests already carry.
+grpc = pytest.importorskip("grpc", reason="grpcio is not installed in this interpreter")
 
-from .conftest import Aborted, run
+from core.account_guardian.contracts import Role  # noqa: E402
+from core.account_guardian.service import AccountGuardianServicer  # noqa: E402
+
+from .conftest import Aborted, run  # noqa: E402
 
 
 @pytest.fixture

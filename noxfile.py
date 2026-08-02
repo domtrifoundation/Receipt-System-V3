@@ -44,6 +44,15 @@ PYTHON_VERSIONS = ["3.14", "3.15"]
 FORWARD_COMPAT_DEPS = [
     "pytest",
     "frozendict; python_version < '3.15'",
+    # Needed at *collection* time, not by any forward_compat-marked test itself. `-m
+    # forward_compat` deselects tests, but pytest imports every test module before it can
+    # evaluate a marker, so an unmarked module whose import chain reaches `rapidfuzz`
+    # (tests/unit/core/{geo_address,matching,account_guardian,reconciliation}/... ->
+    # core.geo_address.reverse_check) raises a collection error that aborts the whole
+    # session. Adding it by name is what the module docstring above prescribes; the
+    # alternative of installing requirements.txt wholesale would drag in grpcio, which is
+    # the exact coupling that docstring explains avoiding.
+    "rapidfuzz>=3.0",
 ]
 
 
