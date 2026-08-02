@@ -20,7 +20,15 @@ models/*
 
 # Logs are rotated flat files with their own retention policy, deliberately never an
 # events table and never git-tracked (`v3-plan-01-core-apis.md` #13).
-logs/
+#
+# Anchored to the repository root deliberately. An unanchored `logs/` matches a directory
+# named `logs` at *any* depth, which silently swallowed `core/logs/` — the Logs API's own
+# source package — so Phase 1's scaffolding pass created 31 of the 32 Core API packages and
+# nothing reported the 32nd as missing, because `git add` had simply been told to ignore it.
+# The runtime log output this rule is actually for lives under the top-level installation
+# directory (`docs/PRINCIPLES.md` §1.6), a sibling of every release clone, or at the repo
+# root for a local dev run — never nested inside a source package.
+/logs/
 *.log
 
 # Persistence's canonical store and its snapshot checkpoints — never git-tracked; the
@@ -32,6 +40,24 @@ logs/
 *.db
 *.db-wal
 *.db-shm
+
+# Real receipt fixtures — never committed, ever.
+#
+# docs/PRE_STABLE_BENCH_VALIDATION.md requires real receipt scans for every Part 1 bench
+# item (synthetic substitutes are explicitly not acceptable there), and in the same breath
+# requires that those scans never enter git history: a real receipt carries a real TIN, a
+# real purchase history, sometimes a real name. Git history is effectively permanent and,
+# on this public repo, effectively public the moment it lands.
+#
+# The pattern is deliberately broad rather than one exact path. The validation doc names
+# `tests/fixtures/real_receipts/` as an example location ("or wherever this ends up
+# living"), and a rule that only covers the one path someone happened to write down is a
+# rule that fails the first time someone picks a different one.
+tests/fixtures/real_receipts/
+**/real_receipts/
+**/real_receipt_fixtures/
+tests/fixtures/**/*.heic
+tests/fixtures/**/*.HEIC
 
 # Sensitive internal documents that must never re-enter this public repository.
 # LEGAL_REVIEW_NEEDED.md is a formal compliance memorandum covering real penalty exposure
@@ -61,6 +87,11 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# nox (noxfile.py — Forward-Compatibility Pattern validation, docs/MAINTENANCE.md) already
+# self-excludes by writing its own `*`-only .gitignore inside .nox/ on first run, but that
+# file doesn't exist until nox has actually run once — an explicit entry here means a fresh
+# clone is protected before that ever happens, not just after.
+.nox/
 
 # Node / webapp
 node_modules/

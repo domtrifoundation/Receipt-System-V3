@@ -51,6 +51,7 @@ The full policy is `docs/PRINCIPLES.md` §3.3 (the Forward-Compatibility Pattern
 - `pillow-heif`, `pymupdf` — release version + free-threading support.
 - `authlib`, `cryptography` — release version + free-threading support.
 - `frozendict` (the PyPI package) — compatibility posture against the 3.15 builtin's exact semantics.
+- `grpcio` / `grpcio-tools` (shared between every Core API's own gRPC surface, `docs/PRINCIPLES.md` §1.7) — Python 3.15 wheel availability specifically. **Confirmed missing, empirically, not assumed**, while setting up Forward-Compatibility Validation (§8 below): pip falls back to building the full C++ grpc/abseil/protobuf stack from source against a 3.15 beta on Windows, and that build failed here for both `grpcio-tools` and plain `grpcio` alone. Re-check once 3.15 reaches its own stable release, which is typically when grpc's wheel builds catch up.
 - RapidOCR's bundled ONNX models — currency relative to PaddleOCR's own newer model generations.
 - ClamAV's virus-definition database — freshness, a security-critical dataset check distinct from the `pyclamd` package version.
 - The Python interpreter itself — 3.14t/3.15 adoption readiness, tracked like any other dependency, not a one-time migration decision.
@@ -148,3 +149,39 @@ This is the right general pattern for any admin-gated command run non-interactiv
 **Copilot custom instructions — set up, but not relied on as real enforcement.** `.github/instructions/*.instructions.md` files with an `applyTo` path-glob frontmatter block are a real, GitHub-documented mechanism for scoping Copilot's automated PR review to specific parts of the repo — four are already written in this repo (`core-apis.instructions.md`, `providers.instructions.md`, `dependencies.instructions.md`, `grpc.instructions.md`), matching the highest-stakes PR template categories. **A genuine, current caveat worth stating plainly rather than glossed over**: multiple community reports (as recent as February 2026) describe Copilot's automated PR-review agent sometimes ignoring custom instructions entirely and falling back to generic review output, apparently because the automated reviewer runs on a different execution path than the interactive Copilot Chat surface, which does reliably read them. Set these files up since they're low-cost and the mechanism is real — but the actual hard enforcement in this project stays with `pr_checklist_enforcement.yml` and branch protection, since that path is deterministic (it parses text, it doesn't depend on an LLM reliably choosing to apply a file it was given). Treat Copilot's own review as a helpful second opinion, not a control this project's own hygiene depends on.
 
 **This is a real, one-time setup action someone needs to actually perform** — writing this section down doesn't turn the setting on by itself, the same way writing a `docs_ref` citation doesn't substitute for a lawyer reviewing the actual Terms of Service text (`v3-deepdive-06-account-guardian-api.md` §7). Worth doing before the first real PR lands, not after — a rule added retroactively doesn't apply to anything already merged under the honor system.
+
+## 8. Forward-Compatibility Validation — the concrete mechanism, not just the policy
+
+`docs/PRINCIPLES.md` §3.3.1 states *what* needs periodic validation across this project's supported Python versions (anything touching `FrozenDict`'s actual resolved type, any GIL-protected assumption, any `asyncio` behavior that differs across versions, PEP 734 subinterpreters) and *why*. This section is the operational mechanism that actually does it — the same "PRINCIPLES states the rule, MAINTENANCE states how it operates day to day" split already used for the Forward-Compatibility Pattern itself (§3 above).
+
+**Two separate mechanisms, for two separate needs — don't conflate them:**
+
+### 8.1 Automated test validation — `nox -s forward_compat`
+`noxfile.py` at the repo root runs the subset of tests marked `@pytest.mark.forward_compat` (registered in `pytest.ini`) against both 3.14 and 3.15, each in its own isolated venv:
+
+```bash
+nox -s forward_compat        # both interpreters
+nox -s forward_compat-3.15   # just the newer one
+nox -s forward_compat_316    # manual, once a 3.16 build exists locally — genuinely optional
+```
+
+nox rather than tox, specifically for Python-native session config — this matters once sessions are filtering to a specific marked subset rather than just running everything. It requires both interpreters to actually be installed and discoverable; if 3.15 isn't there, the session fails loudly rather than silently skipping, since a missing interpreter is a real environment gap to fix, not something to route around. On Windows, nox finds `3.14`/`3.15` through the `py` launcher automatically — no `python3.14`-style PATH entry is needed the way Linux/macOS or a pyenv install would produce.
+
+**Tag a test `@pytest.mark.forward_compat` going forward whenever it specifically validates FrozenDict/free-threading/asyncio-version-sensitive behavior** — not retroactively across the whole suite, and not on a test that merely happens to import a module that also touches those things. `tests/unit/test_forward_compat_frozen_dict.py` is the first real example: it empirically confirms `common.frozen_dict.FrozenDict` resolves to the actual Python 3.15+ builtin (`type(FrozenDict).__module__ == "builtins"`) rather than silently still using the external PyPI package once a newer interpreter makes the marker-scoped install a no-op — precisely the §3.3.1 gap stated above, made concrete and checked rather than assumed.
+
+**Why this session installs a narrow, explicit dependency list (`pytest`, `frozendict`) rather than the project's full `requirements.txt`, confirmed empirically rather than assumed while setting this up**: `grpcio` and `grpcio-tools` have no prebuilt wheel yet for CPython 3.15 — pip falls back to compiling the entire C++ grpc/abseil/protobuf stack from source, and on this project's own dev machine that build genuinely failed against a 3.15 beta (confirmed for both `grpcio-tools` and plain `grpcio` alone, not just the codegen tool). That's a real, current Day-0 gap in an upstream dependency — added to the tracked-dependency inventory in §3 above — not a reason to make the fast, frequent-cadence compat check depend on it. None of the tests currently marked `forward_compat` import `grpc` at all. If a future `forward_compat`-marked test genuinely needs a package `requirements.txt` also carries, add that package to `noxfile.py`'s own dependency list explicitly — don't switch the session over to installing `requirements.txt` wholesale, which would reintroduce exactly this coupling.
+
+### 8.2 Manual runtime selection — `PYTHON_BIN`
+For actually running the program itself under a chosen interpreter, by hand — a genuinely different need from §8.1's automated test subset. `start.bat`/`start.sh` both respect a `PYTHON_BIN` environment-variable override:
+
+```bash
+./start.sh                          # default pinned interpreter (currently 3.14)
+PYTHON_BIN=python3.15 ./start.sh    # the whole system running under 3.15
+```
+
+Unset, always, on a real end-user install — those get their interpreter from Setup API's own environment detection and never touch this variable. It exists for a dev checkout, to hands-on test against a non-default interpreter ahead of (or alongside) a `forward_compat` review. **On Windows, there is usually no bare `python3.15` command even when 3.15 is genuinely installed** — the `py` launcher resolves a specific version there instead, so the override is passed as one quoted variable: `PYTHON_BIN="py -3.15" ./start.sh`.
+
+Verified for real, both directions, not just written and assumed: with `PYTHON_BIN` unset and `python` on `PATH` resolving to the pinned 3.14, `start.sh` launches Agent Control's own gRPC service (`core/agent_control/service.py` — the one real, running Core API as of Phase 1; every other API's launcher target is still scaffolding, and this script's `exec` line is expected to be replaced with a real Supervisor invocation once Supervisor itself is real code) and the running process's own `sys.executable`/`sys.version` — printed at startup specifically so this is checkable from outside the process rather than trusted on faith — confirmed `Python314\python.exe`, `3.14.6`. With `PYTHON_BIN="py -3.15"`, the exact same `exec $PYTHON_BIN` expansion was independently confirmed to resolve to `Python315\python.exe`, `3.15.0b4` — the override genuinely switches interpreters. That second run then hit the same missing-`grpc`-on-3.15 gap §8.1 already documents, which is an environment fact about an upstream dependency, not a defect in the `PYTHON_BIN` mechanism itself.
+
+### 8.3 The real cadence — not a one-time setup
+Run `nox -s forward_compat` after finishing each API's own implementation — a natural per-API checkpoint — and again as a required gate before tagging `x03.00.00`. **This is not optional once set up.** Treat a skipped validation checkpoint the same as a skipped version-tick on a commit (§1 above) — an incomplete unit of work, not a minor omission. This doesn't mean every PR needs a nox run (§3.3.1's own "recommendation, not a hard requirement for every PR" still holds) — it means the checkpoints above are non-negotiable when they come due, the same way a version tick isn't optional on the commit that triggers it.
