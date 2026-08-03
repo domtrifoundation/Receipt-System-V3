@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.04`
+`a03.00.05`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -68,4 +68,9 @@ Idempotent, safely re-runnable *is* the fix for V2's sprawl — not a nicer wrap
 
 **`bootstrap.py` also copies `LAUNCHER_SCRIPT_NAMES` (`start.bat`/`start.sh`) to the install root and writes `config/install.json`'s `dev_mode` flag** — two real §4/§1.6/§4.1 steps that were missing from the original sequence. Launcher copy overwrites on every finalize (every update is a fresh clone, and the install root's own launcher should track whichever clone most recently finalized); the install config is written exactly once and never overwritten, per §4.1's own "not something asked again on every subsequent update."
 
-**`bootstrap.py`'s own `python -m services.setup.bootstrap <clone_dir> [--dev-mode]` CLI is the real handoff target `installer/common.sh` invokes.** This was genuinely missing and un-exercised for a while during development — the top-level `installer/*.sh` scripts clone real committed history, and testing them against *uncommitted* working-tree changes to this file silently exercises the *previous* commit's version instead, which looks like a working end-to-end flow using pytest (pytest reads the working tree directly) while the actual installer script would clone something else entirely. Worth remembering the next time this file changes: commit before testing `installer/` against it, not after.
+**`bootstrap.py`'s own `python -m services.setup.bootstrap <clone_dir> [--dev-mode]` CLI is the real handoff target `installer/common.sh`/`installer/common.bat` invoke.** This was genuinely missing and un-exercised for a while during development — the top-level `installer/*.sh`/`*.bat` scripts clone real committed history, and testing them against *uncommitted* working-tree changes to this file silently exercises the *previous* commit's version instead, which looks like a working end-to-end flow using pytest (pytest reads the working tree directly) while the actual installer script would clone something else entirely. Worth remembering the next time this file changes: commit before testing `installer/` against it, not after.
+
+**`installer/` is a real, top-level, dev-only source tree** (`services/setup/dev_mode_strip.py`'s own `DEV_ONLY_STRIP_LIST`, `.github/workflows/release_installer.yml`) — `setup.bat`/`setup.sh`/`setup-dev.bat`/`setup-dev.sh` plus a `common.bat`/`common.sh` each pair shares (`docs/PRINCIPLES.md` §1.5). Two real, hard-won gotchas from building and live-testing these against actual `cmd.exe`/`bash`, not just reasoning about them:
+
+- **Every `.bat` file here is deliberately ASCII-only with CRLF line endings.** An early UTF-8, LF-only draft made `cmd.exe`'s parser try to execute fragments of prose comments as commands — not a hypothetical, a real failure hit and diagnosed live. `findstr` also needs `/c:"exact phrase"` for a multi-word literal match; without it, `findstr` silently OR-splits the search string into separate single-word patterns, matching almost every line in the file rather than the one intended.
+- **A `goto`/label combination inside a parenthesized `if (...)`/`for (...)` block parses unreliably in batch** — confirmed with a real `") was unexpected at this time"` parser error. Every control-flow branch in `common.bat` is deliberately flat (`if ... goto :label`, labels outside any parens) for exactly this reason; do not "clean up" the flat structure back into nested parenthesized blocks, it will reintroduce the same parse failure.

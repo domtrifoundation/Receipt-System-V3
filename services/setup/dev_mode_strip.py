@@ -93,6 +93,15 @@ DEV_ONLY_STRIP_LIST = frozenset(
         # --- classified in Phase 1.5, when multi-version validation was set up ---------
         "noxfile.py",  # drives `nox -s forward_compat` — a dev-time test-runner invocation,
         #                same category as pytest.ini, never invoked by the shipped program.
+        # --- classified when the release/installer pipeline was built -------------------
+        "installer",  # setup.bat/setup.sh/setup-dev.bat/setup-dev.sh/common.bat/common.sh —
+        #                the SOURCE for the bootstrap ZIPs .github/workflows/release_installer.yml
+        #                publishes to GitHub Releases, not something a running clone reads.
+        #                Their whole job is producing the *first* clone (docs/apis/
+        #                v3-deepdive-11-setup-api.md §4: "the ZIP contains only the bootstrap
+        #                script, not a source snapshot") — meaningless once a clone already
+        #                exists, the same category as noxfile.py/pytest.ini being meaningless
+        #                once installed.
     }
 )
 

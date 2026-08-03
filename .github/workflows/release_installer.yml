@@ -1,0 +1,79 @@
+# Publishes the bootstrap installer ZIPs to GitHub Releases (Setup API deep-dive section 4).
+#
+# One GitHub Release per OS, each a thin ZIP containing only the bootstrap script(s) -- "not a
+# source snapshot" -- exactly as that section specifies. installer/ (this repo's own source for
+# the scripts) is classified dev-only in dev_mode_strip.py's DEV_ONLY_STRIP_LIST; it never ships
+# inside a running clone. This workflow is what turns that source into the two real assets a
+# fresh install actually downloads.
+#
+# Manually triggered only (workflow_dispatch) -- this repo is public and pre-x03.00.00 (no
+# Stable/Beta/Alpha channel tags exist yet), so there is no natural "ship a release on every
+# merge" trigger the way a mature channel-tag promotion would have. The release cadence for
+# these scripts is "whenever the bootstrap script itself changes," genuinely rarer than
+# PROGRAM_VERSION's own per-commit tick -- an explicit human decision each time, not automation
+# tied to ordinary commits.
+#
+# The release is always marked prerelease: true while this project has not tagged x03.00.00 --
+# these installers are real and functional today, but they bootstrap a pre-release codebase,
+# and GitHub's own prerelease flag is the honest signal for that.
+
+name: Release Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Release tag. Distinct from PROGRAM_VERSION's own x00.00.NN scheme on purpose -- this
+          tags the INSTALLER SCRIPTS' own release cadence, not the program's. Defaults to
+          installer-<run number> if left blank.
+        required: false
+        default: ""
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=installer-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package the Linux/macOS installer
+        run: |
+          mkdir -p dist
+          zip -j dist/resibo-installer-linux-macos.zip \
+            installer/setup.sh installer/setup-dev.sh installer/common.sh
+
+      - name: Package the Windows installer
+        run: |
+          mkdir -p dist
+          zip -j dist/resibo-installer-windows.zip \
+            installer/setup.bat installer/setup-dev.bat installer/common.bat
+
+      - name: Publish the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          name: "Installer ${{ steps.tag.outputs.value }}"
+          prerelease: true
+          body: |
+            Bootstrap installer scripts for DOMTRI/Resibo V3 (Setup API deep-dive section 4).
+
+            Download the ZIP for your OS, extract it, and run `setup` (normal) or `setup-dev`
+            (development) -- see docs/MAINTENANCE.md section 5 for the full walkthrough.
+
+            **This project has not reached x03.00.00 yet.** No Stable/Beta/Alpha channel has a
+            release tag as of this build; the installer falls back to the latest development
+            commit (`main`) and says so plainly when it does.
+          files: |
+            dist/resibo-installer-linux-macos.zip
+            dist/resibo-installer-windows.zip
