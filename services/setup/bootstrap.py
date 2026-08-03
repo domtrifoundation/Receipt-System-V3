@@ -28,6 +28,7 @@ __all__ = [
     "TOP_LEVEL_SETUP_FILES",
     "cleanup_top_level_setup_files",
     "copy_launcher_scripts",
+    "ensure_wizard_dependencies",
     "finalize_clone",
     "read_dev_mode",
     "run_first_run_wizard",
@@ -200,16 +201,67 @@ def wizard_command(clone_dir: Path, install_root: Path) -> list[str]:
     ]
 
 
+def _interface_venv_interpreter(clone_dir: Path) -> Path:
+    return venv_provisioning.venv_python(
+        clone_dir / venv_provisioning.VENVS_DIRNAME / "services.interface"
+    )
+
+
+def ensure_wizard_dependencies(clone_dir: Path) -> tuple[bool, str]:
+    """Verifies the interface venv's own interpreter can actually `import textual` before
+    handing control to it — `venv_provisioning.provision_service`'s own success report
+    (`error=None`) is a real, honest signal at the moment it's produced, but is not
+    re-verified here as a guarantee: a real-world install can still end up with a venv
+    that reports clean and doesn't actually have the package importable (a partial
+    install from a transient network blip, antivirus interference with concurrent venv
+    creation on Windows, or any number of other environment-specific causes this module
+    cannot diagnose in the general case). One bounded repair attempt — re-running the
+    same `pip install -r requirements.txt` this venv was already supposed to get — before
+    giving up cleanly. Never leaves the operator looking at a raw Python traceback for
+    this specific, recoverable case.
+    """
+    interpreter = _interface_venv_interpreter(clone_dir)
+    if not interpreter.exists():
+        return False, f"{interpreter} does not exist — services.interface's venv was never created."
+
+    check = subprocess.run([str(interpreter), "-c", "import textual"], capture_output=True, text=True)
+    if check.returncode == 0:
+        return True, ""
+
+    req = clone_dir / "services" / "interface" / "requirements.txt"
+    if not req.is_file():
+        return False, f"{req} is missing from this clone — cannot repair."
+
+    repair = subprocess.run([str(interpreter), "-m", "pip", "install", "-r", str(req)], capture_output=True, text=True)
+    if repair.returncode != 0:
+        detail = (repair.stderr or repair.stdout or "no output captured").strip()
+        return False, f"repair install failed: {detail}"
+
+    recheck = subprocess.run([str(interpreter), "-c", "import textual"], capture_output=True, text=True)
+    if recheck.returncode == 0:
+        return True, ""
+    detail = (check.stderr or check.stdout or "no output captured").strip()
+    return False, f"textual still not importable after a repair install attempt: {detail}"
+
+
 def run_first_run_wizard(clone_dir: Path, install_root: Path) -> bool:
     """Runs the real interactive wizard, inheriting this process's own stdio so it's
     genuinely interactive in the same terminal the operator is already looking at —
     never captured/piped, since a wizard the operator can't see or answer isn't a wizard.
 
-    Returns whether it completed successfully (exit code 0). Never raises for a non-zero
-    exit — an operator who quits out of setup partway through is a real, reportable
-    outcome (`docs/PRINCIPLES.md` §4.1's errors-as-data posture), not a crash in this
-    module.
+    Returns whether it completed successfully. Never raises for a non-zero wizard exit —
+    an operator who quits out of setup partway through is a real, reportable outcome
+    (`docs/PRINCIPLES.md` §4.1's errors-as-data posture), not a crash in this module.
+    Checks `ensure_wizard_dependencies` first and reports a clear, actionable message
+    instead of a raw traceback if the interface venv genuinely can't run it.
     """
+    ok, detail = ensure_wizard_dependencies(clone_dir)
+    if not ok:
+        print(f"Skipping the wizard — its own dependencies aren't available: {detail}")
+        print("The install itself is unaffected; re-run the wizard later with:")
+        print(f"  {_interface_venv_interpreter(clone_dir)} -m services.interface.tui.wizard_entrypoint <launcher> <install_root>")
+        return False
+
     env = dict(os.environ)
     env["PYTHONPATH"] = str(clone_dir)
     result = subprocess.run(wizard_command(clone_dir, install_root), cwd=str(clone_dir), env=env)

@@ -9,11 +9,11 @@ directory away, not a hypothetical.
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
-
-import os
 
 from services.setup import bootstrap
 from services.setup.bootstrap import (
@@ -303,9 +303,14 @@ def test_wizard_command_names_the_real_os_appropriate_launcher(tmp_path):
     assert cmd[4] == str(install_root)
 
 
+def _skip_dependency_check(monkeypatch) -> None:
+    monkeypatch.setattr(bootstrap, "ensure_wizard_dependencies", lambda clone_dir: (True, ""))
+
+
 def test_run_first_run_wizard_returns_true_on_a_real_zero_exit(tmp_path, monkeypatch):
     clone = tmp_path / "clone"
     clone.mkdir()
+    _skip_dependency_check(monkeypatch)
     monkeypatch.setattr(bootstrap, "wizard_command", lambda c, root: [sys_executable(), "-c", "import sys; sys.exit(0)"])
 
     assert run_first_run_wizard(clone, tmp_path / "install") is True
@@ -314,6 +319,7 @@ def test_run_first_run_wizard_returns_true_on_a_real_zero_exit(tmp_path, monkeyp
 def test_run_first_run_wizard_returns_false_on_a_real_nonzero_exit_never_raises(tmp_path, monkeypatch):
     clone = tmp_path / "clone"
     clone.mkdir()
+    _skip_dependency_check(monkeypatch)
     monkeypatch.setattr(bootstrap, "wizard_command", lambda c, root: [sys_executable(), "-c", "import sys; sys.exit(1)"])
 
     assert run_first_run_wizard(clone, tmp_path / "install") is False
@@ -322,12 +328,76 @@ def test_run_first_run_wizard_returns_false_on_a_real_nonzero_exit_never_raises(
 def test_run_first_run_wizard_sets_pythonpath_to_the_clone_dir(tmp_path, monkeypatch):
     clone = tmp_path / "clone"
     clone.mkdir()
+    _skip_dependency_check(monkeypatch)
     monkeypatch.setattr(
         bootstrap, "wizard_command",
         lambda c, root: [sys_executable(), "-c", "import os, sys; sys.exit(0 if os.environ.get('PYTHONPATH') == sys.argv[1] else 1)", str(clone)],
     )
 
     assert run_first_run_wizard(clone, tmp_path / "install") is True
+
+
+def test_run_first_run_wizard_never_launches_the_wizard_when_dependencies_are_missing(tmp_path, monkeypatch):
+    """The real fix for a real live bug: a venv that reports clean provisioning but
+    doesn't actually have textual importable must never reach a raw traceback — it must
+    be caught and reported cleanly before the interactive subprocess is even attempted."""
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    monkeypatch.setattr(bootstrap, "ensure_wizard_dependencies", lambda clone_dir: (False, "textual not importable"))
+    called = []
+    monkeypatch.setattr(bootstrap, "wizard_command", lambda c, root: called.append(1) or [sys_executable(), "-c", "import sys; sys.exit(0)"])
+
+    result = run_first_run_wizard(clone, tmp_path / "install")
+
+    assert result is False
+    assert called == []
+
+
+# --- ensure_wizard_dependencies -----------------------------------------------------------
+
+
+def test_ensure_wizard_dependencies_reports_a_missing_interpreter_clearly(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_interface_venv_interpreter", lambda clone_dir: tmp_path / "nope" / "python.exe")
+
+    ok, detail = bootstrap.ensure_wizard_dependencies(tmp_path)
+
+    assert ok is False
+    assert "does not exist" in detail
+
+
+def test_ensure_wizard_dependencies_succeeds_when_textual_is_already_importable(tmp_path, monkeypatch):
+    """Uses this test run's own real interpreter (which genuinely has textual installed,
+    the same dev venv every test in this session runs under) as a stand-in for a
+    correctly-provisioned interface venv — real subprocess check, not mocked."""
+    monkeypatch.setattr(bootstrap, "_interface_venv_interpreter", lambda clone_dir: Path(sys_executable()))
+
+    ok, detail = bootstrap.ensure_wizard_dependencies(tmp_path)
+
+    assert ok is True
+    assert detail == ""
+
+
+@pytest.mark.slow
+def test_ensure_wizard_dependencies_repairs_a_venv_missing_textual(tmp_path, monkeypatch):
+    """A real, live-tested repair: a genuine venv created without textual, matching the
+    live bug's own reported shape (provisioning reported clean, textual wasn't actually
+    importable) -- confirms the one-shot pip-install repair actually fixes it."""
+    clone = tmp_path / "clone"
+    (clone / "services" / "interface").mkdir(parents=True)
+    (clone / "services" / "interface" / "requirements.txt").write_text("textual>=0.60\n", encoding="utf-8")
+
+    venv_dir = tmp_path / "bare_venv"
+    subprocess.run([sys_executable(), "-m", "venv", str(venv_dir)], check=True)
+    interpreter = venv_python(venv_dir)
+    assert interpreter.exists()
+
+    monkeypatch.setattr(bootstrap, "_interface_venv_interpreter", lambda clone_dir: interpreter)
+
+    ok, detail = bootstrap.ensure_wizard_dependencies(clone)
+
+    assert ok is True, detail
+    check = subprocess.run([str(interpreter), "-c", "import textual"], capture_output=True, text=True)
+    assert check.returncode == 0
 
 
 def sys_executable() -> str:

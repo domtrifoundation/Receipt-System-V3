@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.03`
+`a02.00.04`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -93,12 +93,24 @@ Every engine binding is imported *inside* its own engine module and lazily (`doc
   machine is Windows, so only the platform gate itself (`OcrEnginePlatformUnsupported`)
   is exercised for real here; the `Vision`/`Quartz` call path inside the macOS branch has
   not been run on real hardware this session.
-- **`opencv-python`, `pymupdf`, `rapidocr-onnxruntime`, and `numpy` have no prebuilt wheel
-  for Python 3.15 yet** (still beta as of this writing) — the same gap Preprocessing API's
-  own `CLAUDE.md` documents, for the same reason. `PaddleOCR`/`boto3` are simply not
-  installed in this development environment at all (heaviest local engine and a cloud SDK,
-  both genuinely opt-in) — their adapters degrade to unavailable, a real, live-confirmed
-  outcome rather than a gap in what got tested.
+- **`opencv-python`, `pymupdf`, and `numpy` have no prebuilt wheel for Python 3.15 yet**
+  (still beta as of this writing) — the same gap Preprocessing API's own `CLAUDE.md`
+  documents, for the same reason. `PaddleOCR`/`boto3` are simply not installed in this
+  development environment at all (heaviest local engine and a cloud SDK, both genuinely
+  opt-in) — their adapters degrade to unavailable, a real, live-confirmed outcome rather
+  than a gap in what got tested.
+- **`rapidocr-onnxruntime` is a real, separate, worse gap than the note above — confirmed
+  live against a real install, not assumed from a changelog.** It has no published version
+  supporting Python **3.13 or later at all** — every release through 1.4.4 caps at
+  `Requires-Python >=3.6,<3.13`. This was live-confirmed the hard way: a real `setup.bat`
+  run on this Python-3.14 development machine deterministically failed venv provisioning
+  for this whole service, which failed the entire install's `finalize_clone()` — one
+  optional engine's own missing wheel blocking the whole program from ever finishing
+  setup, directly contradicting this file's own header comment's promise that a missing
+  OCR dependency degrades gracefully. `core/ocr/requirements.txt` now marks this package
+  `; python_version < '3.13'` so pip skips attempting it entirely past that point, instead
+  of failing the venv — RapidOCR correctly reports unavailable at runtime on 3.13+, the
+  rest of OCR's engines are unaffected.
 - **RapidOCR's own wrapper (`rapidocr_onnxruntime`, this installed version, checked by
   reading its actual source rather than assumed) does NOT expose the deep-dive's full
   §5.1 execution-provider list at all — only a single boolean `use_cuda` flag.**
