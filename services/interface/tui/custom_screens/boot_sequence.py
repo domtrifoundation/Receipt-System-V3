@@ -18,6 +18,7 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, ProgressBar, Static
 
+from services.interface.tui.banners import ascii_banner
 from services.interface.tui.i18n import t
 from supervisor.boot_sequence import boot_many
 from supervisor.contracts import BootReport, ServiceLaunchResult, ServiceSpec
@@ -47,6 +48,7 @@ class BootSequenceScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
+            Static(ascii_banner(), id="boot-banner"),
             Static(t("boot.title", self._locale), id="boot-title"),
             ProgressBar(total=max(len(self._specs), 1), id="boot-progress"),
             Static("", id="boot-log"),

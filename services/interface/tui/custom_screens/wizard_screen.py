@@ -21,6 +21,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, ListItem, ListView, Static
 
 from common.frozen_dict import FrozenDict
+from services.interface.tui.banners import ascii_banner
 from services.interface.tui.custom_screens.wizard_script import WIZARD_SCRIPT, WizardChoice
 from services.setup.contracts import WizardAnswer, WizardState
 from services.setup.wizard import WizardEngine
@@ -42,6 +43,7 @@ class WizardScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
+            Static(ascii_banner(), id="wizard-banner"),
             Static("", id="wizard-title"),
             Static("", id="wizard-body"),
             ListView(id="wizard-choices"),

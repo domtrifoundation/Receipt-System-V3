@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.07`
+`a03.00.08`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -67,6 +67,8 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 Idempotent, safely re-runnable *is* the fix for V2's sprawl — not a nicer wrapper around the same fragility. A self-referential script must never move or delete itself while running (fragile everywhere, worse on Windows with locked executing files): the setup script's last action hands off to this API's own Python finalize routine. `strip_development_content()` is shared with Update API's `release_manager.py` rather than reimplemented, so the two strip lists cannot drift.
 
 **`bootstrap.py` also copies `LAUNCHER_SCRIPT_NAMES` (`start.bat`/`start.sh`) to the install root and writes `config/install.json`'s `dev_mode` flag** — two real §4/§1.6/§4.1 steps that were missing from the original sequence. Launcher copy overwrites on every finalize (every update is a fresh clone, and the install root's own launcher should track whichever clone most recently finalized); the install config is written exactly once and never overwritten, per §4.1's own "not something asked again on every subsequent update."
+
+**`bootstrap.py`'s own CLI now actually runs the interactive first-run wizard in normal mode — it did not before.** `run_first_run_wizard()`/`wizard_command()`, called from `__main__` right after a successful `finalize_clone()`, only on the non-`--dev-mode` path (§4.1's own normal/dev split). This re-execs into `.venvs/services.interface/`'s own provisioned interpreter to run `services/interface/tui/wizard_entrypoint.py` — Setup's own `bootstrap.py` process has no `textual` dependency itself and never will (`services/interface/requirements.txt` is a new file, Interface API's own, that is what actually gets `textual` into the interface service's venv during `venv_provisioning.provision_clone()`, itself a step inside the same `finalize_clone()` call). Live-confirmed the whole chain resolves through a freshly-provisioned real venv, not just this repo's own dev `.venv`.
 
 **`bootstrap.py`'s own `python -m services.setup.bootstrap <clone_dir> [--dev-mode]` CLI is the real handoff target `installer/common.sh`/`installer/common.bat` invoke.** This was genuinely missing and un-exercised for a while during development — the top-level `installer/*.sh`/`*.bat` scripts clone real committed history, and testing them against *uncommitted* working-tree changes to this file silently exercises the *previous* commit's version instead, which looks like a working end-to-end flow using pytest (pytest reads the working tree directly) while the actual installer script would clone something else entirely. Worth remembering the next time this file changes: commit before testing `installer/` against it, not after.
 

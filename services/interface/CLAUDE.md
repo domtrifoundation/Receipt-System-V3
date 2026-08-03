@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.02`
+`a02.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -110,13 +110,43 @@ device-login flow for Tunnel Exposure, PSP credential entry for Billing, SMS pro
 credentials/sender-name registration) are not implemented inline — selecting "set this up
 now" on those three submits a real, valid *skip* and shows "isn't available inline yet,
 configure later in Settings," the same honest-placeholder discipline as the five unbuilt
-custom screens above, rather than a fabricated credential form. **This screen is not yet
-wired into `app.py`/`bootstrap.py`'s own real first-run flow** — it exists and works
-end-to-end against a `WizardEngine`, but nothing yet constructs one from a real
-`HardwareProfile`/gateway set and launches `WizardScreen` as the actual first thing a
-fresh install shows; that wiring is the next real step, not done in this pass.
+custom screens above, rather than a fabricated credential form. **Now genuinely wired into the real install flow, closing the gap the previous pass left
+open.** `services/setup/bootstrap.py`'s `__main__` CLI — the exact thing `installer/
+common.bat`/`common.sh` invoke as `python -m services.setup.bootstrap <clone_dir>
+[--dev-mode]` — now calls `run_first_run_wizard()` after `finalize_clone()` succeeds, on
+the normal (non-`--dev-mode`) path only. Real, live-confirmed chain: `services/interface/
+requirements.txt` (new — `textual>=0.60`) is what gets the interface service's own
+`.venvs/services.interface/` provisioned with `textual` in the first place, since
+`bootstrap.py` itself runs under the bare pinned interpreter and has no dependencies of
+its own beyond the standard library; `wizard_command()`/`run_first_run_wizard()` then
+re-exec into that now-provisioned venv's own interpreter to run `services/interface/tui/
+wizard_entrypoint.py` — a small, real, standalone `App` hosting `WizardScreen` — with
+inherited stdio, so it's genuinely interactive in the operator's own terminal. Confirmed
+live: the module chain imports cleanly through a freshly-provisioned real venv (not just
+inside this repo's own dev `.venv`).
+
+**Why the previous pass's gap actually mattered, stated plainly**: the wizard *screen* was
+real and tested in isolation, but nothing in the actual installer path ever invoked it —
+a real user running `setup.bat` got a silent clone-and-finalize with no wizard at all,
+confirmed live against a real published installer release before this fix. Documenting a
+gap in `CLAUDE.md` is not the same as closing it; this entry records that it is now
+actually closed, not just known about.
+
 `TERMS_OF_SERVICE`'s own persistence gap (`services/setup/wizard.py`'s own docstring —
-validates acceptance, persists nothing) is unchanged by this pass.
+validates acceptance, persists nothing) is still unchanged — every wizard collaborator is
+still `None` at this point in the lifecycle (no Core API service is running yet), so the
+wizard's own answers are captured and written to `config/wizard_state.json`
+(`wizard_entrypoint.py`'s `write_wizard_state`) but not yet propagated into a real owner
+account, tenancy config, etc. — that requires Auth & the rest of the fleet to actually be
+running, which only happens after this wizard completes and Supervisor's own Boot
+Sequence takes over.
+
+**The pre-Zircon `"BETA"` ASCII banner** (`tui/banners/`, `common/version.py`'s
+`MAJOR_CODENAMES["00"] = "Beta"`) is shown large on the Boot Sequence screen and the
+Wizard screen, and as a compact header line atop the root menu — pure ASCII (`#`/space
+block art, not Unicode box-drawing), specifically because a real live test on this
+Windows machine hit a `UnicodeEncodeError` on the console's own `cp1252` codepage with the
+initial Unicode-box-drawing version; kept pure ASCII to be safe on any console codepage.
 
 **`boot_sequence.py` (Supervisor) gained a new, optional `on_result` callback parameter in
 this same pass** — backward-compatible (defaults to `None`, every pre-existing caller and

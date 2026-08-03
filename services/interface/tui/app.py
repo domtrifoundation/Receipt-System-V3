@@ -22,6 +22,7 @@ from pathlib import Path
 
 from textual.app import App
 
+from services.interface.tui.banners import header_line
 from services.interface.tui.custom_screens.boot_sequence import BootSequenceScreen
 from services.interface.tui.custom_screens.credits import CreditsScreen
 from services.interface.tui.i18n import DEFAULT_LOCALE, t
@@ -96,8 +97,13 @@ class InterfaceApp(App):
             self.push_screen(MenuScreen(f"Boot failed: {failed}", (), resolver=self._resolver, locale=self._locale))
 
     def _push_root_menu(self) -> None:
+        # The persistent codename header (`v3-plan-02-architecture.md`'s own "(b)
+        # persistently at the top of the TUI's main menu navigation, smaller/header-style"
+        # placement) — small, one line, distinct from the Boot Sequence screen's own full
+        # ASCII banner.
         root_items = tuple(i for i in ALL_MENU_ITEMS if "." not in i.path)
-        self.push_screen(MenuScreen(t("app.title", self._locale), root_items, resolver=self._resolver, locale=self._locale))
+        title = f"{header_line()} — {t('app.title', self._locale)}"
+        self.push_screen(MenuScreen(title, root_items, resolver=self._resolver, locale=self._locale))
 
 
 __all__ = ["InterfaceApp"]

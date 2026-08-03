@@ -14,7 +14,9 @@ Update finalizes every subsequent one, one implementation so the two cannot drif
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from . import dev_mode_strip, venv_provisioning
@@ -28,6 +30,8 @@ __all__ = [
     "copy_launcher_scripts",
     "finalize_clone",
     "read_dev_mode",
+    "run_first_run_wizard",
+    "wizard_command",
     "write_install_config",
 ]
 
@@ -178,6 +182,40 @@ async def finalize_clone(
     )
 
 
+def wizard_command(clone_dir: Path, install_root: Path) -> list[str]:
+    """The real command used to launch the interactive first-run wizard — a pure function
+    so the exact invocation is unit-testable without spawning a real interactive
+    subprocess (`services/interface/tui/wizard_entrypoint.py`'s own module docstring
+    explains why this runs from `services.interface`'s own provisioned venv rather than
+    the bare interpreter this module itself runs under).
+    """
+    interpreter = venv_provisioning.venv_python(
+        clone_dir / venv_provisioning.VENVS_DIRNAME / "services.interface"
+    )
+    launcher_name = "start.bat" if os.name == "nt" else "start.sh"
+    launcher_path = install_root / launcher_name
+    return [
+        str(interpreter), "-m", "services.interface.tui.wizard_entrypoint",
+        str(launcher_path), str(install_root),
+    ]
+
+
+def run_first_run_wizard(clone_dir: Path, install_root: Path) -> bool:
+    """Runs the real interactive wizard, inheriting this process's own stdio so it's
+    genuinely interactive in the same terminal the operator is already looking at —
+    never captured/piped, since a wizard the operator can't see or answer isn't a wizard.
+
+    Returns whether it completed successfully (exit code 0). Never raises for a non-zero
+    exit — an operator who quits out of setup partway through is a real, reportable
+    outcome (`docs/PRINCIPLES.md` §4.1's errors-as-data posture), not a crash in this
+    module.
+    """
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(clone_dir)
+    result = subprocess.run(wizard_command(clone_dir, install_root), cwd=str(clone_dir), env=env)
+    return result.returncode == 0
+
+
 if __name__ == "__main__":  # pragma: no cover
     import argparse
     import asyncio
@@ -215,6 +253,21 @@ if __name__ == "__main__":  # pragma: no cover
             print("finalize FAILED — this clone is not eligible for Boot Sequence.", file=sys.stderr)
             return 1
         print("finalize complete.")
+
+        if not args.dev_mode:
+            # Normal mode is the immersive, interactive first-run experience (§4.1) — the
+            # wizard genuinely runs here, not skipped. Dev mode stays deliberately silent
+            # per that same section; no call happens at all on that path.
+            install_root = args.clone_dir.resolve().parent.parent
+            print("\nStarting the first-run setup wizard...\n")
+            wizard_ok = run_first_run_wizard(args.clone_dir.resolve(), install_root)
+            if not wizard_ok:
+                print(
+                    "Wizard did not complete (quit early or failed) — you can re-run it "
+                    "later; this does not affect the install itself.",
+                    file=sys.stderr,
+                )
+
         return 0
 
     sys.exit(asyncio.run(_main()))

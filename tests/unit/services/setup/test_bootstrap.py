@@ -13,6 +13,9 @@ from pathlib import Path
 
 import pytest
 
+import os
+
+from services.setup import bootstrap
 from services.setup.bootstrap import (
     INSTALL_CONFIG_RELPATH,
     LAUNCHER_SCRIPT_NAMES,
@@ -21,9 +24,11 @@ from services.setup.bootstrap import (
     copy_launcher_scripts,
     finalize_clone,
     read_dev_mode,
+    run_first_run_wizard,
+    wizard_command,
     write_install_config,
 )
-from services.setup.venv_provisioning import BASE_REQUIREMENTS_RELPATH
+from services.setup.venv_provisioning import BASE_REQUIREMENTS_RELPATH, venv_python
 
 
 def _install_root_with_clone(tmp_path: Path) -> tuple[Path, Path]:
@@ -267,3 +272,64 @@ def test_finalize_clone_copies_launchers_and_writes_install_config(tmp_path):
     assert (install_root / "start.sh").exists()
     assert report.install_config_written is True
     assert read_dev_mode(install_root) is False
+
+
+# --- wizard_command / run_first_run_wizard ------------------------------------------------
+# The real thing bootstrap.py's __main__ invokes in normal mode — the piece that was
+# entirely missing before this pass, which is why the wizard never actually ran for a real
+# installer user despite the wizard screen itself being built and tested in isolation.
+
+
+def test_wizard_command_points_at_the_interface_venvs_own_interpreter(tmp_path):
+    clone = tmp_path / "clone"
+    install_root = tmp_path / "install"
+    interface_venv = clone / ".venvs" / "services.interface"
+    expected_python = venv_python(interface_venv)
+
+    cmd = wizard_command(clone, install_root)
+
+    assert cmd[0] == str(expected_python)
+    assert cmd[1:3] == ["-m", "services.interface.tui.wizard_entrypoint"]
+
+
+def test_wizard_command_names_the_real_os_appropriate_launcher(tmp_path):
+    clone = tmp_path / "clone"
+    install_root = tmp_path / "install"
+
+    cmd = wizard_command(clone, install_root)
+
+    launcher_name = "start.bat" if os.name == "nt" else "start.sh"
+    assert cmd[3] == str(install_root / launcher_name)
+    assert cmd[4] == str(install_root)
+
+
+def test_run_first_run_wizard_returns_true_on_a_real_zero_exit(tmp_path, monkeypatch):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    monkeypatch.setattr(bootstrap, "wizard_command", lambda c, root: [sys_executable(), "-c", "import sys; sys.exit(0)"])
+
+    assert run_first_run_wizard(clone, tmp_path / "install") is True
+
+
+def test_run_first_run_wizard_returns_false_on_a_real_nonzero_exit_never_raises(tmp_path, monkeypatch):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    monkeypatch.setattr(bootstrap, "wizard_command", lambda c, root: [sys_executable(), "-c", "import sys; sys.exit(1)"])
+
+    assert run_first_run_wizard(clone, tmp_path / "install") is False
+
+
+def test_run_first_run_wizard_sets_pythonpath_to_the_clone_dir(tmp_path, monkeypatch):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    monkeypatch.setattr(
+        bootstrap, "wizard_command",
+        lambda c, root: [sys_executable(), "-c", "import os, sys; sys.exit(0 if os.environ.get('PYTHONPATH') == sys.argv[1] else 1)", str(clone)],
+    )
+
+    assert run_first_run_wizard(clone, tmp_path / "install") is True
+
+
+def sys_executable() -> str:
+    import sys
+    return sys.executable
