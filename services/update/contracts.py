@@ -1,10 +1,9 @@
 """Update/Deployment API's data contracts — types only, no logic (`docs/PRINCIPLES.md` §1.1).
 
-**Scoped narrowly, deliberately.** This session builds only what the release/installer pipeline
-needs: `ChannelName` (the four user-selectable channels plus the owner-only Latest-Commit one,
-`v3-deepdive-24-update-deployment-api.md` §2's own `contracts.py` line names `Channel`) and
-Keymaster's own client-side contracts (§4). `ReleaseDirectory` and the rest of §2's sketch arrive
-with `release_manager.py`, which is not part of this session's scope.
+**`ReleaseDirectory`/`ReleaseCloneResult` arrive this session, alongside `release_manager.py`.**
+The wire shape matches `installer/common.sh`'s own real, live-tested clone flow exactly — that
+shell script is the pre-Python reference implementation of this same operation and the two must
+never drift (see `release_manager.py`'s own module docstring).
 
 **Keymaster is a completely separate, closed external system, not part of this repo**
 (`v3-plan-02-architecture.md`: "licensing lives entirely outside the `receipt-system-v3`
@@ -18,12 +17,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
+
+from services.setup.contracts import BootstrapReport
 
 __all__ = [
     "ChannelName",
+    "ChannelUsage",
     "KeymasterRejectionReason",
     "KeymasterResult",
     "KeymasterToken",
+    "ReleaseCloneResult",
+    "ReleaseDirectory",
 ]
 
 
@@ -64,6 +69,57 @@ class KeymasterRejectionReason(str, Enum):
 class KeymasterToken:
     token: str
     expires_at: datetime
+
+
+@dataclass(frozen=True)
+class ReleaseDirectory:
+    """One cloned, named release directory (`<version>_<commit-hash>`, `docs/MAINTENANCE.md`
+    §2) — the unit Update API produces and Supervisor's Boot Sequence launches from.
+
+    `path` is the real filesystem location; every other field is read out of the fresh clone
+    itself (`common/version.py`'s `PROGRAM_VERSION`, `git rev-parse --short HEAD`) rather than
+    guessed, matching `installer/common.sh`'s own live-tested "whatever that ref actually
+    contains, not whatever this installer script happened to ship with."
+    """
+
+    path: Path
+    version: str
+    commit_hash: str
+    ref: str
+    channel: ChannelName
+
+
+@dataclass(frozen=True)
+class ReleaseCloneResult:
+    """The outcome of one `clone_release()` call. Errors are data (`docs/PRINCIPLES.md` §4.1)
+    — a failed clone or a failed finalize both come back here, never raised.
+    """
+
+    ok: bool
+    release: ReleaseDirectory | None = None
+    finalize: BootstrapReport | None = None
+    used_fallback_ref: bool = False
+    """True when the requested channel had no tag/branch yet and this clone fell back to
+    `main` — `installer/common.sh`'s own real behaviour during pre-release development
+    (`docs/MAINTENANCE.md` §2: "this project is still in pre-release development")."""
+    keymaster_token_used: bool = False
+    error_code: str = ""
+    error_detail: str = ""
+
+
+@dataclass(frozen=True)
+class ChannelUsage:
+    """One channel's own recorded clone history (`GetActiveChannels`) — "which channels
+    have configured/active usage," distinct from Supervisor's own `GetActiveRelease`
+    ("which specific directory is live for a channel right now"). Derived from this
+    module's own real clone activity (`release_manager.record_channel_usage`), not from a
+    separate, not-yet-built per-user channel-selection config — see `release_manager.py`'s
+    own docstring for the honest scope of what this actually answers.
+    """
+
+    channel: ChannelName
+    last_release_name: str
+    last_cloned_at: datetime
 
 
 @dataclass(frozen=True)
