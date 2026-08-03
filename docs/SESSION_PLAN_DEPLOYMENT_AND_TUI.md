@@ -28,23 +28,20 @@ test_runner.py (BenchDispatcherRegistry + real Docker subprocess isolation check
 promotion.py, changelog_watcher.py (thin, non-triggering), proto + service.py. 19 tests,
 all live-confirmed against real HTTP servers / real Docker-absence detection.
 
-## Phase 3 — Supervisor (`supervisor/`) — the real "server"
+## Phase 3 — Supervisor (`supervisor/`) — the real "server" — DONE
 
-All 0 bytes currently except CLAUDE.md. This is the most load-bearing piece — nothing else in
-Layer 1 starts without it per the boot sequence.
-- [ ] `contracts.py` — `ActiveRelease`, `ServiceState`, `SleepPolicy`, `ServiceVersionPin`
-- [ ] `arbitration.py` — per-channel active-release resolution
-- [ ] `boot_sequence.py` — dependency-ordered launch, Watchdog health-gate between each
-- [ ] `rollback.py` — revert `ActiveRelease` to prior release dir on post-cutover health failure
-- [ ] `self_update/reexec.py` — two-phase verified re-exec with `--smoke-test`
-- [ ] `sleep_wake/` — `classification.py` (NEVER/IDLE_TIMEOUT/SCHEDULED_ONLY per the deep-dive's
-  own named service list), `socket_activation_linux.py`, `activation_proxy_windows.py`
-- [ ] `errors.py`
-- [ ] `supervisor.proto` + service.py — `GetActiveRelease`, `TriggerRollback`,
-  `GetSleepStatus`, `ForceWake`, `PinServiceVersion`, `ListServiceVersionPins`,
-  `RestartServiceOnVersion` (streaming)
-- [ ] Tests, live-confirmed: boot a small set of fake/real services in dependency order against
-  real health checks, confirm rollback path, confirm sleep/wake classification.
+All built, all live-confirmed against real launched subprocesses (`core/geo_address/service.py`),
+a real Windows TCP echo server, and a real two-phase self-update flow. 65 tests.
+`contracts.py`, `errors.py`, `arbitration.py` (persisted per-channel active-release JSON),
+`boot_sequence.py` (topological launch order + real `grpc.aio` reachability health gate —
+honestly documented as narrower than a Watchdog `Kick()` liveness check, since no Core API
+built this session calls `Kick()` yet), `rollback.py`, `single_instance.py`, `version_pins.py`,
+`sleep_wake/classification.py` + `state.py` + `socket_activation_linux.py` (unit-file text only,
+unverified against real systemd) + `activation_proxy_windows.py` (real, live-tested relay),
+`self_update/reexec.py` (two-phase verified re-exec, `--smoke-test`), `supervisor.proto` +
+`service.py`. Two real bugs found and fixed: `_spawn()` wasn't passing `spec.address` as argv
+to the launched subprocess (every service silently bound its own hardcoded default instead),
+and `tests/unit/supervisor/test_service.py`'s `REPO_ROOT` was off by one parent directory.
 
 ## Phase 4 — Verification sweep
 
