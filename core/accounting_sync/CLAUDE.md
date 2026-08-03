@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.00`
+`a01.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -47,16 +47,48 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 
 One-way push only. Bidirectional sync against an external system's own schema is a real problem that is explicitly deferred, not overlooked. OAuth connections are per-user, never system-wide, and tokens are stored encrypted and structurally separate from queryable business data. The no-OAuth file exports for the same two platforms are Export Framework providers, not this API.
 
+## Real gotchas specific to this folder (continued)
+
+- **QuickBooks (`providers/quickbooks.py`) and Xero (`providers/xero.py`) are NOT
+  live-tested this session** — neither `intuitlib`/`python-quickbooks` nor `xero-python`
+  is installed in this environment (confirmed: both raise `ModuleNotFoundError` here),
+  and there are no real app credentials to authenticate against even if they were. Both
+  adapters are built directly from each SDK's own published API shape, the same honesty
+  posture `core/inference/backends/onnx_genai_backend.py`'s own module docstring takes
+  for its own unverified library calls. What IS live-tested and confirmed real: the
+  unconfigured/SDK-missing degrade path (`is_available()` correctly reports `False`),
+  `TokenStore`'s real `Fernet` encryption round-trip (including a wrong-key `InvalidToken`
+  failure), the flagged-receipt exclusion path, and the full servicer assembly with fake
+  provider adapters standing in for the real SDKs.
+- **`FlagChecker` has no real implementation — `NoOpFlagChecker` (`service.py`) is the
+  shipped default, and it never excludes anything.** `core/review_flagging/` owns the
+  real flag lifecycle (`contracts.py`, `db.py`, `gateways.py`, `lifecycle.py` are all
+  real) but has no gRPC proto/`service.py`/generated stubs at all yet (confirmed by
+  directory listing), and this project's own process-topology rule means Accounting Sync
+  cannot reach into another API's internals directly even in the same repo — every
+  Core API talks to every other one over gRPC only. This is a real, named, deliberately
+  NOT-fabricated gap: deep-dive §6/§9's own flagged-receipt-exclusion rule is
+  structurally correct and tested (`test_sync_engine.py`'s
+  `test_flagged_receipt_is_excluded_before_touching_the_provider` and
+  `test_service.py`'s equivalent servicer-level test both use a real, working
+  `FlagChecker` fake), but the *shipped default* used until Review/Flagging ships a
+  gRPC surface cannot enforce it at all. `AccountingSyncServicer.__init__`'s own
+  `flag_checker` parameter exists specifically so wiring in a real one later is a
+  one-line change here, not a rewrite.
+- **`Purchase`/`BankTransaction` push is one-way and does not verify the record survived
+  a provider-side edit or deletion** — deep-dive §4's own explicit scope boundary,
+  confirmed structurally by `test_sync_engine.py`'s
+  `test_provider_protocol_exposes_no_pull_or_read_back_method` (fails the moment
+  `AccountingSyncProvider` grows a pull/fetch/read-back method).
+- **The one-time, no-OAuth QuickBooks IIF / Xero CSV export path is deliberately NOT
+  here** — see "What this API explicitly does NOT own" above; that's an Export
+  Framework provider pair, not this package.
+
 ## Implementation status
 
-**Not implemented.** Every `.py` file in this folder is a 0-byte scaffold created by the Phase-1
-commit that laid out the repository, and no commit since has put a line of logic into any of
-them. Everything above this section describes the design this package will have, not code that
-exists — a distinction worth stating in the one file a future session is most likely to read
-first, because the folder's file list looks exactly like an implemented package from the
-outside.
-
-Nothing outside this folder imports from it yet, so the emptiness is inert rather than a broken
-dependency. Building it is a full Core API pass against the deep-dive linked above, with the
-`new_core_api` and `new_provider` templates in `docs/templates/`. **Delete this section in the
-commit that implements the package** — a stale "not implemented" note is worse than none.
+Implemented this session — `contracts.py`, `errors.py`, `token_store.py` (real `Fernet`
+encryption), `mapping.py`, `providers/base.py` + `quickbooks.py` + `xero.py`,
+`metrics.py`, `sync_engine.py` (the real assembly wiring providers + `FlagChecker` +
+metrics together), `persistence_client.py`, `service.py` + `accounting_sync.proto` +
+generated stubs. 41 tests, all passing, including the three deep-dive §9-named tests
+(one-way boundary, flagged-receipt exclusion, credential isolation).

@@ -1,0 +1,19 @@
+# Accounting Sync API — third-party runtime dependencies beyond `common/requirements.txt`.
+#
+# Every provider's own SDK import lives lazily inside its adapter module
+# (`docs/PRINCIPLES.md` §3.3 point 5) — a missing SDK degrades that one provider to
+# unavailable, it never fails this service at process start (§4.4). Neither SDK is
+# installed in this development environment (confirmed via direct `ModuleNotFoundError`
+# checks); both provider adapters are built from each library's own published API shape
+# but not live-tested against it this session — see `providers/quickbooks.py` and
+# `providers/xero.py`'s own module docstrings.
+
+# --- QuickBooks Online (deep-dive §3, §10) -----------------------------------------------
+intuit-oauth>=1.2.6
+python-quickbooks>=0.9
+
+# --- Xero (deep-dive §3, §10) --------------------------------------------------------------
+xero-python>=8.0
+
+# --- Token encryption at rest (deep-dive §5) ----------------------------------------------
+cryptography>=42.0

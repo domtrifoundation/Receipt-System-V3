@@ -1,0 +1,78 @@
+// Accounting Sync API gRPC surface (`v3-deepdive-50-accounting-sync.md` §8).
+//
+// One-way push only (§4) — there is no pull/import RPC anywhere in this surface, by
+// design, not omission.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only
+// ever added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair, never a bare gRPC status for anything a caller needs
+// to branch on. `SyncConnection`'s own no-token-material guarantee (contracts.py) is
+// structural here too — no message below has a field a token could ever land in.
+
+syntax = "proto3";
+
+package resibo.accounting_sync.v1;
+
+service AccountingSyncService {
+  rpc InitiateAuth(InitiateAuthRequest) returns (InitiateAuthResponse);
+  rpc CompleteAuth(CompleteAuthRequest) returns (CompleteAuthResponse);
+  rpc GetSyncStatus(SyncStatusRequest) returns (SyncStatusResponse);
+  rpc Disconnect(DisconnectRequest) returns (DisconnectResponse);
+  rpc PushReceipt(PushReceiptRequest) returns (PushReceiptResponse);
+}
+
+message InitiateAuthRequest {
+  string user_id = 1;
+  string provider = 2;  // "quickbooks" | "xero"
+}
+
+message InitiateAuthResponse {
+  string url = 1;
+  string state = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message CompleteAuthRequest {
+  string user_id = 1;
+  string provider = 2;
+  map<string, string> callback_params = 3;  // e.g. code, realmId (QuickBooks), state
+}
+
+message CompleteAuthResponse {
+  string external_account_id = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message SyncStatusRequest {
+  string user_id = 1;
+  string provider = 2;
+}
+
+message SyncStatusResponse {
+  bool connected = 1;
+}
+
+message DisconnectRequest {
+  string user_id = 1;
+  string provider = 2;
+}
+
+message DisconnectResponse {
+}
+
+message PushReceiptRequest {
+  string user_id = 1;
+  string provider = 2;
+  string receipt_id = 3;
+  string vendor_display_name = 4;  // optional override — see mapping.py
+}
+
+message PushReceiptResponse {
+  string external_record_id = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
