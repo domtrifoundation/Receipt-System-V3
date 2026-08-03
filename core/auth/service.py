@@ -440,3 +440,37 @@ async def serve(servicer: AuthServicer, address: str = DEFAULT_ADDRESS) -> grpc.
 
 
 __all__ = ["DEFAULT_ADDRESS", "AuthServicer", "serve"]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import asyncio
+    import sys
+
+    async def _main() -> None:
+        addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
+
+        from .auth_methods.base import AuthMethodRegistry
+        from .auth_methods.two_factor import TwoFactorGate
+        from .break_glass.grant import BreakGlassLedger
+        from .challenges import ChallengeStore
+        from .session.session_store import SessionStore
+        from .store import AuthDatabase, UserDirectory
+        from .tenancy import resolve_profile
+
+        db = AuthDatabase()
+        profile = resolve_profile(None)
+        directory = UserDirectory(db)
+        servicer = AuthServicer(
+            profile=profile,
+            registry=AuthMethodRegistry(),
+            sessions=SessionStore(db),
+            directory=directory,
+            two_factor=TwoFactorGate(directory, profile),
+            break_glass=BreakGlassLedger(db),
+            challenges=ChallengeStore(db),
+        )
+        srv = await serve(servicer, addr)
+        print(f"listening on {addr}", file=sys.stderr)
+        await srv.wait_for_termination()
+
+    asyncio.run(_main())

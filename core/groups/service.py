@@ -30,7 +30,7 @@ from .membership import AuditRecorder, GroupMembershipService
 from .permission_gate import PermissionGate, SessionResolver
 from .store import GroupsStore
 
-DEFAULT_ADDRESS = "127.0.0.1:50062"
+DEFAULT_ADDRESS = "127.0.0.1:50067"
 
 
 def _group_entry(pb, group: Group):
@@ -196,3 +196,17 @@ def serve(
 
 
 __all__ = ["DEFAULT_ADDRESS", "GroupsServicer", "serve"]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import asyncio
+    import sys
+
+    async def _main() -> None:
+        addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
+        srv = serve(addr)
+        await srv.start()
+        print(f"listening on {addr}", file=sys.stderr)
+        await srv.wait_for_termination()
+
+    asyncio.run(_main())

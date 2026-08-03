@@ -15,6 +15,7 @@ from .engine_registry import OcrConfig, OcrEngineRegistry
 from .metrics import OcrMetricsCollector
 
 DEFAULT_ADDRESS = "127.0.0.1:50071"
+PERSISTENCE_ADDRESS = "127.0.0.1:50076"
 
 
 class OcrServicer:
@@ -105,10 +106,10 @@ if __name__ == "__main__":  # pragma: no cover
 
     async def _main():
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        raise SystemExit(
-            "No default blob_store is wired up yet — this module needs a real "
-            "Persistence blob-store client to run standalone. Construct OcrServicer with "
-            "a real client from whatever process assembles this service."
-        )
+        from common.blob_client import GrpcBlobStoreClient
+        client = GrpcBlobStoreClient(PERSISTENCE_ADDRESS)
+        srv = await serve(addr, blob_store=client)
+        print(f"listening on {addr}", file=sys.stderr)
+        await srv.wait_for_termination()
 
     asyncio.run(_main())

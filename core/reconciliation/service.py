@@ -33,7 +33,7 @@ from .contracts import CheckOutcome, CheckResult, FlagEmitter, ReceiptSnapshot
 from .metrics import ReconciliationMetricsCollector
 from .propagation import propagate_correction
 
-DEFAULT_ADDRESS = "127.0.0.1:50071"
+DEFAULT_ADDRESS = "127.0.0.1:50075"
 
 
 class ReconciliationServicer:
@@ -166,3 +166,16 @@ async def serve(address: str = DEFAULT_ADDRESS):
 
 
 __all__ = ["DEFAULT_ADDRESS", "ReconciliationServicer", "propagate_correction", "serve"]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import asyncio
+    import sys
+
+    async def _main() -> None:
+        addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
+        srv = await serve(addr)
+        print(f"listening on {addr}", file=sys.stderr)
+        await srv.wait_for_termination()
+
+    asyncio.run(_main())

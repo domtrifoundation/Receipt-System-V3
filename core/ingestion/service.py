@@ -306,3 +306,20 @@ async def serve(address: str = DEFAULT_ADDRESS, *, blob_store: BlobStoreGateway)
     server.add_insecure_port(address)
     await server.start()
     return server
+
+
+PERSISTENCE_ADDRESS = "127.0.0.1:50076"
+
+if __name__ == "__main__":  # pragma: no cover
+    import asyncio
+    import sys
+
+    async def _main() -> None:
+        addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
+        from common.blob_client import GrpcBlobStoreClient
+        client = GrpcBlobStoreClient(PERSISTENCE_ADDRESS)
+        srv = await serve(addr, blob_store=client)
+        print(f"listening on {addr}", file=sys.stderr)
+        await srv.wait_for_termination()
+
+    asyncio.run(_main())

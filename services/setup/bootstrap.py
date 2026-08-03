@@ -21,6 +21,10 @@ from pathlib import Path
 
 from . import dev_mode_strip, venv_provisioning
 from .contracts import BootstrapReport, WebappBuilder
+from supervisor.arbitration import ChannelArbitrator
+from supervisor.install import install_supervisor, provision_supervisor_venv
+
+DEFAULT_SUPERVISOR_CHANNEL = "local"
 
 __all__ = [
     "INSTALL_CONFIG_RELPATH",
@@ -172,6 +176,15 @@ async def finalize_clone(
     launchers_copied = copy_launcher_scripts(clone_dir, install_root)
     config_written = write_install_config(install_root, dev_mode)
     cleaned = cleanup_top_level_setup_files(install_root)
+
+    # Supervisor's own top-level installation — the real, previously-missing deployment
+    # step. Only proceeds if venv provisioning actually succeeded; installing Supervisor
+    # against a clone that isn't eligible for Boot Sequence would just point the top-level
+    # launcher at something broken.
+    if provision_report.fully_provisioned:
+        install_supervisor(clone_dir, install_root)
+        provision_supervisor_venv(clone_dir, install_root, python_bin=python_bin)
+        ChannelArbitrator(install_root).set_active(DEFAULT_SUPERVISOR_CHANNEL, clone_dir)
 
     return BootstrapReport(
         strip=strip_report,

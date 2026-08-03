@@ -47,7 +47,7 @@ from .exports.registry import ExportRegistry
 from .reimport.contracts import ReimportRequest
 from .service import PersistenceService
 
-DEFAULT_ADDRESS = "127.0.0.1:50072"
+DEFAULT_ADDRESS = "127.0.0.1:50076"
 
 __all__ = ["DEFAULT_ADDRESS", "PersistenceGrpcServicer", "serve"]
 
@@ -428,3 +428,16 @@ async def serve(address: str = DEFAULT_ADDRESS, **servicer_kwargs):
     server.add_insecure_port(address)
     await server.start()
     return server
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import asyncio
+    import sys
+
+    async def _main() -> None:
+        addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
+        srv = await serve(addr)
+        print(f"listening on {addr}", file=sys.stderr)
+        await srv.wait_for_termination()
+
+    asyncio.run(_main())

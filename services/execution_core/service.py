@@ -33,7 +33,7 @@ from .metrics import ExecutionMetricsCollector
 from .scheduler import RunCoalescer, RunScheduler
 from .state_machine import ASSIGNABLE_STATES, transition
 
-DEFAULT_ADDRESS = "127.0.0.1:50070"
+DEFAULT_ADDRESS = "127.0.0.1:50068"
 
 #: How often `GetRunStatus` emits while a run is still in flight. A poll rather than a push
 #: because the run's progress lives in a registry rather than a queue; the interval is short
@@ -227,3 +227,16 @@ __all__ = [
     "serve",
     "utcnow",
 ]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import asyncio
+    import sys
+
+    async def _main() -> None:
+        addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
+        srv = await serve(addr)
+        print(f"listening on {addr}", file=sys.stderr)
+        await srv.wait_for_termination()
+
+    asyncio.run(_main())

@@ -30,7 +30,7 @@ from .providers.locationiq import LocationIQProvider
 from .providers.mapbox import MapboxProvider
 from .providers.nominatim_self_hosted import NominatimSelfHostedProvider
 
-DEFAULT_ADDRESS = "127.0.0.1:50062"
+DEFAULT_ADDRESS = "127.0.0.1:50066"
 
 
 def default_providers(

@@ -36,7 +36,7 @@ from .errors import ERROR_SUMMARIES, E_INVALID_REQUEST, ContentSecurityError
 from .pipeline import ContentScanner
 from .providers.base import ProviderRegistry
 
-DEFAULT_ADDRESS = "127.0.0.1:50062"
+DEFAULT_ADDRESS = "127.0.0.1:50064"
 
 #: What a caller sees when the servicer itself failed rather than a scan returning a verdict.
 #: `safe` is absent from this constant on purpose — it is constructed as False at every use.

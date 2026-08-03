@@ -40,6 +40,8 @@ def _install_root_with_clone(tmp_path: Path) -> tuple[Path, Path]:
     base_req = clone / BASE_REQUIREMENTS_RELPATH
     base_req.parent.mkdir(parents=True, exist_ok=True)
     base_req.write_text("", encoding="utf-8")
+    (clone / "supervisor").mkdir(parents=True, exist_ok=True)
+    (clone / "supervisor" / "__init__.py").write_text("", encoding="utf-8")
     for f in ("docs/apis/deepdive.md", "tests/unit/test_x.py", ".github/scripts/check.py"):
         p = clone / f
         p.parent.mkdir(parents=True, exist_ok=True)

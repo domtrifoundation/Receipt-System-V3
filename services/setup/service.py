@@ -33,7 +33,7 @@ from .hardware.report_import import DEFAULT_CANDIDATE_DIRS, find_and_merge
 from .venv_provisioning import provision_clone
 from .wizard import WizardEngine
 
-DEFAULT_ADDRESS = "127.0.0.1:50070"
+DEFAULT_ADDRESS = "127.0.0.1:50069"
 
 
 def _encode_map(data: Mapping) -> dict[str, str]:

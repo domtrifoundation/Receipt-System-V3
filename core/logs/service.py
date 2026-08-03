@@ -29,7 +29,7 @@ from .metrics import LogsMetricsCollector
 from .paths import default_log_root
 from .query import AccessChecker, LogReader
 
-DEFAULT_ADDRESS = "127.0.0.1:50058"
+DEFAULT_ADDRESS = "127.0.0.1:50059"
 DEFAULT_LIMIT = 1000
 
 
