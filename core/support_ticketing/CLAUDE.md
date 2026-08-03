@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -88,10 +88,22 @@ means their own, and an error for a request with an obvious correct answer is ju
   resolution ratio above is the only observable that would reveal that soft link silently
   breaking.
 
-**Known gap, flagged rather than silently filled**: §7 specifies a five-RPC surface and there is
-no `.proto` here yet, and `TicketStore` holds tickets in memory rather than in its own SQLite
-store — §6 calls this API "thin CRUD over its own small database", and that persistence adapter
-is a later wiring step. Every behaviour above is implemented and tested against the in-memory
-store, and swapping in persistence means changing where `_tickets`/`_messages` live, not the
-lifecycle around them. This joins the same open `.proto` question `core/tool_call/CLAUDE.md`,
-`core/background_workers/CLAUDE.md` and `core/migration/CLAUDE.md` record.
+**The `.proto` gap this section used to describe is now closed.** `support_ticketing.proto`
+defines `CreateTicket`/`PostMessage`/`GetTicketMessages`/`UpdateTicketStatus`/`AssignTicket`/
+`ListTickets`, and `service.py`'s `SupportTicketingServicer` wires the real `TicketStore` to
+all six (`GetTicketMessages` is a genuine addition beyond the deep-dive's own five-RPC sketch
+— `messages_for` was a real, tested capability with no RPC to reach it at all). Confirmed live:
+a full create -> assign -> reply -> resolve round trip; a different client denied
+`TICKET_ACCESS_DENIED` reading someone else's conversation; a non-owner staff member denied
+`ROLE_FORBIDDEN` taking over a colleague's assignment while an owner can; a closed ticket
+correctly rejecting reopening with `INVALID_STATUS_TRANSITION`; and a client's `ListTickets`
+call silently narrowed to their own tickets while staff sees every one.
+
+**`GrpcSessionResolver` (`service.py`) is genuinely synchronous, unlike every other gRPC
+client this session built** — `lifecycle.SessionResolver`'s own type is `Callable[[str],
+tuple[str, str] | None]`, not a coroutine function, so this uses a plain `grpc.insecure_channel`
+rather than `grpc.aio`. `TicketStore` itself remains in-memory (`_tickets`/`_messages` behind a
+real `threading.Lock`, not its own SQLite store) — that persistence-adapter wiring step is
+still open, tracked the same way `core/tool_call/CLAUDE.md`, `core/background_workers/
+CLAUDE.md` and `core/migration/CLAUDE.md` record their own equivalent gap; only the gRPC
+surface was built this pass.

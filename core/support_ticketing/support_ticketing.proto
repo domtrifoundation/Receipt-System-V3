@@ -1,0 +1,108 @@
+// Support Ticketing API gRPC surface (`v3-deepdive-52-support-ticketing.md` §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+//
+// `GetTicketMessages` is a real addition beyond the deep-dive's own §7 sketch (which named
+// only CreateTicket/PostMessage/UpdateTicketStatus/AssignTicket/ListTickets) —
+// `lifecycle.py`'s `TicketStore.messages_for` is a real, tested capability (with its own
+// deliberate "raise rather than return empty" access-denial behavior) that had no RPC to
+// reach it at all.
+
+syntax = "proto3";
+
+package resibo.support_ticketing.v1;
+
+service SupportTicketingService {
+  rpc CreateTicket(CreateTicketRequest) returns (TicketResponse);
+  rpc PostMessage(PostMessageRequest) returns (TicketMessageResponse);
+  rpc GetTicketMessages(GetTicketMessagesRequest) returns (ListMessagesResponse);
+  rpc UpdateTicketStatus(UpdateStatusRequest) returns (TicketResponse);
+  rpc AssignTicket(AssignRequest) returns (TicketResponse);
+  rpc ListTickets(ListTicketsRequest) returns (ListTicketsResponse);
+}
+
+message TicketInfo {
+  string ticket_id = 1;
+  string created_by = 2;
+  string subject = 3;
+  string status = 4;
+  string assigned_to = 5;
+  string related_receipt_id = 6;
+  string created_at = 7;          // RFC 3339
+  string updated_at = 8;          // RFC 3339
+}
+
+message TicketMessageInfo {
+  string ticket_id = 1;
+  string author = 2;              // "user" | "staff:<user_id>" — Ticket.author's own wire shape
+  string body = 3;
+  string posted_at = 4;           // RFC 3339
+}
+
+message CreateTicketRequest {
+  string session_id = 1;
+  string subject = 2;
+  string body = 3;
+  string related_receipt_id = 4;
+}
+
+message PostMessageRequest {
+  string session_id = 1;
+  string ticket_id = 2;
+  string body = 3;
+}
+
+message GetTicketMessagesRequest {
+  string session_id = 1;
+  string ticket_id = 2;
+}
+
+message ListMessagesResponse {
+  repeated TicketMessageInfo messages = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message UpdateStatusRequest {
+  string session_id = 1;
+  string ticket_id = 2;
+  string target_status = 3;       // "open" | "in_progress" | "resolved" | "closed"
+}
+
+message AssignRequest {
+  string session_id = 1;
+  string ticket_id = 2;
+  string assignee_user_id = 3;
+}
+
+message ListTicketsRequest {
+  string session_id = 1;
+  repeated string statuses = 2;
+  string created_by = 3;
+  string assigned_to = 4;
+  bool unassigned_only = 5;
+  string related_receipt_id = 6;
+  int32 limit = 7;
+}
+
+message TicketResponse {
+  TicketInfo ticket = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message TicketMessageResponse {
+  TicketMessageInfo message = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ListTicketsResponse {
+  repeated TicketInfo tickets = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
