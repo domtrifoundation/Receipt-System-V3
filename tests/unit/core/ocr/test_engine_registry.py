@@ -156,6 +156,30 @@ def test_run_times_out_a_slow_engine(blob_store):
     assert result.readings[0].error.code == OcrErrorCode.ENGINE_TIMEOUT
 
 
+def test_per_engine_timeout_ms_config_is_a_ceiling_a_caller_cannot_exceed(blob_store):
+    """§6's own `per_engine_timeout_ms` config value — a real, complete gap until
+    caught: a field declared and read by nothing, so a caller's own request timeout was
+    silently the only limit that ever applied, regardless of what an operator
+    configured. A request asking for *more* time than the configured ceiling must still
+    time out at the ceiling."""
+    blob_store.blobs["img1"] = b"fake-bytes"
+
+    class _SlowEngine(_FakeEngine):
+        async def read(self, image_bytes: bytes) -> EngineReading:
+            await asyncio.sleep(1.0)
+            return EngineReading(engine=self._name, text="too slow", duration_ms=1000)
+
+    fakes = {EngineName.TESSERACT: _SlowEngine(EngineName.TESSERACT)}
+    config = OcrConfig(per_engine_timeout_ms=50)
+    registry = _registry_with_fakes(fakes, blob_store, config)
+    request = OcrRequest(
+        run_id="r1", user_id="u1", image_ref=BlobRef(logical_id="img1"),
+        engines=frozenset({EngineName.TESSERACT}), timeout_ms=10_000,  # caller asks for much more time
+    )
+    result = run(registry.run(request))
+    assert result.readings[0].error.code == OcrErrorCode.ENGINE_TIMEOUT
+
+
 def test_cloud_budget_is_enforced_before_the_call_and_resets_per_run(blob_store):
     blob_store.blobs["img1"] = b"fake-bytes"
     call_count = {"n": 0}

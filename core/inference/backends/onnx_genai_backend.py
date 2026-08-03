@@ -36,8 +36,21 @@ optimization level, memory arena tuning, `intra_op`/`inter_op` thread counts) ar
 inside the downloaded model directory in current `onnxruntime-genai` versions, not through
 a separate Python-level session-options object the way raw `onnxruntime` exposes them, and
 verifying the exact JSON schema keys needs a real model directory to test against. Provider
-*options* (e.g. CUDA's own `device_id`) are attempted via `config.set_provider_option(...)`
-below, same confidence caveat as the provider-name mapping itself.
+*options* ARE implemented (`_provider_options()`, `config.set_provider_option(...)`) — CUDA's
+own `device_id`, and TensorRT's own engine-cache path/enable flags (§8.1's own "mandatory,
+not optional" requirement) — same confidence caveat as the provider-name mapping itself.
+
+**Vision/multimodal input (deep-dive §7) and the reasoning-model two-phase budget
+(§4.5) are both implemented, neither verified against real weights.** `generate()` takes
+`images`/`reasoning_marker`/`reasoning_token_budget` and `_run_one_pass()` branches to
+`og.MultiModalProcessor`/`og.Images.open_bytes()` when images are present (a genuinely
+different input path from the plain-text `tokenizer.encode()` one, not an optional extra
+parameter bolted onto it) and runs a real two-call thinking-then-answer sequence when a
+reasoning marker is configured. No preset actually shipped today uses either path
+(`presets.py`'s own `reasoning_marker: None` on both current entries) — these exist so a
+future vision/reasoning preset has real, callable logic behind it rather than a config
+field with nothing wired to it, which is exactly what `reasoning_token_budget` was before
+this was caught and fixed: a real field, read by nothing.
 
 `onnxruntime_genai` is imported lazily inside `load()`/`generate()`, never at module level
 — an install without it (the common case for a fresh checkout before Setup API's wizard
@@ -68,6 +81,29 @@ _PROVIDER_NAMES: dict[str, str] = {
     "openvino": "OpenVINOExecutionProvider",  # low confidence — see module docstring
     "tensorrt": "NvTensorRtRtx",  # low confidence — see module docstring
 }
+
+
+def _provider_options(provider_name: str, model_dir: str) -> dict[str, str]:
+    """Provider-specific options passed via `config.set_provider_option(name, key,
+    value)` — same confidence caveat as `_PROVIDER_NAMES` itself (module docstring).
+
+    **TensorRT engine caching is deep-dive §8.1's own "mandatory, not optional"**: without
+    it, TensorRT builds/optimizes an engine from scratch on every single session creation
+    — a slow step that repeats on every process start rather than being paid once. Cached
+    under the model's own directory, since a cache built for one model+device+precision
+    combination is only ever valid for that exact combination anyway.
+    """
+    if provider_name in ("cuda",):
+        return {"device_id": "0"}
+    if provider_name == "NvTensorRtRtx":
+        import os
+
+        return {
+            "device_id": "0",
+            "trt_engine_cache_enable": "1",
+            "trt_engine_cache_path": os.path.join(model_dir, "trt_cache"),
+        }
+    return {}
 
 
 def build_prompt(messages: tuple[Message, ...]) -> str:
@@ -109,6 +145,8 @@ class OnnxGenAiBackend:
                 config = og.Config(model_dir)
                 config.clear_providers()
                 config.append_provider(provider_name)
+                for key, value in _provider_options(provider_name, model_dir).items():
+                    config.set_provider_option(provider_name, key, value)
                 self._model = og.Model(config)
             else:
                 # "cpu" (or an unrecognized device string — degrade to CPU rather than
@@ -131,30 +169,90 @@ class OnnxGenAiBackend:
         grammar_schema: dict | None,
         max_tokens: int,
         temperature: float,
+        images: tuple[bytes, ...] = (),
+        reasoning_marker: str | None = None,
+        reasoning_token_budget: int = 0,
     ) -> BackendGenerationOutput:
         if self._model is None or self._tokenizer is None:
             raise ModelLoadFailed("generate() called before a successful load()")
 
+        if reasoning_marker and reasoning_token_budget > 0:
+            # Deep-dive §4.5's own two-phase budget: a free-running "thinking" phase
+            # (no grammar active, its own separate budget), then a second call that
+            # continues from the accumulated thinking text into the real,
+            # schema-constrained answer. No reasoning-tuned preset is actually shipped
+            # today (deep-dive §12 — non-reasoning instruct presets only, by default),
+            # so this path is unverified against real weights the same way the rest of
+            # this backend is — but it is real, callable logic, not a config field with
+            # nothing behind it.
+            thinking_output = self._run_one_pass(
+                prompt, grammar_schema=None, max_tokens=reasoning_token_budget,
+                temperature=temperature, images=images, stop_marker=reasoning_marker,
+            )
+            combined_prompt = prompt + thinking_output.text
+            answer_output = self._run_one_pass(
+                combined_prompt, grammar_schema=grammar_schema, max_tokens=max_tokens,
+                temperature=temperature, images=images if not thinking_output.text else (),
+            )
+            return answer_output
+
+        return self._run_one_pass(
+            prompt, grammar_schema=grammar_schema, max_tokens=max_tokens,
+            temperature=temperature, images=images,
+        )
+
+    def _run_one_pass(
+        self,
+        prompt: str,
+        *,
+        grammar_schema: dict | None,
+        max_tokens: int,
+        temperature: float,
+        images: tuple[bytes, ...] = (),
+        stop_marker: str | None = None,
+    ) -> BackendGenerationOutput:
         try:
             import onnxruntime_genai as og  # noqa: PLC0415
 
-            input_ids = self._tokenizer.encode(prompt)
-            params = og.GeneratorParams(self._model)
-            params.set_search_options(
-                max_length=len(input_ids) + max_tokens,
-                temperature=max(temperature, 1e-4),
-                do_sample=temperature > 0.0,
-            )
-            if grammar_schema is not None:
-                # LLGuidance-based constrained decoding (deep-dive §5) — every token
-                # masked to schema-valid continuations. Method name/signature per
-                # onnxruntime-genai's own published examples; unverified against real
-                # weights this session (see module docstring).
-                params.set_guidance("json_schema", json.dumps(grammar_schema))
-
-            generator = og.Generator(self._model, params)
-            generator.append_tokens(input_ids)
-            tokenizer_stream = self._tokenizer.create_stream()
+            if images:
+                # Multimodal input path (deep-dive §7) — unverified against a real
+                # vision-capable model this session (see module docstring). The
+                # `MultiModalProcessor`/`Images.open_bytes` shape is per
+                # onnxruntime-genai's own published Phi-3/Phi-4-vision example scripts;
+                # a text-only tokenizer.encode() call cannot feed image content at all,
+                # so this is a genuinely different input path, not an optional extra
+                # parameter bolted onto the text one.
+                processor = og.MultiModalProcessor(self._model)
+                og_images = og.Images.open_bytes(*images)
+                model_inputs = processor(prompt, images=og_images)
+                params = og.GeneratorParams(self._model)
+                params.set_search_options(
+                    max_length=max_tokens + 4096,  # multimodal prompts are token-heavy; no plain input_ids length to measure ahead of processing
+                    temperature=max(temperature, 1e-4),
+                    do_sample=temperature > 0.0,
+                )
+                if grammar_schema is not None:
+                    params.set_guidance("json_schema", json.dumps(grammar_schema))
+                params.set_inputs(model_inputs)
+                generator = og.Generator(self._model, params)
+                tokenizer_stream = processor.create_stream()
+            else:
+                input_ids = self._tokenizer.encode(prompt)
+                params = og.GeneratorParams(self._model)
+                params.set_search_options(
+                    max_length=len(input_ids) + max_tokens,
+                    temperature=max(temperature, 1e-4),
+                    do_sample=temperature > 0.0,
+                )
+                if grammar_schema is not None:
+                    # LLGuidance-based constrained decoding (deep-dive §5) — every token
+                    # masked to schema-valid continuations. Method name/signature per
+                    # onnxruntime-genai's own published examples; unverified against
+                    # real weights this session (see module docstring).
+                    params.set_guidance("json_schema", json.dumps(grammar_schema))
+                generator = og.Generator(self._model, params)
+                generator.append_tokens(input_ids)
+                tokenizer_stream = self._tokenizer.create_stream()
 
             text_parts: list[str] = []
             tokens_generated = 0
@@ -163,6 +261,8 @@ class OnnxGenAiBackend:
                 new_token = generator.get_next_tokens()[0]
                 text_parts.append(tokenizer_stream.decode(new_token))
                 tokens_generated += 1
+                if stop_marker and stop_marker in "".join(text_parts):
+                    break
         except Exception as exc:  # noqa: BLE001 - a native generation failure is a crash
             raise GenerationCrashed(f"{type(exc).__name__}: {exc}") from exc
 

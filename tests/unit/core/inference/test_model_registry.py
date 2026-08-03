@@ -104,6 +104,22 @@ def test_generate_succeeds_through_a_fake_worker_end_to_end():
     assert result.text == "fake"
 
 
+def test_generate_resolves_an_empty_preset_to_the_configured_default():
+    """§10's own `default_preset` config value — a real, complete gap until caught: a
+    field declared and read by nothing. An empty `request.preset` must resolve to it,
+    not fail as an unconfigured preset."""
+    registry = InferenceModelRegistry(
+        InferenceConfig(presets_enabled=frozenset({"phi4-mini"}), default_preset="phi4-mini"),
+        worker_factory=lambda name: _FakeWorker(name),
+    )
+    request = GenerationRequest(
+        run_id="r1", user_id="u1", preset="", messages=(text_message(MessageRole.USER, "hi"),),
+    )
+    result = run(registry.generate(request))
+    assert result.error is None
+    assert result.text == "fake"
+
+
 class _FakeHealthClient:
     """Real async shape, fake outcome — the real `_default_worker` device-resolution
     logic (deep-dive §8.6) is what's under test here, not `HealthClient`'s own gRPC

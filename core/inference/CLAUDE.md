@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.02`
+`a03.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -109,6 +109,55 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
   `InferenceModelRegistry.shutdown()`; there is no periodic refresh against Health's own
   TTL (`resource_ledger.py` §5.2) for a worker that stays loaded longer than the TTL —
   flagged, not silently assumed permanent, same caveat OCR's own engines carry now.
+- **Three more real, complete gaps found only when directly asked "is every deep-dive
+  detail actually implemented" — not caught by this session's own review before that.**
+  All three follow the identical shape: a field or parameter existed, and nothing ever
+  read it.
+  1. **`vision.py`'s resolved image bytes were computed, threaded into `_WorkerJob.
+     images`, carried across the process boundary, and then silently dropped** —
+     `backend.generate()` had no `images` parameter at all. Fixed: `InferenceBackend.
+     generate()` now accepts `images`/`reasoning_marker`/`reasoning_token_budget`;
+     `OnnxGenAiBackend._run_one_pass()` branches to `og.MultiModalProcessor`/`og.Images.
+     open_bytes()` when images are present (a genuinely different input path from plain
+     `tokenizer.encode()`, not an optional extra parameter) — unverified against real
+     vision weights, same honesty posture as every other unverified `og.*` call in this
+     module. Confirmed live through the real multiprocessing pipeline (not the real
+     model) that images now genuinely reach `backend.generate()`
+     (`test_images_reach_the_backend_through_the_real_worker_process`).
+  2. **`reasoning_token_budget` was a real `InferenceConfig` field read by nothing.**
+     Fixed: `presets.py` gained a `reasoning_marker` per-preset field (`None` on both
+     presets shipped today, matching §12's "non-reasoning instruct presets only, by
+     default" resolution), and `OnnxGenAiBackend.generate()` now runs a real two-call
+     thinking-then-answer sequence when a preset's marker is set — free generation up to
+     `reasoning_token_budget` or until the marker is seen, then a second call continuing
+     into the schema-constrained answer. Confirmed live that the parameters genuinely
+     cross the process boundary; the real phase-switch *logic* itself is unverified (no
+     reasoning-tuned preset exists to test against) and the module docstring says so.
+  3. **`max_concurrent_generations` (§10's own "queue depth cap before backpressure, per
+     preset") did not exist anywhere in the code at all.** Fixed: `PresetWorker.submit()`
+     now acquires a real `asyncio.Semaphore(max_concurrent_generations)` around the
+     dispatch-and-await-response span (created in `load()`, bound to the right event
+     loop) — the (N+1)th concurrent caller genuinely waits for a free slot. Confirmed
+     live with a real timing measurement: 6 concurrent requests at a cap of 2 against a
+     deliberately slow fake backend took ~3x one request's own delay, not ~1x — real
+     serialization, not a cap value accepted and ignored
+     (`test_max_concurrent_generations_creates_real_backpressure`).
+  4. **`default_preset`/`vision_preset` were both declared in `InferenceConfig` and read
+     by nothing.** `default_preset` is now real: an empty `GenerationRequest.preset`
+     resolves to it in `generate()` rather than failing as unconfigured.
+     `vision_preset` is deliberately left unread by this module's own runtime — §1's own
+     "caller's choice, not policy" principle means Inference must not auto-substitute a
+     vision-capable preset just because a request happens to carry image content; this
+     value exists for *other* callers (Execution Core, Interface API's settings menu) to
+     read, not for this API to enforce on itself. Stated explicitly in the config
+     dataclass's own docstring so it isn't mistaken for a missed wiring later.
+  5. **Provider *options* (`config.set_provider_option(...)`) were described in this
+     file's own earlier revision as "attempted... below" and were not actually
+     implemented anywhere** — a docstring claim the code didn't back up, caught by
+     grepping for the call it claimed existed. Now real: `_provider_options()` sets
+     CUDA's `device_id` and, per §8.1's own explicit "mandatory, not optional"
+     requirement, TensorRT's engine-cache enable flag and cache path (uncached TensorRT
+     rebuilds its engine from scratch on every session creation).
 
 ## Implementation status
 

@@ -29,7 +29,11 @@ class FakeBackend:
     def unload(self) -> None:
         self.loaded = False
 
-    def generate(self, prompt: str, *, grammar_schema, max_tokens: int, temperature: float) -> BackendGenerationOutput:
+    def generate(
+        self, prompt: str, *, grammar_schema, max_tokens: int, temperature: float,
+        images: tuple[bytes, ...] = (), reasoning_marker: str | None = None,
+        reasoning_token_budget: int = 0,
+    ) -> BackendGenerationOutput:
         if "CRASH" in prompt:
             raise RuntimeError("simulated native crash")
         if "SLOW" in prompt:
@@ -44,6 +48,20 @@ class FakeBackend:
         if "TRUNCATE" in prompt:
             return BackendGenerationOutput(
                 text='{"vendor": "Dunkin"', finish_reason=FinishReason.LENGTH,
+            )
+        if images:
+            return BackendGenerationOutput(
+                text=f"saw {len(images)} image(s): {prompt[:20]}", finish_reason=FinishReason.STOP,
+            )
+        if reasoning_marker and reasoning_token_budget > 0:
+            # Simulates a real reasoning-tuned preset's own thinking segment: this call
+            # is the "thinking" phase (no grammar), so it emits the marker and stops;
+            # the caller's own follow-up call (the "answer" phase) sees the marker
+            # already present in its own prompt and is what actually reaches here next.
+            if reasoning_marker in prompt:
+                return BackendGenerationOutput(text="the answer is 42", finish_reason=FinishReason.STOP)
+            return BackendGenerationOutput(
+                text=f"thinking...{reasoning_marker}", finish_reason=FinishReason.STOP,
             )
         return BackendGenerationOutput(text=f"echo: {prompt[:40]}", finish_reason=FinishReason.STOP)
 
@@ -61,7 +79,7 @@ class FailingLoadBackend:
     def unload(self) -> None:
         pass
 
-    def generate(self, prompt: str, *, grammar_schema, max_tokens: int, temperature: float):
+    def generate(self, prompt: str, *, grammar_schema, max_tokens: int, temperature: float, **kwargs):
         raise RuntimeError("never reached")
 
 

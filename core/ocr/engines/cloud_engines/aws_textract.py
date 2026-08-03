@@ -39,6 +39,7 @@ __all__ = ["AwsTextractEngine"]
 
 def _run_textract(image_bytes: bytes, config: CloudEngineConfig) -> dict:
     import boto3
+    from botocore.config import Config as BotoConfig
     from botocore.exceptions import BotoCoreError, ClientError
 
     client = boto3.client(
@@ -46,6 +47,12 @@ def _run_textract(image_bytes: bytes, config: CloudEngineConfig) -> dict:
         aws_access_key_id=config.extra.get("access_key_id") or None,
         aws_secret_access_key=config.extra.get("secret_access_key") or None,
         region_name=config.extra.get("region") or None,
+        # `CloudEngineConfig.timeout_seconds` was a real, complete gap until caught here
+        # — declared, and applied by google_vision.py/azure_doc_intelligence.py's own
+        # httpx clients, but never threaded into this engine's boto3 client at all. A
+        # hung Textract call would otherwise only ever hit boto3's own unrelated default
+        # socket timeouts, never this engine's own configured budget.
+        config=BotoConfig(connect_timeout=config.timeout_seconds, read_timeout=config.timeout_seconds),
     )
     try:
         return client.detect_document_text(Document={"Bytes": image_bytes})

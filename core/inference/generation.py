@@ -87,7 +87,8 @@ def _default_backend_factory():
 
 def _generate_with_retry(
     backend, prompt: str, grammar_schema: dict | None, max_tokens: int, temperature: float,
-    truncation: TruncationConfig,
+    truncation: TruncationConfig, images: tuple[bytes, ...] = (),
+    reasoning_marker: str | None = None, reasoning_token_budget: int = 0,
 ) -> tuple:
     """Deep-dive §5.2: on `LENGTH`, retry once with a larger budget before giving up; if
     the retry also truncates, fall back to a salvage parse of the partial output rather
@@ -95,14 +96,16 @@ def _generate_with_retry(
     from .contracts import FinishReason
 
     output = backend.generate(
-        prompt, grammar_schema=grammar_schema, max_tokens=max_tokens, temperature=temperature
+        prompt, grammar_schema=grammar_schema, max_tokens=max_tokens, temperature=temperature,
+        images=images, reasoning_marker=reasoning_marker, reasoning_token_budget=reasoning_token_budget,
     )
     if output.finish_reason != FinishReason.LENGTH:
         return (output, False)
 
     retried_budget = int(max_tokens * truncation.retry_multiplier)
     retried_output = backend.generate(
-        prompt, grammar_schema=grammar_schema, max_tokens=retried_budget, temperature=temperature
+        prompt, grammar_schema=grammar_schema, max_tokens=retried_budget, temperature=temperature,
+        images=images, reasoning_marker=reasoning_marker, reasoning_token_budget=reasoning_token_budget,
     )
     if retried_output.finish_reason != FinishReason.LENGTH or grammar_schema is None:
         return (retried_output, True)
@@ -154,6 +157,8 @@ def _worker_main(
     batch_window_ms: int,
     truncation: TruncationConfig,
     backend_factory: Callable[[], object] = _default_backend_factory,
+    reasoning_marker: str | None = None,
+    reasoning_token_budget: int = 0,
 ) -> None:
     """Runs entirely inside the child process. Module-level, not a closure — see the
     module docstring's own pickling note (this is the `multiprocessing.Process` target,
@@ -187,7 +192,8 @@ def _worker_main(
                 prompt = build_prompt(job.request.messages)
                 output, _retried = _generate_with_retry(
                     backend, prompt, job.grammar_schema, job.request.max_tokens,
-                    job.request.temperature, truncation,
+                    job.request.temperature, truncation, job.images,
+                    reasoning_marker, reasoning_token_budget,
                 )
                 duration_ms = int((time.monotonic() - start) * 1000)
                 result = _build_result(job.request, output, device, duration_ms)
@@ -219,6 +225,9 @@ class PresetWorker:
         truncation: TruncationConfig | None = None,
         load_timeout_seconds: float = 60.0,
         backend_factory: Callable[[], object] = _default_backend_factory,
+        reasoning_marker: str | None = None,
+        reasoning_token_budget: int = 0,
+        max_concurrent_generations: int = 4,
     ) -> None:
         self._preset_name = preset_name
         self._model_dir = model_dir
@@ -227,6 +236,16 @@ class PresetWorker:
         self._truncation = truncation or TruncationConfig()
         self._load_timeout_seconds = load_timeout_seconds
         self._backend_factory = backend_factory
+        self._reasoning_marker = reasoning_marker
+        self._reasoning_token_budget = reasoning_token_budget
+        #: Deep-dive §10's own named config value ("queue depth cap before backpressure,
+        #: per preset") — a real `asyncio.Semaphore`, acquired in `submit()` around the
+        #: dispatch-and-await-response span so the (N+1)th concurrent caller genuinely
+        #: waits rather than piling unboundedly many requests into this worker's own
+        #: request queue. Created lazily in `load()`, not here, since it must be bound to
+        #: the event loop `load()` actually runs on.
+        self._max_concurrent_generations = max_concurrent_generations
+        self._generation_semaphore: asyncio.Semaphore | None = None
 
         self._process: multiprocessing.Process | None = None
         self._request_queue: multiprocessing.Queue | None = None
@@ -237,6 +256,7 @@ class PresetWorker:
         self._next_id = 0
 
     async def load(self) -> None:
+        self._generation_semaphore = asyncio.Semaphore(self._max_concurrent_generations)
         self._request_queue = multiprocessing.Queue()
         self._response_queue = multiprocessing.Queue()
         self._control_queue = multiprocessing.Queue()
@@ -245,7 +265,7 @@ class PresetWorker:
             args=(
                 self._model_dir, self._device, self._request_queue, self._response_queue,
                 self._control_queue, self._batch_window_ms, self._truncation,
-                self._backend_factory,
+                self._backend_factory, self._reasoning_marker, self._reasoning_token_budget,
             ),
             daemon=True,
         )
@@ -299,19 +319,26 @@ class PresetWorker:
         if not self.is_alive():
             raise WorkerUnavailable(f"preset {self._preset_name!r} worker is not running")
 
-        self._next_id += 1
-        request_id = f"{self._preset_name}-{self._next_id}"
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future = loop.create_future()
-        self._pending[request_id] = future
+        # Deep-dive §10's own backpressure cap: the (N+1)th concurrent caller genuinely
+        # waits here for a free slot rather than piling an unbounded number of requests
+        # into this worker's own queue — the wait itself is not charged against
+        # `request.timeout_ms`, which budgets the generation call itself, not queueing.
+        # `_generation_semaphore` is always set by this point — `is_alive()` above only
+        # returns `True` once `load()` has run, and `load()` is what creates it.
+        async with self._generation_semaphore:
+            self._next_id += 1
+            request_id = f"{self._preset_name}-{self._next_id}"
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future = loop.create_future()
+            self._pending[request_id] = future
 
-        job = _WorkerJob(request_id, request, grammar_schema, images)
-        await loop.run_in_executor(None, self._request_queue.put, job)
-        try:
-            return await asyncio.wait_for(future, timeout=request.timeout_ms / 1000)
-        except TimeoutError as exc:
-            self._pending.pop(request_id, None)
-            raise GenerationTimeout(f"exceeded {request.timeout_ms}ms") from exc
+            job = _WorkerJob(request_id, request, grammar_schema, images)
+            await loop.run_in_executor(None, self._request_queue.put, job)
+            try:
+                return await asyncio.wait_for(future, timeout=request.timeout_ms / 1000)
+            except TimeoutError as exc:
+                self._pending.pop(request_id, None)
+                raise GenerationTimeout(f"exceeded {request.timeout_ms}ms") from exc
 
     async def shutdown(self) -> None:
         if self._reader_task is not None:

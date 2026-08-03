@@ -28,7 +28,7 @@ import collections
 import inspect
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from common.frozen_dict import FrozenDict
 
@@ -56,11 +56,25 @@ class InferenceConfig:
     """§10's config surface, as a real typed object."""
 
     presets_enabled: frozenset[str] = field(default_factory=lambda: DEFAULT_PRESETS_ENABLED)
+    #: Resolves an empty `GenerationRequest.preset` (`generate()`'s own fallback below) —
+    #: a real, enforced default, not just documentation.
     default_preset: str = "phi4-mini"
+    #: Deliberately NOT read anywhere in this module's own runtime. §1's own design
+    #: principle is "caller's choice, not policy" for every request this API serves —
+    #: auto-substituting a vision-capable preset whenever a request happens to carry
+    #: image content would be exactly the policy decision this API is built not to make.
+    #: This value exists for *other* callers to read (Execution Core deciding which
+    #: preset to request for a vision-corroboration step, Interface API's settings menu
+    #: preselecting one) — declarative config this API's own schema carries, not a
+    #: runtime behavior it enforces itself.
     vision_preset: str = "phi4-vision"
     device_by_preset: FrozenDict = field(default_factory=lambda: FrozenDict({}))
     models_dir: str = "models"
     batch_window_ms: int = 30
+    #: Queue depth cap before backpressure, per preset (§10) — the (N+1)th concurrent
+    #: caller against one preset's worker waits for a free slot rather than piling an
+    #: unbounded number of requests into that worker's own queue.
+    max_concurrent_generations: int = 4
     reasoning_token_budget: int = 1024
     truncation_retry_multiplier: float = 2.0
     per_request_timeout_ms: int = 30_000
@@ -95,10 +109,10 @@ class InferenceModelRegistry:
         """Resolves the real device to load on, gated on a real Health API VRAM
         reservation (deep-dive §8.6) — a GPU device configured but rejected by Health
         falls back to `"cpu"` for this worker rather than failing the load entirely."""
+        spec = PresetSpec(preset_name)
         configured_device = self._device_for(preset_name)
         device = configured_device
         if configured_device != "cpu":
-            spec = PresetSpec(preset_name)
             outcome = await self._health_client.reserve(
                 "inference", configured_device, spec.estimated_vram_mb
             )
@@ -113,6 +127,9 @@ class InferenceModelRegistry:
             device,
             batch_window_ms=self._config.batch_window_ms,
             truncation=TruncationConfig(retry_multiplier=self._config.truncation_retry_multiplier),
+            reasoning_marker=spec.reasoning_marker,
+            reasoning_token_budget=self._config.reasoning_token_budget,
+            max_concurrent_generations=self._config.max_concurrent_generations,
         )
 
     def _device_for(self, preset_name: str) -> str:
@@ -142,16 +159,22 @@ class InferenceModelRegistry:
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         start = time.monotonic()
-        if request.preset not in self.enabled_presets():
+        # §10's own `default_preset` config value: an empty `request.preset` resolves to
+        # it rather than failing as an unconfigured preset — this was a real, complete
+        # gap until caught (a config field declared and read by nothing).
+        preset_name = request.preset or self._config.default_preset
+        if preset_name not in self.enabled_presets():
             self._record_failure(InferenceErrorCode.PRESET_NOT_CONFIGURED)
             return GenerationResult.failure(
                 InferenceError(
                     InferenceErrorCode.PRESET_NOT_CONFIGURED,
-                    f"preset {request.preset!r} is not configured/enabled",
+                    f"preset {preset_name!r} is not configured/enabled",
                 )
             )
+        if preset_name != request.preset:
+            request = replace(request, preset=preset_name)
 
-        spec = PresetSpec(request.preset)
+        spec = PresetSpec(preset_name)
         images: tuple[bytes, ...] = ()
         if self._blob_store is not None:
             try:

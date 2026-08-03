@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.02`
+`a02.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -130,3 +130,20 @@ Every engine binding is imported *inside* its own engine module and lazily (`doc
   refreshed via Health's own TTL mechanism (`resource_ledger.py` §5.2) — a long-lived
   engine singleton's reservation will lapse on Health's own sweep unless a periodic
   refresh is added later; flagged here rather than silently assumed permanent.
+- **Two more real, complete gaps found only when directly asked "is every deep-dive
+  detail actually implemented" — the same audit that caught Inference's own gaps of the
+  identical shape.**
+  1. **`OcrConfig.per_engine_timeout_ms` (§6) was declared and read by nothing** —
+     `OcrRequest.timeout_ms` (the caller's own per-request value) was silently the only
+     timeout that ever applied, regardless of what an operator configured. Fixed:
+     `OcrEngineRegistry.run()` now takes `min(request.timeout_ms, config.
+     per_engine_timeout_ms)` as the effective timeout — the configured value is a real
+     ceiling a caller cannot exceed, not a duplicate default. Confirmed with a real test:
+     a request asking for 10s against a 50ms-configured ceiling still times out at 50ms
+     (`test_per_engine_timeout_ms_config_is_a_ceiling_a_caller_cannot_exceed`).
+  2. **`CloudEngineConfig.timeout_seconds` was applied by `google_vision.py`'s and
+     `azure_doc_intelligence.py`'s own `httpx` clients, but never threaded into
+     `aws_textract.py`'s `boto3` client at all** — a hung Textract call would only ever
+     hit boto3's own unrelated default socket timeouts, never this engine's configured
+     budget. Fixed: `_run_textract()` now passes a real `botocore.config.Config
+     (connect_timeout=..., read_timeout=...)` built from `config.timeout_seconds`.

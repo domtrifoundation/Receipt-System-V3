@@ -35,6 +35,13 @@ MODEL_PRESETS: FrozenDict = FrozenDict({
         #: a real download exist — this number gates a Health API reservation call
         #: (deep-dive §8.6), not a hard resource limit enforced elsewhere.
         "estimated_vram_mb": 3_000,
+        #: `None` — a non-reasoning instruct preset (deep-dive §12's own resolved default:
+        #: "non-reasoning instruct presets only, by default"). A future reasoning-tuned
+        #: preset sets this to its own real thinking-segment closing tag (e.g.
+        #: `"</think>"`) to opt into the §4.5 two-phase budget; `generation.py` treats
+        #: `None` as "no reasoning phase at all," the correct behavior for every preset
+        #: actually shipped today.
+        "reasoning_marker": None,
     }),
     "phi4-vision": FrozenDict({
         "repo": "microsoft/Phi-4-multimodal-instruct-onnx",
@@ -46,6 +53,7 @@ MODEL_PRESETS: FrozenDict = FrozenDict({
         #: weight beyond the base language model. Same "reasoned placeholder, not
         #: measured" caveat applies.
         "estimated_vram_mb": 5_000,
+        "reasoning_marker": None,
     }),
 })
 
@@ -80,6 +88,10 @@ class PresetSpec:
     @property
     def estimated_vram_mb(self) -> int:
         return self._raw["estimated_vram_mb"]
+
+    @property
+    def reasoning_marker(self) -> str | None:
+        return self._raw["reasoning_marker"]
 
     def variant_hint(self, device_family: str) -> tuple[str, str] | None:
         return self._raw["variant_hints"].get(device_family)

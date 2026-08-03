@@ -263,9 +263,15 @@ class OcrEngineRegistry:
             )
             return merge_readings(readings)
 
+        # §6's own `per_engine_timeout_ms` config value is an administrator-set ceiling,
+        # not merely a duplicate of `OcrRequest.timeout_ms`'s own contract default — a
+        # real, complete gap until caught (a config field declared and read by nothing).
+        # A caller's own per-request timeout can ask for *less* time, never more, than
+        # what the operator configured for this install.
+        effective_timeout_ms = min(request.timeout_ms, self._config.per_engine_timeout_ms)
         readings = await asyncio.gather(
             *(
-                self._read_one(request.run_id, name, image_bytes, request.timeout_ms)
+                self._read_one(request.run_id, name, image_bytes, effective_timeout_ms)
                 for name in request.engines
             )
         )
