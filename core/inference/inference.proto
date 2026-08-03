@@ -1,0 +1,75 @@
+// Inference API gRPC surface (`v3-deepdive-02-inference-api.md` §9).
+//
+// `StreamGenerate` deliberately removed — its one stated use case (a live chat/AI-Mode
+// interface) moved to a separate system backed by Cloudflare Workers AI, not this API.
+// Every real caller here is a structured-extraction request already well served by a
+// plain unary `Generate` call.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only
+// ever added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair, never a bare gRPC status for anything a caller needs
+// to branch on.
+
+syntax = "proto3";
+
+package resibo.inference.v1;
+
+service InferenceService {
+  rpc Generate(GenerateRequest) returns (GenerateResponse);
+  rpc ListPresets(ListPresetsRequest) returns (ListPresetsResponse);  // for Interface API's settings menu
+}
+
+message GenerateRequest {
+  string run_id = 1;
+  string user_id = 2;
+  string preset = 3;
+  repeated Message messages = 4;
+  repeated ToolSpec tools = 5;
+  string response_schema_json = 6;   // empty = no schema constraint
+  int32 max_tokens = 7;
+  float temperature = 8;
+  int32 timeout_ms = 9;
+}
+
+message Message {
+  string role = 1;
+  repeated ContentBlock content = 2;
+}
+
+message ContentBlock {
+  string type = 1;        // "text" | "image"
+  string text = 2;
+  string image_blob_ref = 3;
+}
+
+message ToolSpec {
+  string name = 1;
+  string description = 2;
+  string parameters_schema_json = 3;
+}
+
+message GenerateResponse {
+  string text = 1;
+  ToolCall tool_call = 2;         // unset unless finish_reason == "tool_call"
+  string finish_reason = 3;       // "stop" | "length" | "tool_call" | "error"
+  bool schema_valid = 4;
+  string device = 5;
+  int32 duration_ms = 6;
+  string error_code = 7;
+  string error_detail = 8;
+}
+
+message ToolCall {
+  string name = 1;
+  string arguments_json = 2;
+}
+
+message ListPresetsRequest {
+}
+
+message ListPresetsResponse {
+  repeated string available_presets = 1;
+  repeated string enabled_presets = 2;
+}

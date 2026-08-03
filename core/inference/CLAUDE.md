@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.00`
+`a03.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -47,16 +47,42 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 
 `PresetWorker` is a handle to a real `multiprocessing.Process`, not a thread — corrected in `docs/PROCESS_TOPOLOGY.md` §5 after the original design was isolated in name only. The `og.Model`/`og.Generator` objects live entirely in that child process; this service's own process never imports `onnxruntime_genai`'s native bindings. Preserve that: a crash in generation must stay contained to one preset's worker. Lazy model loading also needs its own lock, separate from the generation lock, or two concurrent first-calls race.
 
+- **`backends/onnx_genai_backend.py` is built from `onnxruntime-genai`'s own published API
+  and release notes, not verified end-to-end against real model weights this session.**
+  Downloading a real model directory (multi-GB) is one of this project's own "ask the user
+  first" actions and there was no need to for what this package's own concurrency design
+  actually required proving. Say this plainly rather than implying parity with
+  Preprocessing's/OCR's own live-hardware-validated engines — `build_prompt()`'s chat
+  template is explicitly a placeholder (no real per-model-family template verified),
+  and `set_guidance()`'s exact signature is taken from the library's own examples, unverified.
+- **Everything that *is* live-confirmed this session, without needing model weights**: the
+  real `multiprocessing.Process`/`Queue` mechanics — worker startup and the load-status
+  handshake, the micro-batch drain loop (`batching.py`), per-request response routing via
+  a single dedicated reader task (never N racing consumers on one shared queue), an
+  in-generate exception staying contained to the worker (worker survives, next call still
+  works), and a hard `Process.kill()` correctly failing every pending caller with
+  `WorkerUnavailable` rather than hanging forever. `test_generation.py` exercises all of
+  this against `tests/unit/core/inference/fakes.py`'s own module-level fake backend — a
+  closure could not have survived being pickled to the child process under Windows's
+  `spawn` start method (confirmed directly during Preprocessing API's own development).
+- **The §6.2 lazy-load-locking race is a real regression test, not just design
+  reasoning** (`test_model_registry.py`): ten concurrent `get_worker()` calls for an
+  unloaded preset result in exactly one `load()` call, verified against a fake worker
+  with an artificial load delay to widen the race window.
+- **`InferenceModelRegistry`'s per-request model-directory resolution is deliberately
+  simple** — a plain `os.path.join(models_dir, preset_name)`, never the live Hugging Face
+  variant lookup `presets.resolve_variant_path()` performs. That live lookup is a one-time
+  provisioning step (Setup/Update API's own territory), never re-derived on every
+  `generate()` call, and was never actually invoked this session (no network call made).
+- **`PresetWorker`/`InferenceModelRegistry` both take a `backend_factory`/`worker_factory`
+  seam** — the same shape as Preprocessing API's own `blob_store_factory`: a plain,
+  picklable, zero-argument callable, defaulting to the real implementation, overridable
+  by tests so the real concurrency mechanics can be proven without real model weights.
+
 ## Implementation status
 
-**Not implemented.** Every `.py` file in this folder is a 0-byte scaffold created by the Phase-1
-commit that laid out the repository, and no commit since has put a line of logic into any of
-them. Everything above this section describes the design this package will have, not code that
-exists — a distinction worth stating in the one file a future session is most likely to read
-first, because the folder's file list looks exactly like an implemented package from the
-outside.
-
-Nothing outside this folder imports from it yet, so the emptiness is inert rather than a broken
-dependency. Building it is a full Core API pass against the deep-dive linked above, with the
-`new_core_api` and `new_provider` templates in `docs/templates/`. **Delete this section in the
-commit that implements the package** — a stale "not implemented" note is worse than none.
+Implemented this session — `contracts.py`, `errors.py`, `backends/` (Protocol + the one
+`onnxruntime-genai` backend, unverified against real weights per the gotcha above),
+`model_registry.py`, `presets.py`, `generation.py`, `batching.py`, `structured_output.py`,
+`tool_calling.py`, `vision.py`, `metrics.py`, `service.py` + `inference.proto`. 33 tests,
+all passing.

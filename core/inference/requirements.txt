@@ -1,0 +1,16 @@
+# Inference API — third-party runtime dependencies beyond `common/requirements.txt`.
+#
+# Exactly one of the three onnxruntime-genai variants gets installed per machine, chosen
+# from Setup API's shared hardware detection (deep-dive §4.2) — never guessed. Listed here
+# as the CPU variant, the safe universal default; a real install substitutes the
+# DirectML/CUDA variant instead of installing all three.
+onnxruntime-genai>=0.6
+
+# --- Preset resolution (deep-dive §4.4) — live Hugging Face repo listing, not a hardcoded
+# subfolder path, the same self-healing technique OCR API's own model-currency concern
+# established. Only touched by provisioning code (Setup/Update API), never per-request.
+huggingface_hub>=0.24
+
+# --- Constrained-output schema validation (deep-dive §5.1) — a secondary check behind
+# onnxruntime-genai's own LLGuidance-based guarantee, not the primary mechanism.
+jsonschema>=4.0
