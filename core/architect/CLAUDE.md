@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.02`
+`a01.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -66,3 +66,9 @@ No free-threading or `asyncio`-version-sensitive assumptions: the async surface 
 **Nothing here makes a network call unless a transport is wired in.** `WikidataSeedSource` defaults to `UnavailableTransport`, which reports itself unreachable rather than quietly hitting a public endpoint from a fresh install. Swapping the HTTP client, pointing at a self-hosted Wikibase, or replaying a captured response are all the same operation: a different `SparqlTransport`.
 
 **Beware truthiness on this package's own collection-like objects.** `AliasIndex`, `ReviewAuditMirror` and several others define `__len__`, so an empty-but-genuinely-supplied instance is falsy — constructor defaults use `x if x is not None else Default()`, never `x or Default()`. That exact bug detached a caller's alias index from the directory during implementation.
+
+**`service.py`/`architect.proto`'s generated stubs did not exist at all until this session — a real, complete gap, not a documented placeholder.** Every module `ArchitectServicer` calls (`registry/read.py`'s `DefinitionRegistry`, `temporal_learning/moderation_queue.py`'s `ModerationQueue`, `vendor_directory/directory.py`'s `VendorDirectory`) already existed and was independently tested, but nothing in this package ever constructed one of each and answered a single RPC. `architect.proto` defined a contract that Persistence, Matching, Review/Flagging, Billing and Execution Core are all meant to call, and there was no server on the other end of it. Confirmed live: `GetTaxonomy` against the real seeded categories, a full `SubmitContribution` -> prescreen -> `ReviewContribution` -> merge round trip that shows up in a subsequent `SearchVendorDirectory` call, the staff direct-to-global path (`staff_authored=True`) merging without a separate review call, and a rejected contribution correctly never reaching the directory.
+
+**`ContributionRequest.staff_authored` is trusted verbatim from the request — a real, NOT-enforced gap, not silently glossed over.** The proto's own comment states this must be "resolved by the server" from the caller's session role, never taken as a claim the caller makes about itself. No Auth API client exists anywhere in this codebase's `service.py` files yet to check a role against (confirmed by checking every other API's `service.py`), so this servicer cannot enforce that today. Documented in `service.py`'s own module docstring: do not expose this RPC to an untrusted caller until a Gateway-level or Auth-backed role check is wired in front of it.
+
+**`ReviewContribution` merges immediately on approval — there is no separate merge RPC in `architect.proto`.** `ModerationQueue.review()` and `.merge()` are two distinct calls in `moderation_queue.py`'s own API; the servicer chains them because there is no reason a caller would want to hold an approved, eligible contribution unmerged, and the proto's own single `ReviewRequest` -> `ContributionResponse` shape has no room for a caller to ask for the two steps separately.
