@@ -30,9 +30,16 @@ import asyncio
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from .contracts import BootReport, ServiceLaunchResult, ServiceSpec, utcnow
+
+#: Invoked once per service immediately after its own `ServiceLaunchResult` is known — the
+#: seam the TUI's Boot Sequence screen (`services/interface/tui/custom_screens/
+#: boot_sequence.py`) uses for real live progress, since `boot_many()` itself only returns
+#: once at the very end. `None` is the default so every existing caller is unaffected.
+BootProgressCallback = Callable[[ServiceLaunchResult], None]
 
 __all__ = ["DEFAULT_HEALTH_TIMEOUT_SECONDS", "boot_many", "launch_one", "topological_order", "wait_until_reachable"]
 
@@ -143,15 +150,21 @@ async def launch_one(
 
 async def boot_many(
     specs: tuple[ServiceSpec, ...], clone_dir: Path, *, channel: str, timeout_seconds: float = DEFAULT_HEALTH_TIMEOUT_SECONDS,
+    on_result: BootProgressCallback | None = None,
 ) -> BootReport:
     """§3.2's own whole sequence: resolve dependency order, launch and health-gate each
     service in turn, stop at the first failure rather than launching past a dependency
-    gap (see the module docstring)."""
+    gap (see the module docstring). `on_result`, if given, is called with each service's
+    own result the moment it's known — real live progress for a caller like the TUI's
+    Boot Sequence screen, rather than that caller guessing at timing `boot_many()` itself
+    doesn't expose."""
     ordered = topological_order(specs)
     results: list[ServiceLaunchResult] = []
     for spec in ordered:
         result = await launch_one(spec, clone_dir, timeout_seconds=timeout_seconds)
         results.append(result)
+        if on_result is not None:
+            on_result(result)
         if not result.ok:
             break
     return BootReport(channel=channel, release_dir=clone_dir, services=tuple(results))

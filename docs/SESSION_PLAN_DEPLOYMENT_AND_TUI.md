@@ -49,15 +49,40 @@ and `tests/unit/supervisor/test_service.py`'s `REPO_ROOT` was off by one parent 
 - [ ] CLAUDE.md updates for every touched package
 - [ ] Commit + push each phase separately (matching this session's established cadence)
 
-## Phase 5 — TUI
+## Phase 5 — TUI — shell DONE, five custom screens + webapp + wizard integration remain
 
-- [ ] Confirm the "first-time interactive setup TUI" is a real, sourced requirement (check
-  `docs/apis/v3-deepdive-11-setup-api.md` and Interface's own deep-dive for exactly how the TUI
-  drives Setup's `RunWizard` stream) before building — do not assume shape.
-  - [ ] TERMS_OF_SERVICE persistence gap (Phase 0 note above) — fix if it blocks the wizard flow.
-- [ ] Read `docs/apis/v3-deepdive-??-interface-api.md` (TUI + webapp) fully for the complete
-  screen list, and `services/interface/` current state (contracts.py, tui/, webapp/).
-- [ ] Build the TUI shell against Supervisor's boot sequence (loading screen -> handoff).
-- [ ] Build every screen the deep-dive names, including the full settings screen with tooltips.
-- [ ] Settings TUI must both open/edit the raw settings file AND provide the structured
-  form-based config path — confirm both are real, sourced requirements before building.
+Read `v3-deepdive-14-interface-api.md` in full first, confirmed real requirements (not
+assumed): the TUI is Textual, menu-data-driven with one generic `MenuScreen`, a closed
+8-item custom-screen exception list (run monitor, OCR diff viewer, vendor/branch editor,
+Groups, staff audit queue, Fleet & Updates, Boot Sequence, credits), and localization
+(English + Tagalog at launch) as a cross-cutting `t()` mechanism, never a sub-API.
+
+**Built and live-tested this pass** (16 new tests, `tests/unit/services/interface/`, real
+`Textual.App.run_test()`/`Pilot` runs — never a mocked screen tree): `theme.py`, `i18n.py`,
+`menu_screen.py` (the one generic renderer), `menu_data/__init__.py` (`submenu_items()`),
+`menu_data/root.py`, `custom_screens/boot_sequence.py` (real progress via a new
+`boot_many(on_result=...)` callback added to `supervisor/boot_sequence.py` in the same
+pass), `custom_screens/credits.py` (real dependency/license table sourced from every
+`requirements.txt` in the repo), `app.py` (`InterfaceApp`: boot -> root menu, plus the
+`interface.open_screen.*` convention that lets menu-data name a custom screen).
+
+**Explicitly NOT done, tracked honestly in `services/interface/CLAUDE.md`** rather than
+silently left half-finished:
+- [ ] `fleet_updates`, `run_monitor`, `staff_audit_queue`, `vendor_branch_editor`, `groups`
+  — five of the eight exception-list screens. Each needs real RPC wiring to an owning API
+  (Supervisor, Execution Core, Review/Flagging, temporal_learning, Groups respectively)
+  that doesn't expose a TUI-facing surface yet. Named in `root.py`, report "not built yet"
+  honestly when selected rather than crashing or faking a result.
+- [ ] `find_setting` interactive screen — the real fuzzy-matcher already exists and is
+  tested (`core/agent_control/backends/local.py`), just not yet presented as its own screen.
+- [ ] `ocr_diff_viewer` — not yet named in `root.py` at all (reached contextually from a
+  run, not the root menu); undesigned as of this pass.
+- [ ] Confirm the first-time interactive setup wizard's TUI-side integration against
+  `docs/apis/v3-deepdive-11-setup-api.md`'s real `RunWizard` bidirectional stream — not
+  yet wired to any TUI screen.
+  - [ ] `TERMS_OF_SERVICE` persistence gap (validates acceptance, persists nothing) — fix
+    when the wizard screen is built, since that's the first point it would actually matter.
+- [ ] Full settings screen with tooltips as a **structured, editable form** (current
+  `settings.py` menu data is real and browsable via `MenuScreen`, but no screen yet lets an
+  operator open/edit the raw settings file directly, per the explicit ask for both paths).
+- [ ] Webapp (`services/interface/webapp/`) — still entirely 0-byte scaffolding.

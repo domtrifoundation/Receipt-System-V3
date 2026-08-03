@@ -90,3 +90,16 @@ def test_boot_many_reports_ok_when_every_service_becomes_healthy(geo_address_spe
             killer.append(s.pid)
 
     assert report.ok is True
+
+
+def test_boot_many_calls_on_result_once_per_service_as_it_completes(geo_address_spec, killer):
+    """The TUI's Boot Sequence screen's own live-progress seam."""
+    seen = []
+
+    report = run(boot_many((geo_address_spec,), REPO_ROOT, channel="dev", timeout_seconds=15.0, on_result=seen.append))
+    for s in report.services:
+        if s.pid:
+            killer.append(s.pid)
+
+    assert [r.name for r in seen] == [geo_address_spec.name]
+    assert seen[0].ok is True

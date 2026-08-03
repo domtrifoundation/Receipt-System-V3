@@ -22,3 +22,7 @@ frozendict; python_version < '3.15'
 # sense — find_setting degrades to substring matching without it (§4.4) — but wanted by
 # default, since the degraded path is meaningfully worse at natural-language lookup.
 rapidfuzz>=3.0
+
+# --- TUI (v3-deepdive-14-interface-api.md §7) --------------------------------
+# asyncio-native by construction; Interface API's admin/status console is built on it.
+textual>=0.60

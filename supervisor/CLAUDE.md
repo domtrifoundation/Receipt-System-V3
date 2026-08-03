@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -64,3 +64,5 @@ Structurally neither Layer 1 nor Layer 2 (`docs/PROCESS_TOPOLOGY.md` §1): it li
 **`RestartServiceOnVersion`'s own step-1-before-step-2 asymmetry (§5.4, §7's own named testing hook) is confirmed live, not just described**: a target version with no release clone at all, and a target with a release clone but no provisioned venv for the service, both fail at `confirming_target` — before `stopping_old` is ever reached. Step 1's own "health-check-capable" check is honestly narrower than a full launch rehearsal — this codebase has no sandboxed dry-run launch mode, so it treats "the clone directory exists and names a real venv for this service" as the real, checkable proxy, documented as such rather than claimed to be the deeper guarantee.
 
 **`ForceWake`/`PinServiceVersion` are Audit-logged (§11's own resolved "yes" for both) using the exact same gap-shape `core/review_flagging/gateways.py` already documents** — Audit's own closed operation vocabulary does not register Supervisor's own operations yet, so a real call today returns `recorded=False, error_code="UNKNOWN_ACTION"`, surfaced honestly (best-effort, never fails the operation it describes) rather than silently dropped.
+
+**`boot_sequence.py`'s `boot_many()` gained an optional `on_result` callback**, added while building the TUI's own Boot Sequence screen (`services/interface/tui/custom_screens/boot_sequence.py`) — that screen needed real per-service progress as it happens, and `boot_many()` previously only returned once at the very end. Backward-compatible by construction (`on_result: BootProgressCallback | None = None`); a new test (`test_boot_many_calls_on_result_once_per_service_as_it_completes`) confirms it fires once per service with that service's own real result, and the full pre-existing suite stayed green with no changes needed at any other call site.
