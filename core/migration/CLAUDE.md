@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.01`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -82,8 +82,16 @@ what §8 asks for, rather than the gap being found mid-migration on a live syste
 **Files here that the deep-dive's §2 package layout does not list**: none. Every module matches
 §2 exactly. `steps/v1_to_v2.py` is named there and is present, deliberately unregistered.
 
-**Known gap, flagged rather than silently filled**: §7 specifies a two-RPC surface
-(`RunMigration`, `GetCurrentVersion`) and there is no `.proto` here yet. Every behaviour those
-RPCs would translate is implemented and tested at the in-process layer; the wire translation is
-what is missing. This joins the same open question `core/tool_call/CLAUDE.md` and
-`core/background_workers/CLAUDE.md` record.
+**The `.proto` gap this section used to describe is now closed.** `migration.proto` defines
+`RunMigration`/`GetCurrentVersion`, and `service.py`'s `MigrationServicer` wires the real
+`MigrationRunner` to both. `GetCurrentVersion` answers "this build's own target version for
+`kind`" (`contracts.CURRENT_VERSIONS`) — Migration API does not itself persist a specific
+structure's *stored* version (that column lives wherever the structure actually is:
+Persistence for `database_schema`, Architect for `vendor_data`), so this is a build-level
+answer, not a per-structure query. Confirmed live: a real chain of two registered steps
+walked and applied in order; a re-run correctly reporting `already_applied` rather than
+`applied`; a real chain gap stopping the walk at `MISSING_MIGRATION_STEP` with
+`reached_version` honestly reporting how far it got; a structure already at its target
+completing trivially with zero steps; and `target_version=0` correctly deferring to the
+build's own default. This joins the same open question `core/tool_call/CLAUDE.md` and
+`core/background_workers/CLAUDE.md` still record for themselves.
