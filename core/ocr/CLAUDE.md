@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.04`
+`a02.00.05`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -111,6 +111,13 @@ Every engine binding is imported *inside* its own engine module and lazily (`doc
   `; python_version < '3.13'` so pip skips attempting it entirely past that point, instead
   of failing the venv — RapidOCR correctly reports unavailable at runtime on 3.13+, the
   rest of OCR's engines are unaffected.
+- **A second, real, live-found install-blocker in the same file, same live-tested
+  `setup.bat` run: `winsdk>=1.0` matches nothing.** `winsdk` has never published a stable
+  `1.0` — only pre-releases (`1.0.0b1` through `b10` as of this writing) — and pip's
+  default resolver excludes pre-releases unless the version specifier itself names one
+  (PEP 440). Fixed to `winsdk>=1.0.0b1`. After both fixes, a full repo-wide sweep
+  (`pip install --dry-run -r <file>` against every `requirements.txt` in this repo under
+  the real Python 3.14 interpreter) found no further broken pins — this pass, not assumed.
 - **RapidOCR's own wrapper (`rapidocr_onnxruntime`, this installed version, checked by
   reading its actual source rather than assumed) does NOT expose the deep-dive's full
   §5.1 execution-provider list at all — only a single boolean `use_cuda` flag.**

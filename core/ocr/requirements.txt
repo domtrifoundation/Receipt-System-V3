@@ -34,7 +34,11 @@ opencv-python>=4.10
 # Environment markers are the Forward-Compatibility Pattern's first point
 # (`docs/PRINCIPLES.md` §3.3): on a non-Windows/non-macOS install, these are never even
 # attempted, matching the structural (not degraded) unavailability of these two engines.
-winsdk>=1.0; sys_platform == 'win32'
+# `winsdk` has never published a stable 1.0 — only pre-releases (1.0.0b1 through b10 as of
+# this writing) — confirmed live: a bare `winsdk>=1.0` matches nothing under pip's default
+# resolver, which excludes pre-releases unless the constraint itself names one (PEP 440).
+# Real, live-found second install-blocker alongside the rapidocr-onnxruntime one above.
+winsdk>=1.0.0b1; sys_platform == 'win32'
 pyobjc-framework-Vision>=10.0; sys_platform == 'darwin'
 pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'
 

@@ -49,7 +49,7 @@ from __future__ import annotations
 from pathlib import Path
 
 #: The running program version. Ticked on every commit — see the module docstring.
-PROGRAM_VERSION = "x00.00.59"
+PROGRAM_VERSION = "x00.00.60"
 
 #: Codename for the current `MM`, keyed to `MM` alone so every `x03.xx.xx` release reuses
 #: one banner asset without regeneration (`v3-plan-02-architecture.md`). `"00"` is a real,
