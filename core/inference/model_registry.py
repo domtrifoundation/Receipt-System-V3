@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import inspect
 import os
 import time
 from dataclasses import dataclass, field
@@ -39,6 +40,7 @@ from .contracts import (
 )
 from .errors import GenerationCrashed, GenerationTimeout, ModelLoadFailed, WorkerUnavailable
 from .generation import PresetWorker, TruncationConfig
+from .health_client import HealthClient
 from .metrics import InferenceMetricsCollector
 from .presets import MODEL_PRESETS, PresetSpec
 from .structured_output import resolve_schema
@@ -72,6 +74,7 @@ class InferenceModelRegistry:
         metrics: InferenceMetricsCollector | None = None,
         *,
         worker_factory=None,
+        health_client: HealthClient | None = None,
     ) -> None:
         self._config = config or InferenceConfig()
         self._blob_store = blob_store
@@ -79,16 +82,35 @@ class InferenceModelRegistry:
         #: Defaults to real `PresetWorker` construction. Overridable so
         #: `tests/unit/core/inference/test_model_registry.py` can inject a fake-backed
         #: worker to exercise the real §6.2 lazy-load-locking race without real model
-        #: weights — same seam shape as `generation.py`'s own `backend_factory`.
+        #: weights — same seam shape as `generation.py`'s own `backend_factory`. May be
+        #: sync or async; `get_worker()` awaits it only if it actually returned an
+        #: awaitable, so existing sync test fakes keep working unchanged.
         self._worker_factory = worker_factory or self._default_worker
+        self._health_client = health_client or HealthClient()
         self._loaded_workers: dict[str, PresetWorker] = {}
+        self._reservations: dict[str, str] = {}
         self._load_locks: dict[str, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
 
-    def _default_worker(self, preset_name: str) -> PresetWorker:
+    async def _default_worker(self, preset_name: str) -> PresetWorker:
+        """Resolves the real device to load on, gated on a real Health API VRAM
+        reservation (deep-dive §8.6) — a GPU device configured but rejected by Health
+        falls back to `"cpu"` for this worker rather than failing the load entirely."""
+        configured_device = self._device_for(preset_name)
+        device = configured_device
+        if configured_device != "cpu":
+            spec = PresetSpec(preset_name)
+            outcome = await self._health_client.reserve(
+                "inference", configured_device, spec.estimated_vram_mb
+            )
+            if outcome.granted:
+                self._reservations[preset_name] = outcome.reservation_id
+            else:
+                device = "cpu"
+
         return PresetWorker(
             preset_name,
             self._model_dir_for(preset_name),
-            self._device_for(preset_name),
+            device,
             batch_window_ms=self._config.batch_window_ms,
             truncation=TruncationConfig(retry_multiplier=self._config.truncation_retry_multiplier),
         )
@@ -106,7 +128,8 @@ class InferenceModelRegistry:
         async with self._load_locks[preset_name]:
             if preset_name in self._loaded_workers:
                 return self._loaded_workers[preset_name]
-            worker = self._worker_factory(preset_name)
+            result = self._worker_factory(preset_name)
+            worker = await result if inspect.isawaitable(result) else result
             await worker.load()
             self._loaded_workers[preset_name] = worker
             return worker
@@ -197,3 +220,6 @@ class InferenceModelRegistry:
         for worker in self._loaded_workers.values():
             await worker.shutdown()
         self._loaded_workers.clear()
+        for reservation_id in self._reservations.values():
+            await self._health_client.release(reservation_id)
+        self._reservations.clear()

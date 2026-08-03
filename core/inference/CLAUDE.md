@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.01`
+`a03.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -78,6 +78,37 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
   seam** — the same shape as Preprocessing API's own `blob_store_factory`: a plain,
   picklable, zero-argument callable, defaulting to the real implementation, overridable
   by tests so the real concurrency mechanics can be proven without real model weights.
+- **§8's execution-provider selection was completely missing from the first pass of this
+  package — `load()` called plain `og.Model(model_dir)` with the `device` argument
+  accepted and stored but never actually used to select anything.** Fixed:
+  `backends/onnx_genai_backend.py`'s `load()` now builds an `og.Config`, calls
+  `clear_providers()`/`append_provider(name)` for a real non-CPU device, and only then
+  constructs `og.Model(config)` — the documented mechanism from `onnxruntime-genai`'s own
+  example scripts. Confidence varies genuinely by provider: high for `cuda`/`dml`, medium
+  for `rocm`/`qnn`, low for `openvino`/`tensorrt` (this session could not confirm the
+  exact provider-name string either of the last two expects) — see the module's own
+  docstring for the full per-provider breakdown, not glossed over as uniformly solid.
+  Session-level settings from §8.2 (IOBinding, CUDA graph capture, memory arena tuning,
+  `intra_op`/`inter_op` thread counts) are genuinely **not implemented** — current
+  `onnxruntime-genai` controls most of these through `genai_config.json`'s own schema
+  inside the model directory, not a separate Python session-options object, and
+  confirming the exact JSON keys needs a real model directory this session doesn't have.
+- **§8.6's Health API VRAM reservation integration was also completely missing from the
+  first pass — a real, complete gap, not a documented placeholder.**
+  `core/health/resource_ledger.py`'s own module docstring names Inference explicitly as
+  one of three APIs promised this integration; none of the three had it until this was
+  caught and fixed. `InferenceModelRegistry._default_worker` now calls Health API
+  (`health_client.py`) before ever handing a non-`"cpu"` device to a `PresetWorker` —
+  confirmed live, both directions, against a real running Health service: with no
+  `HardwareProfile` published (Setup API doesn't exist yet), the reservation is rejected
+  (`UNKNOWN_DEVICE`) and the worker loads on `"cpu"` instead; against a real
+  `StaticHardwareProfile`, the reservation is genuinely granted and the worker loads on
+  the requested device. Each preset's `estimated_vram_mb` (`presets.py`) is a reasoned
+  placeholder pending real bench measurement, the same posture as every other
+  unmeasured constant in this project. Reservations are released on
+  `InferenceModelRegistry.shutdown()`; there is no periodic refresh against Health's own
+  TTL (`resource_ledger.py` §5.2) for a worker that stays loaded longer than the TTL —
+  flagged, not silently assumed permanent, same caveat OCR's own engines carry now.
 
 ## Implementation status
 

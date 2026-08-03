@@ -28,6 +28,13 @@ MODEL_PRESETS: FrozenDict = FrozenDict({
             "cpu": ("cpu", "int4"), "cuda": ("gpu", "int4"), "directml": ("gpu", "int4"),
         }),
         "context_window": 128_000, "supports_tools": True, "supports_vision": False,
+        #: A reasoned placeholder, not a bench-measured figure (same posture as OCR's own
+        #: RapidOCR/PaddleOCR VRAM estimates) — Phi-4-mini int4 is roughly a 3.8B-parameter
+        #: model; int4 weight-only quantization puts raw weights around 2GB, plus KV-cache
+        #: and activation overhead. Refine from real measurement once the bench suite and
+        #: a real download exist — this number gates a Health API reservation call
+        #: (deep-dive §8.6), not a hard resource limit enforced elsewhere.
+        "estimated_vram_mb": 3_000,
     }),
     "phi4-vision": FrozenDict({
         "repo": "microsoft/Phi-4-multimodal-instruct-onnx",
@@ -35,6 +42,10 @@ MODEL_PRESETS: FrozenDict = FrozenDict({
             "cpu": ("cpu", "int4"), "cuda": ("gpu", "int4"), "directml": ("gpu", "int4"),
         }),
         "context_window": 128_000, "supports_tools": False, "supports_vision": True,
+        #: Larger than the text-only preset above — a multimodal vision encoder adds real
+        #: weight beyond the base language model. Same "reasoned placeholder, not
+        #: measured" caveat applies.
+        "estimated_vram_mb": 5_000,
     }),
 })
 
@@ -65,6 +76,10 @@ class PresetSpec:
     @property
     def supports_vision(self) -> bool:
         return self._raw["supports_vision"]
+
+    @property
+    def estimated_vram_mb(self) -> int:
+        return self._raw["estimated_vram_mb"]
 
     def variant_hint(self, device_family: str) -> tuple[str, str] | None:
         return self._raw["variant_hints"].get(device_family)

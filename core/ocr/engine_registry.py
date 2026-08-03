@@ -59,6 +59,7 @@ from .errors import (
     OcrNetworkError,
     OcrRateLimited,
 )
+from .health_client import HealthClient
 from .metrics import OcrMetricsCollector
 
 __all__ = ["OcrConfig", "OcrEngineRegistry"]
@@ -122,15 +123,19 @@ class OcrEngineRegistry:
         config: OcrConfig | None = None,
         blob_store: BlobStoreGateway | None = None,
         metrics: OcrMetricsCollector | None = None,
+        health_client: HealthClient | None = None,
     ) -> None:
         self._config = config or OcrConfig()
         self._blob_store = blob_store
         self._metrics = metrics
+        #: One shared `HealthClient` for every GPU-capable engine — a real reservation
+        #: call per engine instance, not per request (deep-dive §5.6).
+        self._health_client = health_client or HealthClient()
         self._engines: dict[EngineName, OcrEngine] = {
             EngineName.TEXT_LAYER: TextLayerEngine(),
             EngineName.TESSERACT: TesseractEngine(self._config.tesseract),
-            EngineName.RAPIDOCR: RapidOcrEngine(self._config.rapidocr),
-            EngineName.PADDLEOCR: PaddleOcrEngine(self._config.paddleocr),
+            EngineName.RAPIDOCR: RapidOcrEngine(self._config.rapidocr, self._health_client),
+            EngineName.PADDLEOCR: PaddleOcrEngine(self._config.paddleocr, self._health_client),
             EngineName.CLOUD_VISION: GoogleVisionEngine(self._config.cloud_vision),
             EngineName.AZURE_DOCUMENT_INTELLIGENCE: AzureDocumentIntelligenceEngine(
                 self._config.azure_document_intelligence

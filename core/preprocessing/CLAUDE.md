@@ -75,3 +75,16 @@ Variant generation runs in a `ProcessPoolExecutor`, not threads, because OpenCV'
   `tests/unit/core/preprocessing/conftest.py` guards its own `cv2`/`fitz`/`numpy` imports with
   `pytest.importorskip` instead, the same collection-time-skip pattern `core/auth`'s and
   `core/account_guardian`'s servicer tests already use for the equivalent `grpcio` gap.
+- **§6.7's "register lightweight usage with Health API for visibility" is deliberately
+  NOT wired in, checked against the deep-dive's own wording rather than skipped by
+  oversight.** Unlike OCR's/Inference's own §5.6/§8.6 ("check in *before claiming*
+  GPU resources" — a real reservation gating a real allocation, now built for both, see
+  their own `CLAUDE.md` gotchas), this API's own §6.7 explicitly says Preprocessing
+  "doesn't need to participate in the live reservation ledger with the same urgency" —
+  UMat's OpenCL buffers are small and short-lived per-image, not a persistent multi-GB
+  model load. A per-image reserve/release round trip to Health API would be real,
+  disproportionate gRPC overhead against a single UMat op's own cost, and the deep-dive's
+  own language is "visibility," not "gating" — a different, lighter-weight mechanism
+  (a periodic usage metric push, not a reservation) than the ledger this session built
+  for the other two APIs. Left as a real, named, still-open item rather than forced into
+  the reservation shape it doesn't actually need.

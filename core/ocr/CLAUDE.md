@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.01`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -99,3 +99,34 @@ Every engine binding is imported *inside* its own engine module and lazily (`doc
   installed in this development environment at all (heaviest local engine and a cloud SDK,
   both genuinely opt-in) — their adapters degrade to unavailable, a real, live-confirmed
   outcome rather than a gap in what got tested.
+- **RapidOCR's own wrapper (`rapidocr_onnxruntime`, this installed version, checked by
+  reading its actual source rather than assumed) does NOT expose the deep-dive's full
+  §5.1 execution-provider list at all — only a single boolean `use_cuda` flag.**
+  `OrtInferSession` (`rapidocr_onnxruntime/utils.py`) hardcodes
+  `[CUDAExecutionProvider, CPUExecutionProvider]` gated on that one flag; there is no
+  `providers=[...]` passthrough for OpenVINO/DirectML/QNN/MIGraphX in this wrapper at all.
+  Confirmed live: passing `det_use_cuda=True` without also passing `det_model_path=None`
+  raises a bare `KeyError` in this version — an undocumented quirk, not something
+  reasoned about from the outside. `use_cuda` is the one real lever this wrapper gives,
+  and it is now wired through (see the Health API point below) — the rest of §5.1's list
+  simply isn't reachable through this dependency as it exists today.
+- **PaddleOCR's GPU device kwarg is unverified** — its constructor's own GPU-selection
+  kwarg has genuinely changed across major releases (`use_gpu: bool` vs. the newer
+  PaddleX-based `device: "gpu"|"cpu"`), and PaddlePaddle is not installed here to check
+  which one a real install needs. `use_gpu` is used as the more broadly-applicable
+  choice today, flagged rather than asserted with false confidence.
+- **RapidOCR/PaddleOCR now call Health API's live VRAM reservation ledger
+  (`health_client.py`, deep-dive §5.6) before ever requesting a GPU device — this was a
+  real, complete gap in the first implementation, not a documented placeholder.**
+  `core/health/resource_ledger.py`'s own module docstring names OCR explicitly as one of
+  three APIs promised this integration; it was built for none of them in the initial
+  pass and had to be added afterward. Confirmed live, both directions, against a real
+  running Health service: with no `HardwareProfile` published (Setup API doesn't exist
+  yet), every reservation attempt correctly comes back `UNKNOWN_DEVICE` and the engine
+  falls back to CPU; against a real `StaticHardwareProfile`, a reservation is genuinely
+  granted and the engine stays on GPU. The resolved device decision is cached per engine
+  instance (not re-reserved every `read()` call) — a genuine Health API round trip on
+  every single OCR call would be real, avoidable overhead. Reservations are not
+  refreshed via Health's own TTL mechanism (`resource_ledger.py` §5.2) — a long-lived
+  engine singleton's reservation will lapse on Health's own sweep unless a periodic
+  refresh is added later; flagged here rather than silently assumed permanent.
