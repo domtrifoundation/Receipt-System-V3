@@ -1,0 +1,90 @@
+// Ingestion API gRPC surface (`v3-deepdive-04-ingestion-api.md` §8).
+//
+// Direct upload and scanner finalization both return a NormalizationResponse
+// synchronously (fast enough not to need streaming); scan-session frame submission is
+// its own call per frame since a panorama capture is inherently multi-step and the client
+// needs per-frame confirmation before moving on, not a single batch call at the end.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only
+// ever added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair, never a bare gRPC status for anything a caller needs
+// to branch on.
+
+syntax = "proto3";
+
+package resibo.ingestion.v1;
+
+service IngestionService {
+  rpc SubmitDirectUpload(DirectUploadRequest) returns (NormalizationResponse);
+  rpc StartScanSession(StartScanRequest) returns (ScanSessionResponse);
+  rpc SubmitScanFrame(ScanFrameRequest) returns (ScanFrameResponse);
+  rpc FinalizeScanSession(FinalizeScanRequest) returns (NormalizationResponse);
+  rpc ListEnabledSources(ListSourcesRequest) returns (ListSourcesResponse);
+  rpc HandleDriveWebhook(DriveWebhookPayload) returns (WebhookAck);
+}
+
+message DirectUploadRequest {
+  string run_id = 1;
+  string user_id = 2;
+  string filename = 3;
+  string declared_mime_type = 4;
+  bytes content = 5;
+}
+
+message NormalizationResponse {
+  repeated NormalizedImage images = 1;
+  string archival_blob_ref = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message NormalizedImage {
+  string image_blob_ref = 1;
+  int32 page_index = 2;
+  string source = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message StartScanRequest {
+  string run_id = 1;
+  string user_id = 2;
+}
+
+message ScanSessionResponse {
+  string session_id = 1;
+}
+
+message ScanFrameRequest {
+  string session_id = 1;
+  bytes frame = 2;
+}
+
+message ScanFrameResponse {
+  int32 frame_index = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message FinalizeScanRequest {
+  string session_id = 1;
+}
+
+message ListSourcesRequest {
+}
+
+message ListSourcesResponse {
+  repeated string available_sources = 1;
+  repeated string enabled_sources = 2;
+}
+
+message DriveWebhookPayload {
+  string channel_id = 1;
+  string resource_id = 2;
+}
+
+message WebhookAck {
+  bool accepted = 1;
+}
