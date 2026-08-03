@@ -127,6 +127,45 @@ del "%_body_file%" >nul 2>&1
 exit /b 0
 
 REM ------------------------------------------------------------------------------------------
+REM :trim_trailing_space <var_name> -- strips trailing spaces from the named variable in place
+REM
+REM The standard batch idiom for this (repeatedly strip one trailing char while the last char
+REM is a space) -- confirmed the hard way that `for /f "tokens=* delims= "` does NOT do this,
+REM despite looking like it should; that idiom trims LEADING whitespace only.
+:trim_trailing_space
+setlocal enabledelayedexpansion
+set "_tv=!%~1!"
+:trim_trailing_space_loop
+if not "!_tv:~-1!"==" " goto :trim_trailing_space_done
+set "_tv=!_tv:~0,-1!"
+goto :trim_trailing_space_loop
+:trim_trailing_space_done
+endlocal & set "%~1=%_tv%"
+exit /b 0
+
+REM ------------------------------------------------------------------------------------------
+REM :detect_python_bin -- sets PYTHON_BIN, unless already set by the caller's own environment
+REM
+REM Confirmed the hard way, not assumed: a bare PYTHON_BIN=python default silently hung on this
+REM project's own already-documented Day-0 gap (docs/MAINTENANCE.md section 8.1 -- grpcio has
+REM no prebuilt wheel for 3.15, and building it from source has already failed outright in this
+REM project's own environment). Every one of the ~30 service venvs this script provisions needs
+REM grpcio, so this prefers a real 3.14 via the py launcher before falling back. A two-word
+REM value like "py -3.14" works correctly here because batch variable expansion is plain text
+REM substitution (%PYTHON_BIN% -m ...), unlike a POSIX shell where the same value would need
+REM array handling to avoid being treated as one literal command name (see common.sh's own
+REM detect_python_bin for that distinction).
+:detect_python_bin
+if defined PYTHON_BIN exit /b 0
+py -3.14 --version >nul 2>&1
+if not errorlevel 1 (
+    set "PYTHON_BIN=py -3.14"
+    exit /b 0
+)
+set "PYTHON_BIN=python"
+exit /b 0
+
+REM ------------------------------------------------------------------------------------------
 REM :do_bootstrap <dev_mode> <install_root>
 :do_bootstrap
 call :set_defaults
@@ -150,15 +189,35 @@ echo Cancelled.
 exit /b 0
 :skip_dev_confirm
 
+REM Deliberately flat, no goto inside any parenthesized block -- see this file's own header
+REM comment and the do_bootstrap confirm section above for why.
+if not defined REF_OVERRIDE goto :prompt_for_channel
+REM A real, standing escape hatch, not just a today-only test knob -- see common.sh's own
+REM identical feature for the full reasoning. Skips the channel prompt entirely.
+REM
+REM Trimmed via :trim_trailing_space below -- confirmed the hard way that this matters:
+REM `set REF_OVERRIDE=foo && setup-dev.bat` (a completely ordinary way to set an env var
+REM before a chained command) leaves a trailing space IN THE VALUE under cmd.exe's own set
+REM command semantics, unlike `set "VAR=value"`. Without trimming, that trailing space becomes
+REM part of the git ref and the clone fails with a "branch not found" error that looks nothing
+REM like a whitespace problem. Confirmed separately that `for /f "tokens=* delims= "` -- the
+REM usual batch idiom people reach for here -- trims LEADING whitespace only, not trailing.
+set "REF=%REF_OVERRIDE%"
+call :trim_trailing_space REF
+echo.
+echo REF_OVERRIDE set -- bootstrapping %REF% directly, skipping channel selection.
+goto :channel_resolved
+
+:prompt_for_channel
 call :prompt_channel
 call :resolve_channel_ref "%CHANNEL%"
-if "%REF%"=="" (
-    echo.
-    echo The %CHANNEL% channel doesn't have a release yet -- this project is
-    echo still in pre-release development. Falling back to the latest
-    echo development commit instead.
-    set "REF=main"
-)
+if not "%REF%"=="" goto :channel_resolved
+echo.
+echo The %CHANNEL% channel doesn't have a release yet -- this project is
+echo still in pre-release development. Falling back to the latest
+echo development commit instead.
+set "REF=main"
+:channel_resolved
 
 call :generate_instance_id
 call :prompt_license_key
@@ -192,7 +251,8 @@ move "%_tmp_clone_dir%" "%_final_dir%" >nul
 echo Cloned into %_final_dir%
 echo Handing off to Setup API's own finalize routine...
 
-if not defined PYTHON_BIN set "PYTHON_BIN=python"
+call :detect_python_bin
+echo Using interpreter: %PYTHON_BIN%
 set "_finalize_args=%_final_dir%"
 if /i "%_dev_mode%"=="true" set "_finalize_args=%_final_dir% --dev-mode"
 
@@ -211,3 +271,5 @@ echo.
 echo Done. You are ready to go.
 echo Run: %_install_root%\start.bat
 exit /b 0
+
+
