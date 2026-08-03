@@ -77,11 +77,19 @@ silently left half-finished:
   tested (`core/agent_control/backends/local.py`), just not yet presented as its own screen.
 - [ ] `ocr_diff_viewer` — not yet named in `root.py` at all (reached contextually from a
   run, not the root menu); undesigned as of this pass.
-- [ ] Confirm the first-time interactive setup wizard's TUI-side integration against
-  `docs/apis/v3-deepdive-11-setup-api.md`'s real `RunWizard` bidirectional stream — not
-  yet wired to any TUI screen.
-  - [ ] `TERMS_OF_SERVICE` persistence gap (validates acceptance, persists nothing) — fix
-    when the wizard screen is built, since that's the first point it would actually matter.
+- [x] Confirm the first-time interactive setup wizard's TUI-side integration — confirmed
+  real against `v3-deepdive-11-setup-api.md` §7 and the complete word-for-word
+  `docs/SETUP_WIZARD_SCRIPT.md` (not assumed). Built `custom_screens/wizard_script.py`
+  (the script as structured data) + `custom_screens/wizard_screen.py` (drives
+  `WizardEngine.run()` **in-process, not gRPC** — the wizard runs before Supervisor boots
+  the fleet, so no Setup service process exists yet to stream against). Live-tested
+  end-to-end through a full PERSONAL-branch run. Each step's primary decision is real;
+  Tunnel/Billing/SMS's external credential sub-flows report "not available inline yet"
+  honestly rather than faking a form. **Not yet wired into an actual first-run launch
+  path** (`app.py`/`bootstrap.py` don't construct a real `WizardEngine` and show this
+  screen yet) — tracked in `services/interface/CLAUDE.md`.
+  - [ ] `TERMS_OF_SERVICE` persistence gap (validates acceptance, persists nothing) —
+    still open; matters once the screen is wired into a real launch path.
 - [ ] Full settings screen with tooltips as a **structured, editable form** (current
   `settings.py` menu data is real and browsable via `MenuScreen`, but no screen yet lets an
   operator open/edit the raw settings file directly, per the explicit ask for both paths).

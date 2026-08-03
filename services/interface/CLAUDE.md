@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.01`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -81,6 +81,42 @@ pass did not build a screen presenting it interactively; it currently reports th
 **The webapp remains entirely unstarted** (`services/interface/webapp/` is still 0-byte
 scaffolding) — React/TypeScript/Zustand/TanStack Query are resolved decisions (§4) but no
 code exists yet.
+
+**The first-run interactive setup wizard TUI is real, not assumed** — confirmed against
+`v3-deepdive-11-setup-api.md` §7 and `docs/SETUP_WIZARD_SCRIPT.md` before building anything,
+per the explicit instruction to check the deep-dives rather than guess whether this was
+ever actually specified. It was: §7's own words are "TUI-driven via the same menu-data
+pattern as the rest of Interface API rather than a separate wizard UI technology," and
+`docs/SETUP_WIZARD_SCRIPT.md` is the complete, word-for-word 12-step script. Built as
+`custom_screens/wizard_script.py` (the script transcribed into structured
+`WizardStepScript`/`WizardChoice` data, keyed by `WizardStepId` exactly as the deep-dive's
+own `WizardStepPrompt` docstring says a client should) and `custom_screens/wizard_screen.py`
+(a `WizardScreen` driving `services/setup/wizard.py`'s real `WizardEngine.run()` async
+generator directly — live-tested end to end through a full `PERSONAL`-branch run reaching
+a real `WizardState`, `tests/unit/services/interface/test_wizard_screen.py`).
+
+**Real, not a wire call, and that's a deliberate finding, not an oversight.** The wizard
+runs *before* Supervisor boots the fleet (§7.4: wizard -> `strip_development_content()` ->
+`build_webapp()` -> Supervisor's Boot Sequence) — there is no Setup API service process up
+yet for a `RunWizard` gRPC stream to call. `WizardScreen` calls `WizardEngine.run()`
+in-process instead, the same async-generator shape the engine's own docstring says maps
+onto bidirectional streaming, just without the wire in between for this one moment in the
+system's lifecycle where nothing is serving yet.
+
+**Scope actually covered, stated precisely**: each step's *primary* decision — the one
+`WizardEngine._apply_*` actually branches on — is wired to a real `WizardAnswer`, live-
+tested. The deeper external follow-up flows three steps describe (Cloudflare's own
+device-login flow for Tunnel Exposure, PSP credential entry for Billing, SMS provider
+credentials/sender-name registration) are not implemented inline — selecting "set this up
+now" on those three submits a real, valid *skip* and shows "isn't available inline yet,
+configure later in Settings," the same honest-placeholder discipline as the five unbuilt
+custom screens above, rather than a fabricated credential form. **This screen is not yet
+wired into `app.py`/`bootstrap.py`'s own real first-run flow** — it exists and works
+end-to-end against a `WizardEngine`, but nothing yet constructs one from a real
+`HardwareProfile`/gateway set and launches `WizardScreen` as the actual first thing a
+fresh install shows; that wiring is the next real step, not done in this pass.
+`TERMS_OF_SERVICE`'s own persistence gap (`services/setup/wizard.py`'s own docstring —
+validates acceptance, persists nothing) is unchanged by this pass.
 
 **`boot_sequence.py` (Supervisor) gained a new, optional `on_result` callback parameter in
 this same pass** — backward-compatible (defaults to `None`, every pre-existing caller and
