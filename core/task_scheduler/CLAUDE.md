@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -95,8 +95,26 @@ ticket; one rejected in the form is a form error.
   is the adapter that puts it there, kept out of `registry.py` because the allowlist is global
   and process-wide while this is per-user (`docs/PRINCIPLES.md` §1.5).
 
-**Known gap, flagged rather than silently filled**: §7 specifies a five-RPC gRPC surface
-(`CreateScheduledTask`, `UpdateScheduledTask`, `DeleteScheduledTask`, `ListScheduledTasks`,
-`ListSchedulableActions`) and there is no `.proto` here yet. Every behaviour those RPCs would
-translate — allowlist enforcement, cron validation, the per-tier cap, per-user scoping — is
-implemented and tested at the in-process layer; what is missing is the wire translation on top.
+**The `.proto` gap this section used to describe is now closed.** `task_scheduler.proto`
+defines the five RPCs the deep-dive names (`CreateScheduledTask`/`UpdateScheduledTask`/
+`DeleteScheduledTask`/`ListScheduledTasks`/`ListSchedulableActions`). Two new files carry
+the real assembly: `service.py`'s `TaskSchedulerService` combines `TaskStore` (per-user
+persistence), `SchedulableActionRegistry` (the allowlist), and `cron.parse`/
+`enforce_task_cap` (creation-time validation) into one operations surface; `grpc_servicer.py`'s
+`TaskSchedulerServicer` wires that to the wire. Confirmed live: an owner creating a task
+against a registered action and valid cron expression; a `client`-role caller and an
+unresolvable session both denied `ROLE_FORBIDDEN`; an unregistered action and a malformed
+cron expression both rejected at creation, never accepted; an update changing only the
+field actually supplied; a delete that removes the real row; and `ListScheduledTasks`
+correctly scoped per user (two different owners each seeing only their own tasks).
+
+**`errors.RoleForbidden` is a real addition, made alongside the servicer.** This package's
+own opening line ("letting an owner/staff user configure their own recurring actions")
+implies a role gate `contracts.py`'s own docstring already promised (mirroring
+`core/audit/service.py`'s injected, fail-closed `role_resolver`), but no error code existed
+for it until the servicer needed one — added to `errors.ERROR_CODES`/`ERROR_SUMMARIES` the
+same append-only way every other error code in this project is added.
+
+**`GrpcSessionResolver` (`grpc_servicer.py`) is genuinely synchronous, matching
+`core/support_ticketing/service.py`'s own equivalent** — a plain `grpc.insecure_channel`,
+not `grpc.aio`, since nothing here requires an async resolver signature.

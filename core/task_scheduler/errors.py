@@ -68,6 +68,17 @@ class TriggerUnavailable(TaskSchedulerError):
     """
 
 
+class RoleForbidden(TaskSchedulerError):
+    """The resolved caller role does not permit this call at all (`service.py`'s own gRPC
+    boundary, added alongside it) — this API's own opening line names it as "letting an
+    owner/staff user configure their own recurring actions," and includes the case where no
+    role could be resolved at all (`docs/PRINCIPLES.md` §4.2, fail closed). Not part of
+    `contracts.py`'s original taxonomy because permission resolution is `service.py`'s own
+    concern (this module's own docstring already says so, mirroring `core/audit/service.py`'s
+    injected, fail-closed `role_resolver`), added the moment that servicer was actually built.
+    """
+
+
 #: Stable wire codes for the `.proto` surface's own `error_code` field (§7). Field-only-append
 #: discipline applies here the same way it does to the `.proto`: a code is added, never
 #: renamed, because a client may be matching on it.
@@ -79,6 +90,7 @@ ERROR_CODES: FrozenDict = FrozenDict(
         TaskNotFound: "TASK_NOT_FOUND",
         TaskLimitExceeded: "TASK_LIMIT_EXCEEDED",
         TriggerUnavailable: "TRIGGER_UNAVAILABLE",
+        RoleForbidden: "ROLE_FORBIDDEN",
     }
 )
 
@@ -97,6 +109,7 @@ ERROR_SUMMARIES: FrozenDict = FrozenDict(
         "TRIGGER_UNAVAILABLE": (
             "the task was saved, but its live wake mechanism could not be armed right now"
         ),
+        "ROLE_FORBIDDEN": "the caller's resolved role does not permit scheduling tasks",
         "INTERNAL": "an unexpected internal error occurred",
     }
 )
@@ -117,6 +130,7 @@ __all__ = [
     "ERROR_SUMMARIES",
     "InvalidCronExpression",
     "InvalidTaskRequest",
+    "RoleForbidden",
     "TaskLimitExceeded",
     "TaskNotFound",
     "TaskSchedulerError",

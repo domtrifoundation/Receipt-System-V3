@@ -1,0 +1,97 @@
+// Task Scheduler API gRPC surface (`v3-deepdive-39-task-scheduler.md` §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+//
+// Every mutating/reading call carries `session_id`, resolved server-side to `(user_id,
+// role)` — never a `user_id` the caller asserts about itself (`docs/PRINCIPLES.md` §4.2).
+// `ListSchedulableActions` needs no session: the allowlist itself carries no per-user data.
+
+syntax = "proto3";
+
+package resibo.task_scheduler.v1;
+
+service TaskSchedulerService {
+  rpc CreateScheduledTask(CreateTaskRequest) returns (TaskResponse);
+  rpc UpdateScheduledTask(UpdateTaskRequest) returns (TaskResponse);
+  rpc DeleteScheduledTask(DeleteTaskRequest) returns (DeleteTaskResponse);
+  rpc ListScheduledTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc ListSchedulableActions(ListActionsRequest) returns (ListActionsResponse);
+}
+
+message ScheduledTaskInfo {
+  string task_id = 1;
+  string created_by = 2;
+  string action = 3;
+  map<string, string> action_params = 4;
+  string cron_expression = 5;
+  bool enabled = 6;
+  string created_at = 7;          // RFC 3339
+  string updated_at = 8;          // RFC 3339
+}
+
+message SchedulableActionInfo {
+  string name = 1;
+  string description = 2;
+  repeated string param_keys = 3;
+}
+
+message CreateTaskRequest {
+  string session_id = 1;
+  string action = 2;
+  map<string, string> action_params = 3;
+  string cron_expression = 4;
+  bool enabled = 5;
+}
+
+message UpdateTaskRequest {
+  string session_id = 1;
+  string task_id = 2;
+  // Empty/unset means "leave unchanged" — see UpdateTaskRequestFieldMask below for the
+  // one genuinely ambiguous case (action_params).
+  string action = 3;
+  map<string, string> action_params = 4;
+  bool action_params_set = 7;     // true means "apply action_params even if it's empty"
+  string cron_expression = 5;
+  bool enabled = 6;
+  bool enabled_set = 8;           // true means "apply enabled" (a bare bool can't mean unset)
+}
+
+message DeleteTaskRequest {
+  string session_id = 1;
+  string task_id = 2;
+}
+
+message ListTasksRequest {
+  string session_id = 1;
+}
+
+message ListActionsRequest {
+}
+
+message TaskResponse {
+  ScheduledTaskInfo task = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message DeleteTaskResponse {
+  bool ok = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ListTasksResponse {
+  repeated ScheduledTaskInfo tasks = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ListActionsResponse {
+  repeated SchedulableActionInfo actions = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
