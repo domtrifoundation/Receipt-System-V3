@@ -22,11 +22,7 @@ __all__ = ["SUPERVISOR_VENV_DIRNAME", "install_supervisor", "supervisor_python"]
 SUPERVISOR_VENV_DIRNAME = ".venv"
 
 
-def install_supervisor(clone_dir: Path, install_root: Path) -> Path:
-    """Copies `supervisor/` from `clone_dir` to `<install_root>/supervisor/`, alongside
-    the arbitration/pin JSON files that already live there."""
-    source = clone_dir / "supervisor"
-    target = install_root / "supervisor"
+def _copy_package(source: Path, target: Path) -> None:
     for item in source.iterdir():
         if item.name in ("__pycache__",):
             continue
@@ -36,6 +32,17 @@ def install_supervisor(clone_dir: Path, install_root: Path) -> Path:
         else:
             target.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, dest)
+
+
+def install_supervisor(clone_dir: Path, install_root: Path) -> Path:
+    """Copies `supervisor/` from `clone_dir` to `<install_root>/supervisor/`, alongside
+    the arbitration/pin JSON files that already live there. Also copies `common/` —
+    Supervisor's own code imports it (`FrozenDict`, error codes) and it must be reachable
+    from the top-level install, never from inside whichever clone happened to be active
+    when Supervisor was last installed."""
+    target = install_root / "supervisor"
+    _copy_package(clone_dir / "supervisor", target)
+    _copy_package(clone_dir / "common", install_root / "common")
     return target
 
 
