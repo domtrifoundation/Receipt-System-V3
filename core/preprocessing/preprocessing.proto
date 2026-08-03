@@ -1,0 +1,68 @@
+// Preprocessing API gRPC surface (`v3-deepdive-03-preprocessing-api.md` §10).
+//
+// No streaming — same reasoning as OCR API's `Read` call: variant generation for one image is
+// fast relative to the run-level progress streaming that already exists at the orchestration
+// layer.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an `error_code`/
+// `error_detail` pair, never a bare gRPC status for anything a caller needs to branch on.
+
+syntax = "proto3";
+
+package resibo.preprocessing.v1;
+
+service PreprocessingService {
+  rpc Rasterize(RasterizeRequest) returns (RasterizeResponse);
+  rpc GenerateVariants(GenerateVariantsRequest) returns (GenerateVariantsResponse);
+  rpc ListVariantKinds(ListVariantKindsRequest) returns (ListVariantKindsResponse);  // for Interface API's settings menu
+}
+
+message RasterizeRequest {
+  string run_id = 1;
+  string user_id = 2;
+  string source_blob_ref = 3;
+  int32 page_index = 4;
+  float scale = 5;
+}
+
+message RasterizeResponse {
+  string image_blob_ref = 1;
+  int32 width = 2;
+  int32 height = 3;
+  int32 duration_ms = 4;
+  string device = 5;
+  string error_code = 6;
+  string error_detail = 7;
+}
+
+message GenerateVariantsRequest {
+  string run_id = 1;
+  string user_id = 2;
+  string image_blob_ref = 3;
+  repeated string kinds = 4;        // VariantKind values
+  string device_preference = 5;     // "auto" | "cpu" | "opencl"
+}
+
+message GenerateVariantsResponse {
+  repeated Variant variants = 1;
+}
+
+message Variant {
+  string kind = 1;
+  string image_blob_ref = 2;
+  int32 duration_ms = 3;
+  string device = 4;
+  string error_code = 5;
+  string error_detail = 6;
+}
+
+message ListVariantKindsRequest {
+}
+
+message ListVariantKindsResponse {
+  repeated string available_kinds = 1;
+  repeated string enabled_kinds = 2;
+}

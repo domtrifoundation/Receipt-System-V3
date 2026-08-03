@@ -1,0 +1,18 @@
+# Preprocessing API — third-party runtime dependencies beyond `common/requirements.txt`.
+#
+# opencv-python and pymupdf have no prebuilt wheel for Python 3.15 yet (3.15 is still beta as
+# of this writing) — confirmed directly: installing against a 3.15 interpreter falls through to
+# a from-source build that fails on an unrelated linker issue, i.e. no compatible wheel exists
+# at all. That is why this package is NOT in `noxfile.py`'s `FORWARD_COMPAT_DEPS` list — adding
+# it there would just fail the same way — and why every test module here that imports one of
+# these guards the import with `pytest.importorskip` instead.
+
+# --- Rasterizing PDF pages to images (v3-deepdive-03-preprocessing-api.md §5) ------------------
+pymupdf>=1.24
+
+# --- Image decode/encode and all variant generation (same deep-dive, §6-§8) -------------------
+# The OpenCL Transparent API (`cv2.UMat`) is this package's own hardware-acceleration path
+# (`hardware.py`); ordinary `numpy.ndarray` is the CPU fallback. Both are exercised directly by
+# this package's own tests, not mocked.
+opencv-python>=4.10
+numpy>=1.26
