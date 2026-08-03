@@ -15,6 +15,7 @@ from concurrent import futures
 
 from .contracts import BlobRef, BlobStoreGateway, RasterRequest, VariantKind, VariantRequest
 from .generation import VariantExecutor
+from .metrics import PreprocessingMetricsCollector
 from .raster import rasterize
 from .variant_registry import PreprocessingConfig, VariantRegistry
 
@@ -36,6 +37,12 @@ class PreprocessingServicer:
         self._config = config or PreprocessingConfig()
         self._executor = VariantExecutor(blob_store_factory, config=self._config, worker_count=worker_count)
         self._registry = VariantRegistry(self._config)
+        #: Built and independently tested (`metrics.py`) but never actually instantiated
+        #: anywhere in this servicer until caught — the same "declared, never wired"
+        #: gap already found and fixed in every other API's own real assembly this
+        #: session (Ingestion's `GoogleDriveSource`/`webhook_manager`, Inference's
+        #: `max_concurrent_generations`, OCR's `per_engine_timeout_ms`).
+        self._metrics = PreprocessingMetricsCollector()
 
     async def Rasterize(self, request, context=None):  # noqa: N802 - gRPC naming
         from .generated import preprocessing_pb2 as pb
@@ -48,6 +55,7 @@ class PreprocessingServicer:
             scale=request.scale or 2.5,
         )
         result = await rasterize(raster_request, self._blob_store_factory())
+        self._metrics.increment("rasters_failed" if result.error is not None else "rasters_succeeded")
 
         response = pb.RasterizeResponse()
         if result.image_ref is not None:
@@ -85,6 +93,12 @@ class PreprocessingServicer:
             if variant.error is not None:
                 msg.error_code = variant.error.code.value
                 msg.error_detail = variant.error.detail
+                self._metrics.increment("variants_failed")
+            else:
+                self._metrics.increment("variants_succeeded")
+                self._metrics.increment(
+                    "variants_run_on_opencl" if variant.device == "opencl" else "variants_run_on_cpu"
+                )
         return response
 
     async def ListVariantKinds(self, request, context=None):  # noqa: N802 - gRPC naming

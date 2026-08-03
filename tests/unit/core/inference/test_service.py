@@ -33,7 +33,7 @@ class _FakeWorker:
     def is_alive(self) -> bool:
         return True
 
-    async def submit(self, request, grammar_schema, images=()):
+    async def submit(self, request, grammar_schema, images=(), on_retry=None):
         return GenerationResult(
             text="hello from a fake worker", tool_call=None, finish_reason=FinishReason.STOP,
             schema_valid=True, device="cpu", duration_ms=1,

@@ -78,6 +78,25 @@ def test_download_works_identically_regardless_of_credential_provider_kind(blob_
         assert blob_store.blobs[result.raw_blob_ref.logical_id] == b"fake-pdf-bytes"
 
 
+def test_download_increments_the_drive_downloads_metric_when_provided(blob_store):
+    """`IngestionMetrics.drive_downloads` was declared and read by nothing until this
+    was caught — the same "built, never wired to its real call site" gap already found
+    and fixed for `GoogleDriveSource`'s own registration and the whole `webhook_manager`
+    sub-API."""
+    from core.ingestion.metrics import IngestionMetricsCollector
+
+    service = _FakeDriveService(
+        files=[{"id": "f1", "name": "receipt.pdf", "mimeType": "application/pdf"}],
+        downloads={"f1": b"fake-pdf-bytes"},
+    )
+    credentials = _FakeCredentialProvider(service)
+    metrics = IngestionMetricsCollector()
+    source = GoogleDriveSource(credentials, blob_store, DriveSourceConfig(folder_id="folder1"), metrics)
+
+    run(source.download("r1", "u1", "f1", "receipt.pdf", "application/pdf"))
+    assert metrics.snapshot().drive_downloads == 1
+
+
 def test_is_available_requires_a_configured_folder(blob_store):
     service = _FakeDriveService(files=[], downloads={})
     credentials = _FakeCredentialProvider(service)

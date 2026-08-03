@@ -67,6 +67,13 @@ class _WorkerJob:
 class _WorkerResponse:
     request_id: str
     result: GenerationResult
+    #: Whether `_generate_with_retry` retried at least once for this request — computed
+    #: in the child process (the only place that decision is made) and carried back so
+    #: the parent process's own `InferenceMetrics.truncation_retry_count` (deep-dive
+    #: §5.2) can actually be incremented. This field was previously discarded at the
+    #: call site (`output, _retried = ...`) — a real, complete gap: the metric existed
+    #: and nothing crossing the process boundary ever carried the signal it needed.
+    retried: bool = False
 
 
 @dataclass(frozen=True)
@@ -188,9 +195,10 @@ def _worker_main(
                 return
             job: _WorkerJob = item
             start = time.monotonic()
+            retried = False
             try:
                 prompt = build_prompt(job.request.messages)
-                output, _retried = _generate_with_retry(
+                output, retried = _generate_with_retry(
                     backend, prompt, job.grammar_schema, job.request.max_tokens,
                     job.request.temperature, truncation, job.images,
                     reasoning_marker, reasoning_token_budget,
@@ -209,7 +217,7 @@ def _worker_main(
                     InferenceError(InferenceErrorCode.GENERATION_CRASHED, f"{type(exc).__name__}: {exc}"),
                     duration_ms, device,
                 )
-            response_queue.put(_WorkerResponse(job.request_id, result))
+            response_queue.put(_WorkerResponse(job.request_id, result, retried))
 
 
 class PresetWorker:
@@ -308,14 +316,29 @@ class PresetWorker:
                 return
             future = self._pending.pop(response.request_id, None)
             if future is not None and not future.done():
-                future.set_result(response.result)
+                # The whole `_WorkerResponse`, not just `.result` — `submit()` unpacks
+                # `.retried` too, the signal `InferenceModelRegistry` needs to increment
+                # its own `truncation_retry_count` metric (deep-dive §5.2). This was
+                # previously discarded here entirely (`future.set_result(response.
+                # result)`), a real, complete gap: the metric existed and nothing
+                # crossing the process boundary ever carried the signal it needed.
+                future.set_result(response)
 
     def is_alive(self) -> bool:
         return self._process is not None and self._process.is_alive()
 
     async def submit(
-        self, request: GenerationRequest, grammar_schema: dict | None, images: tuple[bytes, ...] = ()
+        self,
+        request: GenerationRequest,
+        grammar_schema: dict | None,
+        images: tuple[bytes, ...] = (),
+        on_retry: Callable[[], None] | None = None,
     ) -> GenerationResult:
+        """`on_retry`, if given, is called (synchronously, no return value) when this
+        specific request's own generation retried at least once (deep-dive §5.2) —
+        `InferenceModelRegistry` passes a callback that increments its own
+        `truncation_retry_count` metric. Optional and defaulted to `None` so every
+        existing caller that doesn't care about this signal is unaffected."""
         if not self.is_alive():
             raise WorkerUnavailable(f"preset {self._preset_name!r} worker is not running")
 
@@ -335,10 +358,16 @@ class PresetWorker:
             job = _WorkerJob(request_id, request, grammar_schema, images)
             await loop.run_in_executor(None, self._request_queue.put, job)
             try:
-                return await asyncio.wait_for(future, timeout=request.timeout_ms / 1000)
+                response: _WorkerResponse = await asyncio.wait_for(
+                    future, timeout=request.timeout_ms / 1000
+                )
             except TimeoutError as exc:
                 self._pending.pop(request_id, None)
                 raise GenerationTimeout(f"exceeded {request.timeout_ms}ms") from exc
+
+            if on_retry is not None and response.retried:
+                on_retry()
+            return response.result
 
     async def shutdown(self) -> None:
         if self._reader_task is not None:

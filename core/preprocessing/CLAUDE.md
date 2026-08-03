@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.01`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -88,3 +88,14 @@ Variant generation runs in a `ProcessPoolExecutor`, not threads, because OpenCV'
   (a periodic usage metric push, not a reservation) than the ledger this session built
   for the other two APIs. Left as a real, named, still-open item rather than forced into
   the reservation shape it doesn't actually need.
+- **`PreprocessingMetricsCollector` was built and independently tested
+  (`test_metrics.py`) but never instantiated anywhere in `PreprocessingServicer` at
+  all** — every `Rasterize`/`GenerateVariants` call went uncounted, the same
+  "declared, never wired into the real assembly" gap found and fixed in every other
+  API's own service this session (Ingestion's `GoogleDriveSource`/`webhook_manager`,
+  Inference's `max_concurrent_generations`, OCR's `per_engine_timeout_ms`). Fixed:
+  `PreprocessingServicer.__init__` now constructs one, `Rasterize` increments
+  `rasters_succeeded`/`rasters_failed`, `GenerateVariants` increments
+  `variants_succeeded`/`variants_failed` and `variants_run_on_opencl`/
+  `variants_run_on_cpu` per the real resolved device on each variant. Confirmed live
+  with a real servicer call (`test_servicer_metrics_actually_increment_not_just_declared`).

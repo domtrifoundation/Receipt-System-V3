@@ -79,6 +79,33 @@ def test_rasterize_through_the_servicer_directly(blob_dir):
 
 
 @pytest.mark.slow
+def test_servicer_metrics_actually_increment_not_just_declared(blob_dir):
+    """The concrete fix for a real gap: `PreprocessingMetricsCollector` was built and
+    independently tested (`test_metrics.py`) but never instantiated anywhere in
+    `PreprocessingServicer` at all — every rasterize/generate call went uncounted."""
+
+    async def go():
+        store = _make_test_blob_store()
+        source_ref = await store.write_blob(make_synthetic_pdf())
+        servicer = PreprocessingServicer(_make_test_blob_store)
+        try:
+            from core.preprocessing.generated import preprocessing_pb2 as pb
+
+            request = pb.RasterizeRequest(
+                run_id="r1", user_id="u1", source_blob_ref=source_ref.logical_id,
+                page_index=0, scale=2.0,
+            )
+            await servicer.Rasterize(request)
+            return servicer._metrics.snapshot()
+        finally:
+            servicer._executor.shutdown()
+
+    snapshot = asyncio.run(go())
+    assert snapshot.rasters_succeeded == 1
+    assert snapshot.rasters_failed == 0
+
+
+@pytest.mark.slow
 def test_list_variant_kinds_reflects_the_real_registry(blob_dir):
     async def go():
         servicer = PreprocessingServicer(_make_test_blob_store)

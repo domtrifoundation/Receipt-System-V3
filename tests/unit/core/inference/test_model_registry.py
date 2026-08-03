@@ -35,7 +35,7 @@ class _FakeWorker:
     def is_alive(self) -> bool:
         return self._loaded
 
-    async def submit(self, request, grammar_schema, images=()):
+    async def submit(self, request, grammar_schema, images=(), on_retry=None):
         from core.inference.contracts import FinishReason, GenerationResult
 
         return GenerationResult(
@@ -102,6 +102,28 @@ def test_generate_succeeds_through_a_fake_worker_end_to_end():
     result = run(registry.generate(_request()))
     assert result.error is None
     assert result.text == "fake"
+
+
+def test_generate_increments_truncation_retry_count_via_the_on_retry_callback():
+    """`InferenceMetrics.truncation_retry_count` was declared and read by nothing until
+    caught — `InferenceModelRegistry.generate()` now passes a real `on_retry` callback
+    into `worker.submit()` that increments it."""
+    from core.inference.metrics import InferenceMetricsCollector
+
+    class _RetryingWorker(_FakeWorker):
+        async def submit(self, request, grammar_schema, images=(), on_retry=None):
+            if on_retry is not None:
+                on_retry()
+            return await super().submit(request, grammar_schema, images)
+
+    metrics = InferenceMetricsCollector()
+    registry = InferenceModelRegistry(
+        InferenceConfig(presets_enabled=frozenset({"phi4-mini"})),
+        metrics=metrics,
+        worker_factory=lambda name: _RetryingWorker(name),
+    )
+    run(registry.generate(_request()))
+    assert metrics.snapshot().truncation_retry_count == 1
 
 
 def test_generate_resolves_an_empty_preset_to_the_configured_default():

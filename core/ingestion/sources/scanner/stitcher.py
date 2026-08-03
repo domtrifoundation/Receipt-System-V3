@@ -18,10 +18,19 @@ user-facing guidance (deep-dive §4.3.2).
 from __future__ import annotations
 
 import asyncio
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 from ...errors import StitchFailed
+
+if TYPE_CHECKING:
+    # Type-only — `from __future__ import annotations` already defers every annotation
+    # below to a string, so this import never needs to happen at runtime at all. A bare
+    # top-level `import numpy as np` here (this module's own original form) broke
+    # `forward_compat` collection on both 3.14 and 3.15: numpy isn't in `noxfile.py`'s
+    # own narrow `FORWARD_COMPAT_DEPS` list, and this module doesn't otherwise need numpy
+    # itself — every actual numpy call in this file happens inside `capture_session.py`'s
+    # own lazily-imported `cv2`/`numpy` usage, not here.
+    import numpy as np
 
 __all__ = ["stitch_panorama"]
 

@@ -196,8 +196,12 @@ class InferenceModelRegistry:
                 InferenceError(InferenceErrorCode.MODEL_LOAD_FAILED, str(exc))
             )
 
+        def _record_retry() -> None:
+            if self._metrics is not None:
+                self._metrics.increment("truncation_retry_count")
+
         try:
-            result = await worker.submit(request, grammar_schema, images)
+            result = await worker.submit(request, grammar_schema, images, on_retry=_record_retry)
         except GenerationTimeout as exc:
             self._record_failure(InferenceErrorCode.GENERATION_TIMEOUT)
             duration_ms = int((time.monotonic() - start) * 1000)

@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.03`
+`a03.00.04`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -158,6 +158,18 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
      CUDA's `device_id` and, per §8.1's own explicit "mandatory, not optional"
      requirement, TensorRT's engine-cache enable flag and cache path (uncached TensorRT
      rebuilds its engine from scratch on every session creation).
+  6. **`InferenceMetrics.truncation_retry_count` was declared and structurally could
+     never be incremented** — the retry decision (`_generate_with_retry`) happens
+     entirely inside a `PresetWorker`'s own child process, while the metrics collector
+     lives in the parent (`InferenceModelRegistry`); the signal was computed and then
+     discarded at the call site (`output, _retried = ...`), never crossing the process
+     boundary at all. Fixed: `_WorkerResponse` (the internal message crossing
+     `response_queue`) now carries `retried: bool`; `PresetWorker.submit()` gained an
+     optional `on_retry` callback invoked only when this specific request actually
+     retried; `InferenceModelRegistry.generate()` passes one that increments the real
+     metric. Confirmed live through the real multiprocessing pipeline: `on_retry` fires
+     exactly once for a request that truncates and retries, not at all for one that
+     completes normally (`test_on_retry_fires_only_when_a_real_retry_happened`).
 
 ## Implementation status
 

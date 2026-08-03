@@ -144,6 +144,35 @@ def test_tool_call_grammar_produces_a_parsed_tool_call():
 
 
 @pytest.mark.slow
+def test_on_retry_fires_only_when_a_real_retry_happened():
+    """The concrete fix for a real gap: `InferenceMetrics.truncation_retry_count` was
+    declared and nothing crossing the process boundary ever carried the signal it
+    needed to increment (`output, _retried = ...` discarded the flag entirely at the
+    call site). Confirms `on_retry` fires exactly once for a request that truncates and
+    retries, and not at all for one that completes normally."""
+
+    async def go():
+        worker = PresetWorker("test-preset", "fake-model-dir", "cpu", backend_factory=make_fake_backend)
+        await worker.load()
+        try:
+            calls = []
+            truncated = await worker.submit(
+                _request("TRUNCATE please"), grammar_schema={"type": "object"},
+                on_retry=lambda: calls.append(1),
+            )
+            assert truncated.finish_reason.value == "length"
+            assert len(calls) == 1
+
+            normal = await worker.submit(_request("hello there"), grammar_schema=None, on_retry=lambda: calls.append(1))
+            assert normal.error is None
+            assert len(calls) == 1  # unchanged — no retry happened for this one
+        finally:
+            await worker.shutdown()
+
+    run(go())
+
+
+@pytest.mark.slow
 def test_truncated_output_retries_then_salvages():
     async def go():
         worker = PresetWorker("test-preset", "fake-model-dir", "cpu", backend_factory=make_fake_backend)

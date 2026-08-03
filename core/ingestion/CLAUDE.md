@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.01`
+`a03.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -77,6 +77,38 @@ Every source is an independently enableable Provider Registry entry. A self-host
   unmatchable-content failure all producing the real, distinct `cv2.Stitcher` status
   codes) — see `format_normalization`'s own sub-CLAUDE.md for the codec/raster-side
   findings.
+- **`GoogleDriveSource` was built and independently tested but never actually
+  constructed or registered anywhere in the running service — a real, complete gap
+  found only by checking that every built module is genuinely reachable, not just that
+  it has its own passing tests.** `IngestionServicer`'s own `SourceRegistry` previously
+  only ever contained `SourceKind.DIRECT_UPLOAD`; Drive was completely unreachable
+  through the running service regardless of how it was configured. Fixed:
+  `drive_assembly.py` is the real assembly point — it reads `credential_strategy`
+  ("service_account" | "oauth"), builds the matching credential provider, and
+  constructs a real `GoogleDriveSource` that `IngestionServicer.__init__` now registers
+  unconditionally (safe: `is_available()` correctly reports `False` without a
+  configured folder, matching the deep-dive's own "direct-upload-only" degrade
+  guarantee — confirmed live).
+- **The entire `webhook_manager` sub-API was disconnected from the running service —
+  the same shape of gap, at sub-API scale.** `subscription.py`, `circadian.py`, and
+  `callback_handler.py` each existed and were independently tested, but nothing ever
+  constructed a subscription store, tracked a Drive Changes API page token across
+  calls, or recorded a delivery for Circadian — `HandleDriveWebhook` (the one real gRPC
+  entry point named in `ingestion.proto`) acknowledged every callback unconditionally
+  without doing anything at all. Fixed: `webhook_manager/manager.py`'s new
+  `WebhookManager` is the real, stateful assembly point (register/renew/handle_callback,
+  a bounded `pending_events` queue standing in for Execution Core's own not-yet-built
+  debounce consumer, per deep-dive §1's "never decides run boundaries" boundary).
+  `IngestionServicer` now holds one, built from the same shared credential provider as
+  `GoogleDriveSource`, and `HandleDriveWebhook` genuinely delegates to it — confirmed
+  live: an unregistered channel correctly returns `accepted=False`, and a full
+  register -> handle_callback -> Circadian-recording sequence against fake Drive
+  responses produces real `ChangeEvent`s and updates `needs_fallback_poll()` correctly.
+- **`IngestionMetrics.drive_downloads` was declared and read by nothing** — the same
+  shape of gap, found by the same "does every declared field have a real usage site"
+  check. Fixed: `GoogleDriveSource` now takes an optional metrics collector and
+  increments it on a real download; `service.py` passes its own `self._metrics` through
+  `drive_assembly.build_google_drive_source()`.
 
 ## Implementation status
 

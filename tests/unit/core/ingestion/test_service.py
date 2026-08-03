@@ -157,3 +157,32 @@ def test_list_enabled_sources_reflects_the_real_registry(blob_store, clean_conte
 
     response = asyncio.run(go())
     assert "direct_upload" in response.available_sources
+
+
+@pytest.mark.slow
+def test_google_drive_source_is_genuinely_registered_not_disconnected(blob_store, clean_content_security_server):
+    """The concrete fix for a real gap: `GoogleDriveSource` was built and independently
+    tested, but nothing ever constructed one and registered it into the running
+    service's own `SourceRegistry` — Drive was completely unreachable regardless of
+    configuration."""
+    from core.ingestion.contracts import SourceKind
+
+    servicer = IngestionServicer(blob_store, content_security=clean_content_security_server)
+    assert SourceKind.GOOGLE_DRIVE in servicer._registry._sources
+
+
+@pytest.mark.slow
+def test_handle_drive_webhook_rejects_an_unregistered_channel(blob_store, clean_content_security_server):
+    """The concrete fix for the other real gap: this RPC used to acknowledge every
+    callback unconditionally without doing anything at all — the entire webhook_manager
+    sub-API was disconnected from the running service."""
+    from core.ingestion.generated import ingestion_pb2 as pb
+    import asyncio
+
+    servicer = IngestionServicer(blob_store, content_security=clean_content_security_server)
+
+    async def go():
+        return await servicer.HandleDriveWebhook(pb.DriveWebhookPayload(channel_id="never-registered"))
+
+    response = asyncio.run(go())
+    assert response.accepted is False

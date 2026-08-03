@@ -27,12 +27,16 @@ from .contracts import (
     SourceFile,
     SourceKind,
 )
+from .drive_assembly import GoogleDriveConfig, build_credential_provider, build_google_drive_source
 from .errors import ContentSecurityUnavailable
 from .format_normalization import errors as fn_errors
 from .metrics import IngestionMetricsCollector
 from .source_registry import SourceRegistry, SourceRegistryConfig
 from .sources.direct_upload import DirectUploadSource
 from .sources.scanner.capture_session import CaptureSessionStore
+from .webhook_manager.errors import UnknownSubscription
+from .webhook_manager.manager import WebhookManager
+from .webhook_manager.subscription import DriveWebhookAdapter
 
 DEFAULT_ADDRESS = "127.0.0.1:50074"
 
@@ -131,6 +135,8 @@ class IngestionServicer:
         content_security: ContentSecurityClient | None = None,
         archival_codec: str = DEFAULT_ARCHIVAL_CODEC,
         archival_quality: int = DEFAULT_ARCHIVAL_QUALITY,
+        google_drive: GoogleDriveConfig | None = None,
+        source_registry_config: SourceRegistryConfig | None = None,
     ) -> None:
         self._blob_store = blob_store
         self._content_security = content_security or ContentSecurityClient()
@@ -138,10 +144,43 @@ class IngestionServicer:
         self._archival_quality = archival_quality
         self._metrics = IngestionMetricsCollector()
         self._direct_upload = DirectUploadSource(blob_store)
-        self._registry = registry or SourceRegistry(
-            {SourceKind.DIRECT_UPLOAD: self._direct_upload}, SourceRegistryConfig()
-        )
+        google_drive = google_drive or GoogleDriveConfig()
+        # One credential provider instance, shared between the download path
+        # (`GoogleDriveSource`) and the webhook path (`DriveWebhookAdapter`) — resolving
+        # `credential_strategy` twice independently could let the two paths disagree
+        # about which strategy is active.
+        drive_credentials = build_credential_provider(google_drive)
+        if registry is not None:
+            self._registry = registry
+        else:
+            # `GoogleDriveSource` was built and independently tested but never actually
+            # constructed/registered anywhere — the real gap this assembly closes
+            # (`drive_assembly.py`'s own module docstring). A self-hosted install with
+            # no Drive folder configured still degrades cleanly: `GoogleDriveSource.
+            # is_available()` reports `False` without a `folder_id`, so registering it
+            # unconditionally is safe (deep-dive §1's own "direct-upload-only" guarantee).
+            drive_source = build_google_drive_source(drive_credentials, google_drive, blob_store, self._metrics)
+            self._registry = SourceRegistry(
+                {SourceKind.DIRECT_UPLOAD: self._direct_upload, SourceKind.GOOGLE_DRIVE: drive_source},
+                source_registry_config or SourceRegistryConfig(),
+            )
         self._scan_sessions = CaptureSessionStore()
+
+        # `webhook_manager`'s own subscription/circadian/callback-handling logic existed
+        # and was independently tested but nothing ever constructed or held one of these
+        # — `HandleDriveWebhook` used to acknowledge every callback unconditionally
+        # without doing anything at all. Real now, still unverified against a real Drive
+        # webhook delivery (no real credentials/channel exist in this environment).
+        webhook_adapter = (
+            DriveWebhookAdapter(drive_credentials, google_drive.webhook_callback_url)
+            if google_drive.webhook_callback_url else None
+        )
+        self._webhook_manager = WebhookManager(
+            webhook_adapter,
+            renewal_lead_time_hours=google_drive.webhook_renewal_lead_time_hours,
+            fallback_poll_interval_hours=google_drive.fallback_poll_interval_hours,
+        )
+        self._drive_credentials = drive_credentials
 
     async def SubmitDirectUpload(self, request, context=None):  # noqa: N802 - gRPC naming
         from .generated import ingestion_pb2 as pb
@@ -210,13 +249,21 @@ class IngestionServicer:
         return response
 
     async def HandleDriveWebhook(self, request, context=None):  # noqa: N802 - gRPC naming
-        """Acknowledges receipt. Real change-event emission (`webhook_manager.
-        callback_handler.handle_drive_webhook`) needs a live Drive credential/page-token
-        state this servicer does not itself own yet — Execution Core's own event
-        consumption wiring is a separate integration step, not something faked here."""
+        """Delegates to `WebhookManager.handle_callback()` for real — this RPC used to
+        acknowledge every callback unconditionally without doing anything at all
+        (`webhook_manager`'s entire sub-API was disconnected from the running service).
+        `accepted=False` for an unknown/unregistered channel or a Drive API failure —
+        Drive's own retry behavior for a webhook that returns an error response is the
+        real backstop here, not a design gap in this RPC."""
         from .generated import ingestion_pb2 as pb
 
-        return pb.WebhookAck(accepted=True)
+        try:
+            await self._webhook_manager.handle_callback(request.channel_id, self._drive_credentials)
+            return pb.WebhookAck(accepted=True)
+        except UnknownSubscription:
+            return pb.WebhookAck(accepted=False)
+        except Exception:  # noqa: BLE001 - any Drive API failure still acks False, never raises to Gateway
+            return pb.WebhookAck(accepted=False)
 
     def _record_metrics(self, result: NormalizationResult) -> None:
         if result.error is None:

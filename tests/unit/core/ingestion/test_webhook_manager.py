@@ -87,3 +87,78 @@ def test_circadian_catches_a_channel_that_silently_stopped_delivering():
     monitor = CircadianMonitor(fallback_poll_interval=timedelta(hours=1))
     monitor.record_delivery("chan1", at=datetime.now(timezone.utc) - timedelta(hours=2))
     assert monitor.needs_fallback_poll("chan1") is True
+
+
+class _FakeChangesCredentials:
+    """A fake `DriveCredentialProvider` whose `get_service()` returns just enough of
+    the Drive API shape for `callback_handler.handle_drive_webhook()`'s own
+    `changes().list()` call."""
+
+    def __init__(self, changes: list[dict]) -> None:
+        self._changes = changes
+
+    def get_service(self):
+        changes = self._changes
+
+        class _Request:
+            def execute(self2):
+                return {"changes": changes}
+
+        class _Changes:
+            def list(self2, pageToken, fields):
+                return _Request()
+
+        class _Service:
+            def changes(self2):
+                return _Changes()
+
+        return _Service()
+
+
+def test_webhook_manager_register_then_handle_callback_produces_change_events():
+    """The concrete fix: `WebhookManager` is the piece that was missing entirely — every
+    module it composes (`subscription.py`, `circadian.py`, `callback_handler.py`) existed
+    and was independently tested, but nothing tracked a subscription, a page token, or
+    recorded a delivery for Circadian. `HandleDriveWebhook` used to acknowledge every
+    callback unconditionally without doing anything at all."""
+    from core.ingestion.webhook_manager.manager import WebhookManager
+
+    adapter = _TrackingAdapter()
+    manager = WebhookManager(adapter)
+
+    subscription = run(manager.register("folder1", start_page_token="tok0"))
+    assert subscription.channel_id == "new-chan"
+    assert manager.circadian.needs_fallback_poll(subscription.channel_id) is True
+
+    credentials = _FakeChangesCredentials([
+        {"fileId": "f1", "removed": False}, {"fileId": "f2", "removed": True},
+    ])
+    events = run(manager.handle_callback(subscription.channel_id, credentials))
+    assert [(e.file_id, e.change_type) for e in events] == [("f1", "modified"), ("f2", "removed")]
+    assert list(manager.pending_events) == list(events)
+    assert manager.circadian.needs_fallback_poll(subscription.channel_id) is False
+
+
+def test_webhook_manager_handle_callback_for_unknown_channel_raises():
+    from core.ingestion.webhook_manager.errors import UnknownSubscription
+    from core.ingestion.webhook_manager.manager import WebhookManager
+
+    manager = WebhookManager(_TrackingAdapter())
+    with pytest.raises(UnknownSubscription):
+        run(manager.handle_callback("never-registered", _FakeChangesCredentials([])))
+
+
+def test_webhook_manager_renew_replaces_the_tracked_channel():
+    from core.ingestion.webhook_manager.manager import WebhookManager
+
+    adapter = _TrackingAdapter()
+    manager = WebhookManager(adapter)
+    old = run(manager.register("folder1", start_page_token="tok0"))
+
+    adapter.calls.clear()
+    new = run(manager.renew(old.channel_id))
+    assert adapter.calls == ["register", "confirm", "deregister"]
+    # `_TrackingAdapter.register()` always returns the same fixed channel_id, so this
+    # doesn't assert the id changed (a real adapter's own id would) — it asserts the
+    # manager tracks exactly one subscription after renewal, not a stale duplicate.
+    assert manager.known_channel_ids() == (new.channel_id,)

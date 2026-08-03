@@ -16,7 +16,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -63,9 +63,27 @@ Renewal creates a *new* channel ID rather than extending the old one, so the onl
   all produce the correct `needs_fallback_poll()` answer against a real interval,
   matching deep-dive §9's own named required test.
 
+- **This entire sub-API was disconnected from the running service until caught by a
+  direct "is every module actually wired in, not just individually tested" audit.**
+  Every module above existed and had its own passing tests, but nothing ever
+  constructed a subscription store, tracked a Drive Changes API page token across
+  calls, or recorded a delivery for Circadian — `core/ingestion/service.py`'s
+  `HandleDriveWebhook` RPC acknowledged every callback unconditionally without doing
+  anything. Fixed: `manager.py`'s new `WebhookManager` is the real, stateful assembly
+  point tying `subscription.py`/`circadian.py`/`callback_handler.py` together;
+  `IngestionServicer` now holds one, built from the same shared credential provider as
+  `GoogleDriveSource` (`core/ingestion/drive_assembly.py`). Confirmed live: register ->
+  handle_callback -> Circadian-recording end to end against fake Drive responses, and
+  an unregistered channel correctly rejected. `webhook_renewal_lead_time_hours` is
+  stored on `WebhookManager` for a future Background Worker to read (deep-dive §4.1.3's
+  own stated owner of the actual renewal *schedule* — this repo has no Background
+  Workers API built yet); `fallback_poll_interval_hours` IS enforced right now, via
+  `CircadianMonitor`'s own real interval.
+
 ## Implementation status
 
 Implemented this session — `contracts.py`, `errors.py`, `subscription.py` (including
 `DriveWebhookAdapter`, unverified against real Drive credentials — see above),
-`circadian.py`, `callback_handler.py`. The renewal-ordering and Circadian tests are real
-regression tests, not placeholders.
+`circadian.py`, `callback_handler.py`, `manager.py` (the real assembly point — see the
+gotcha above for why it had to be added after the fact). The renewal-ordering, Circadian,
+and manager-integration tests are real regression tests, not placeholders.

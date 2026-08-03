@@ -59,10 +59,19 @@ class GoogleDriveSource:
         credentials: DriveCredentialProvider,
         blob_store: BlobStoreGateway,
         config: DriveSourceConfig | None = None,
+        metrics=None,
     ) -> None:
         self._credentials = credentials
         self._blob_store = blob_store
         self._config = config or DriveSourceConfig()
+        #: `IngestionMetricsCollector | None` — not type-hinted directly to avoid a
+        #: circular import (`metrics.py` doesn't need to know about sources; this module
+        #: only needs `.increment(name)`). `contracts.IngestionMetrics.drive_downloads`
+        #: was declared and read by nothing until this was caught — the same "built,
+        #: never wired to its real call site" gap already found and fixed for
+        #: `GoogleDriveSource`'s own registration and the whole `webhook_manager`
+        #: sub-API (`drive_assembly.py`'s own module docstring).
+        self._metrics = metrics
 
     @property
     def source(self) -> SourceKind:
@@ -102,6 +111,8 @@ class GoogleDriveSource:
         except Exception as exc:  # noqa: BLE001 - any Drive API failure is a download failure
             raise DownloadFailed(f"Drive files.get_media failed: {exc}") from exc
 
+        if self._metrics is not None:
+            self._metrics.increment("drive_downloads")
         raw_ref = await self._blob_store.write_blob(data)
         return SourceFile(
             run_id=run_id, user_id=user_id, source=self.source,
