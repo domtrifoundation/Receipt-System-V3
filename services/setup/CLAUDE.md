@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.03`
+`a03.00.04`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -65,3 +65,7 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 **Per-service venvs isolate dependencies, not namespaces.** The whole clone is on `PYTHONPATH`, so a service *can* physically import a sibling's modules. The rule that it must not — gRPC and injected `Protocol` seams, never a direct `core.x` import — stays enforced by review and the `contracts.py`-only convention. Do not assume the venv boundary is enforcing it.
 
 Idempotent, safely re-runnable *is* the fix for V2's sprawl — not a nicer wrapper around the same fragility. A self-referential script must never move or delete itself while running (fragile everywhere, worse on Windows with locked executing files): the setup script's last action hands off to this API's own Python finalize routine. `strip_development_content()` is shared with Update API's `release_manager.py` rather than reimplemented, so the two strip lists cannot drift.
+
+**`bootstrap.py` also copies `LAUNCHER_SCRIPT_NAMES` (`start.bat`/`start.sh`) to the install root and writes `config/install.json`'s `dev_mode` flag** — two real §4/§1.6/§4.1 steps that were missing from the original sequence. Launcher copy overwrites on every finalize (every update is a fresh clone, and the install root's own launcher should track whichever clone most recently finalized); the install config is written exactly once and never overwritten, per §4.1's own "not something asked again on every subsequent update."
+
+**`bootstrap.py`'s own `python -m services.setup.bootstrap <clone_dir> [--dev-mode]` CLI is the real handoff target `installer/common.sh` invokes.** This was genuinely missing and un-exercised for a while during development — the top-level `installer/*.sh` scripts clone real committed history, and testing them against *uncommitted* working-tree changes to this file silently exercises the *previous* commit's version instead, which looks like a working end-to-end flow using pytest (pytest reads the working tree directly) while the actual installer script would clone something else entirely. Worth remembering the next time this file changes: commit before testing `installer/` against it, not after.

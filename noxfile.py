@@ -53,6 +53,11 @@ FORWARD_COMPAT_DEPS = [
     # alternative of installing requirements.txt wholesale would drag in grpcio, which is
     # the exact coupling that docstring explains avoiding.
     "rapidfuzz>=3.0",
+    # Same reasoning, same fix: tests/unit/services/update/test_keymaster_client.py -> import
+    # chain -> services.update.keymaster_client -> module-scope `import httpx`. httpx has real
+    # 3.15 wheels (unlike grpcio), so this is a genuinely cheap addition, not a repeat of the
+    # grpcio problem this session's own dependency selection exists to avoid.
+    "httpx>=0.27",
 ]
 
 

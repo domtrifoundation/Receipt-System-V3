@@ -14,9 +14,14 @@ from pathlib import Path
 import pytest
 
 from services.setup.bootstrap import (
+    INSTALL_CONFIG_RELPATH,
+    LAUNCHER_SCRIPT_NAMES,
     TOP_LEVEL_SETUP_FILES,
     cleanup_top_level_setup_files,
+    copy_launcher_scripts,
     finalize_clone,
+    read_dev_mode,
+    write_install_config,
 )
 from services.setup.venv_provisioning import BASE_REQUIREMENTS_RELPATH
 
@@ -164,3 +169,101 @@ def test_finalize_report_is_not_ok_when_any_underlying_step_failed(tmp_path):
 
     assert not report.venv_provision.fully_provisioned
     assert not report.ok
+
+
+# --- copy_launcher_scripts -------------------------------------------------------------------
+
+
+def test_launcher_scripts_present_in_the_clone_are_copied_to_the_install_root(tmp_path):
+    install_root, clone = _install_root_with_clone(tmp_path)
+    (clone / "start.sh").write_text("#!/usr/bin/env bash\necho real launcher\n", encoding="utf-8")
+    (clone / "start.bat").write_text("@echo off\r\necho real launcher\r\n", encoding="utf-8")
+
+    copied = copy_launcher_scripts(clone, install_root)
+
+    assert set(copied) == LAUNCHER_SCRIPT_NAMES
+    assert (install_root / "start.sh").read_text(encoding="utf-8") == "#!/usr/bin/env bash\necho real launcher\n"
+    assert (install_root / "start.bat").exists()
+
+
+def test_a_missing_launcher_script_in_the_clone_is_skipped_not_fatal(tmp_path):
+    install_root, clone = _install_root_with_clone(tmp_path)
+    (clone / "start.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    # start.bat deliberately absent
+
+    copied = copy_launcher_scripts(clone, install_root)
+
+    assert copied == ("start.sh",)
+    assert not (install_root / "start.bat").exists()
+
+
+def test_re_running_copy_launcher_scripts_overwrites_with_the_newer_clones_version(tmp_path):
+    """Every update is a fresh clone; the install root's own launcher should track whichever
+    clone most recently finalized, not silently keep serving a stale copy from the first
+    install."""
+    install_root, clone = _install_root_with_clone(tmp_path)
+    (clone / "start.sh").write_text("v1\n", encoding="utf-8")
+    copy_launcher_scripts(clone, install_root)
+
+    (clone / "start.sh").write_text("v2\n", encoding="utf-8")
+    copy_launcher_scripts(clone, install_root)
+
+    assert (install_root / "start.sh").read_text(encoding="utf-8") == "v2\n"
+
+
+# --- write_install_config / read_dev_mode ----------------------------------------------------
+
+
+def test_write_install_config_persists_dev_mode_and_read_dev_mode_reads_it_back(tmp_path):
+    written = write_install_config(tmp_path, dev_mode=True)
+    assert written is True
+    assert read_dev_mode(tmp_path) is True
+
+    target = tmp_path / INSTALL_CONFIG_RELPATH
+    assert target.is_file()
+
+
+def test_write_install_config_never_overwrites_an_existing_config():
+    """§4.1: "recorded once, at first-clone time... not something asked again on every
+    subsequent update." A later finalize call with a *different* dev_mode value must not flip
+    an already-installed instance's own persisted choice."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        first = write_install_config(root, dev_mode=False)
+        second = write_install_config(root, dev_mode=True)
+
+        assert first is True
+        assert second is False
+        assert read_dev_mode(root) is False
+
+
+def test_read_dev_mode_returns_none_when_no_config_exists_yet(tmp_path):
+    """Distinct from `False` — "not yet installed" and "installed in normal mode" are different
+    facts a caller needs to tell apart."""
+    assert read_dev_mode(tmp_path) is None
+
+
+def test_read_dev_mode_returns_none_for_a_corrupted_config_rather_than_raising(tmp_path):
+    target = tmp_path / INSTALL_CONFIG_RELPATH
+    target.parent.mkdir(parents=True)
+    target.write_text("not valid json{{{", encoding="utf-8")
+
+    assert read_dev_mode(tmp_path) is None
+
+
+# --- finalize_clone now includes both new steps -----------------------------------------------
+
+
+@pytest.mark.slow
+def test_finalize_clone_copies_launchers_and_writes_install_config(tmp_path):
+    install_root, clone = _install_root_with_clone(tmp_path)
+    (clone / "start.sh").write_text("real launcher\n", encoding="utf-8")
+
+    report = asyncio.run(finalize_clone(clone, dev_mode=False))
+
+    assert report.launcher_scripts_copied == ("start.sh",)
+    assert (install_root / "start.sh").exists()
+    assert report.install_config_written is True
+    assert read_dev_mode(install_root) is False

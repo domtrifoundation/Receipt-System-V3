@@ -673,6 +673,17 @@ class BootstrapReport:
     webapp_built: bool
     top_level_files_cleaned: tuple[str, ...]
 
+    launcher_scripts_copied: tuple[str, ...] = ()
+    """`start.bat`/`start.sh`, copied from the clone to the install root as siblings of every
+    release directory (`docs/PRINCIPLES.md` §1.6, §4's own "the top-level directory structure...
+    the `start.bat`/`start.sh` launcher... built as siblings"). Not in §7.4's own listed sequence
+    — a real gap that sequence never named, closed here rather than left silently unbuilt."""
+
+    install_config_written: bool = False
+    """Whether `<install_root>/config/install.json`'s `dev_mode` flag was written by *this*
+    finalize call. `False` on a second finalize against an already-configured install root — the
+    flag is set once, at first clone, and read (never re-asked) by every later one (§4.1)."""
+
     @property
     def ok(self) -> bool:
         """Whether this clone is genuinely ready for Supervisor's Boot Sequence.
