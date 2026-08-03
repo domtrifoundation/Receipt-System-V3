@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,3 +46,9 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 This is also the system's general in-browser edit entry point — a flag or a notification quick-action deep-links straight into an edit form for one field, writing through the normal Persistence path. There is deliberately no separate inline-edit-grid feature to build.
+
+**`.proto`/`service.py`/generated stubs did not exist at all until this session — a real, complete gap, not a documented placeholder.** `contracts.py`, `db.py`, `lifecycle.py`, `gateways.py`, `errors.py`, and `metrics.py` were all real and independently tested, but there was no gRPC surface for anything outside this process to call. This was the concrete blocker `core/accounting_sync/service.py`'s own `NoOpFlagChecker` documented by name — Accounting Sync could not build a real client against a service that did not exist yet. `review_flagging.proto` now defines `CreateFlag`/`AssignFlag`/`ResolveFlag`/`DismissFlag`/`GetAuditView`/`ListFlags`; `ReviewFlaggingServicer` wires `lifecycle.FlagStore` and `audit_screen.build_audit_view` to it for real. `AssignFlag` is a genuine addition beyond the deep-dive's own §6 sketch — `FlagStore.assign_flag` was a real, tested capability with no RPC to reach it at all.
+
+**`audit_screen.py` and `edit_entry_point.py` were both 0-byte scaffolds until this session**, despite being named in the deep-dive's own §2 package layout and referenced by `contracts.py`'s `AuditView`/`EditLink` types. `build_audit_view()` is real: it reads every flag raised for a receipt from the real `FlagStore`, plus a Logs trace via `GrpcLogsTraceSource`. **`logs.proto`'s own `LogQueryRequest` has no `receipt_id` filter** — a real, structural limitation, not an oversight here: the trace source queries Logs scoped to the receipt's own `user_id` (resolved from the flags already found for it) and filters the returned stream client-side for entries whose `context_json` names the receipt id. This is a real call against a real running Logs service, confirmed live, but it is an unindexed per-user scan, not a receipt-indexed lookup — a genuine fix would add a field to `logs.proto`, which is Logs API's own change to make. `edit_entry_point.py`'s `build_edit_link()` is a pure, no-I/O lookup table (`FLAG_TYPE_EDIT_FIELD`) mapping a handful of common flag types to their conventional single-field deep-link target; it is deliberately not exhaustive, and an unlisted flag type falls back to "open the receipt generally" rather than this module guessing at a field.
+
+**Confirmed live, both ways**: a full `CreateFlag` -> `ResolveFlag` round trip through a real in-process gRPC server showing the flag self-assigns to the resolving staff member and becomes terminal; a `client`-role/unresolvable-session attempt denied with `ROLE_FORBIDDEN`; a second resolution attempt on an already-terminal flag rejected with `INVALID_STAGE_TRANSITION`; an owner reassigning an already-assigned flag while a non-owner staff member attempting the same is denied with `OWNERSHIP_DENIED`; and `core/accounting_sync/flag_checker.py::GrpcFlagChecker` genuinely calling `ListFlags` over a real socket and correctly reporting `True`/`False` before and after a flag exists — the loop this gap was blocking is now closed end to end.

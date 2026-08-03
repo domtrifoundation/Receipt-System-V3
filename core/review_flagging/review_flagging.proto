@@ -1,0 +1,117 @@
+// Review/Flagging API gRPC surface (`v3-deepdive-25-review-flagging-api.md` §6).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+//
+// `AssignFlag` is a real addition beyond the deep-dive's own §6 sketch (which named only
+// CreateFlag/ResolveFlag/DismissFlag/GetAuditView/ListFlags) — `lifecycle.py`'s
+// `FlagStore.assign_flag` is a real, fully-tested lifecycle transition (§8's own resolved
+// "shared open queue, self-assign" routing policy) that had no RPC to reach it at all; not
+// exposing it would leave a real capability unreachable over the wire, the same shape of
+// gap this session found repeatedly elsewhere.
+
+syntax = "proto3";
+
+package resibo.review_flagging.v1;
+
+service ReviewFlaggingService {
+  rpc CreateFlag(CreateFlagRequest) returns (FlagResponse);
+  rpc AssignFlag(AssignFlagRequest) returns (FlagResponse);
+  rpc ResolveFlag(ResolveFlagRequest) returns (FlagResponse);
+  rpc DismissFlag(DismissFlagRequest) returns (FlagResponse);
+  rpc GetAuditView(AuditViewRequest) returns (AuditViewResponse);
+  rpc ListFlags(ListFlagsRequest) returns (ListFlagsResponse);
+}
+
+message FlagInfo {
+  string flag_id = 1;
+  string flag_type = 2;
+  string user_id = 3;
+  string receipt_id = 4;
+  string status = 5;
+  string created_by = 6;
+  string created_at = 7;          // RFC 3339
+  string assigned_to = 8;
+  string resolved_at = 9;         // RFC 3339, empty when not yet resolved
+  string resolved_by = 10;
+  string resolution_note = 11;
+  map<string, string> payload = 12;
+}
+
+message CreateFlagRequest {
+  string flag_type = 1;
+  string user_id = 2;
+  string receipt_id = 3;
+  string created_by = 4;
+  map<string, string> payload = 5;
+}
+
+message AssignFlagRequest {
+  string flag_id = 1;
+  string assignee_user_id = 2;
+  // The caller's own session, resolved server-side to a role — never trusted from a claim
+  // the caller makes about itself (`docs/PRINCIPLES.md` §4.2).
+  string session_id = 3;
+}
+
+message ResolveFlagRequest {
+  string flag_id = 1;
+  string resolution_note = 2;
+  // Both empty means a pure status transition; both set routes the write through
+  // Persistence's normal path before the flag is marked resolved (§4).
+  string edit_field = 3;
+  string edit_new_value = 4;
+  string session_id = 5;
+}
+
+message DismissFlagRequest {
+  string flag_id = 1;
+  string reason = 2;
+  string session_id = 3;
+}
+
+message FlagResponse {
+  FlagInfo flag = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message AuditViewRequest {
+  string receipt_id = 1;
+}
+
+message AuditTraceEntryInfo {
+  string timestamp = 1;           // RFC 3339
+  string service = 2;
+  string level = 3;
+  string message = 4;
+  string detail = 5;
+}
+
+message AuditViewResponse {
+  string receipt_id = 1;
+  repeated AuditTraceEntryInfo trace = 2;
+  repeated FlagInfo flags = 3;
+  bool trace_available = 4;
+  string error_code = 5;
+  string error_detail = 6;
+}
+
+message ListFlagsRequest {
+  repeated string statuses = 1;   // FlagStatus values; empty means every status
+  string flag_type = 2;
+  string receipt_id = 3;
+  string assigned_to = 4;
+  int32 limit = 5;                // 0 defers to the server default
+  int32 offset = 6;
+}
+
+message ListFlagsResponse {
+  repeated FlagInfo flags = 1;
+  int32 total_matching = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}

@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -60,21 +60,21 @@ One-way push only. Bidirectional sync against an external system's own schema is
   `TokenStore`'s real `Fernet` encryption round-trip (including a wrong-key `InvalidToken`
   failure), the flagged-receipt exclusion path, and the full servicer assembly with fake
   provider adapters standing in for the real SDKs.
-- **`FlagChecker` has no real implementation — `NoOpFlagChecker` (`service.py`) is the
-  shipped default, and it never excludes anything.** `core/review_flagging/` owns the
-  real flag lifecycle (`contracts.py`, `db.py`, `gateways.py`, `lifecycle.py` are all
-  real) but has no gRPC proto/`service.py`/generated stubs at all yet (confirmed by
-  directory listing), and this project's own process-topology rule means Accounting Sync
-  cannot reach into another API's internals directly even in the same repo — every
-  Core API talks to every other one over gRPC only. This is a real, named, deliberately
-  NOT-fabricated gap: deep-dive §6/§9's own flagged-receipt-exclusion rule is
-  structurally correct and tested (`test_sync_engine.py`'s
-  `test_flagged_receipt_is_excluded_before_touching_the_provider` and
-  `test_service.py`'s equivalent servicer-level test both use a real, working
-  `FlagChecker` fake), but the *shipped default* used until Review/Flagging ships a
-  gRPC surface cannot enforce it at all. `AccountingSyncServicer.__init__`'s own
-  `flag_checker` parameter exists specifically so wiring in a real one later is a
-  one-line change here, not a rewrite.
+- **`FlagChecker` now has a real implementation — `GrpcFlagChecker` (`flag_checker.py`)
+  — but `service.py`'s shipped default is still `NoOpFlagChecker`.** Review/Flagging has
+  since shipped a real gRPC surface (`core/review_flagging/service.py`,
+  `review_flagging.proto`), and `GrpcFlagChecker.has_open_flag()` is confirmed live
+  against a real in-process `ReviewFlaggingService`: it correctly reports `False` before
+  any flag exists, `True` once one is raised for that receipt, `False` for an unrelated
+  receipt, and fails **open** (reports no flag, never blocks a push) if Review/Flagging
+  is unreachable — the opposite fail-direction from `content_security_client.py`'s
+  fail-closed posture, since a missing flag check here is a data-correctness risk, not a
+  security gap. `AccountingSyncServicer.__init__`'s own `flag_checker` parameter is how a
+  real deployment swaps `NoOpFlagChecker` for `GrpcFlagChecker(address=...)` — the
+  default was deliberately left as `NoOpFlagChecker` rather than flipped unilaterally,
+  since a real deployment needs Review/Flagging's own address configured correctly
+  first, and changing a security/correctness-adjacent default silently is exactly what
+  `docs/PRINCIPLES.md` §4.3 says not to do.
 - **`Purchase`/`BankTransaction` push is one-way and does not verify the record survived
   a provider-side edit or deletion** — deep-dive §4's own explicit scope boundary,
   confirmed structurally by `test_sync_engine.py`'s
