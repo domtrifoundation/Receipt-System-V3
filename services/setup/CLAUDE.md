@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.02`
+`a03.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,10 +46,15 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 
 ## Real gotchas specific to this folder
 
-**Partially implemented — 4 of 13 files.** Real: `contracts.py` (provisioning types only), `venv_provisioning.py`, `dev_mode_strip.py`, `errors.py`. Still 0-byte scaffolding: `bootstrap.py` (§4), `dev_fixtures.py` (§4.1), all of `hardware/` (§5), `wizard.py` (§7 — the entire first-run UX, whose word-for-word script is `docs/SETUP_WIZARD_SCRIPT.md`), and `metrics.py`. `contracts.py` states its own partial status at the top so a future session does not mistake it for finished.
+**Implemented.** Every file §2's own package layout names is real: `contracts.py`, `bootstrap.py` (§4/§7.4's finalize routine), `dev_mode_strip.py` (§4.1), `dev_fixtures.py` (§4.1, deliberately narrower than the sketch — see below), `hardware/detect.py`/`report_import.py`/`scoring.py` (§5), `wizard.py` (§7 — the whole `docs/SETUP_WIZARD_SCRIPT.md` step sequence, all three branches, verified against real live hardware and a real live `grpc.aio` connection during development, not just unit-tested against fakes), `errors.py`, `metrics.py`. Plus `venv_provisioning.py`, `service.py`, `setup.proto` + `generated/`, beyond §2's own list — see below for each.
 
 **Files here that the deep-dive's §2 package layout does not list**, with the reason:
 - `venv_provisioning.py` — per-service venv creation, the mechanism behind the "dependency installation" this API's own §1 has always claimed to own but never described. Full design in [`docs/VENV_AND_IMPORTS.md`](../../docs/VENV_AND_IMPORTS.md). It sits here rather than in Update API for the same reason `dev_mode_strip.py` does: Setup provisions the *first* clone, Update's `release_manager.py` provisions every subsequent one, and one shared implementation is what stops the two drifting (`docs/PRINCIPLES.md` §1.5).
+- `setup.proto` + `generated/` + `service.py` — §9 sketches the gRPC surface but never names where the `.proto` lives, the same gap every other API's own `CLAUDE.md` notes about its own proto. Regenerate with `python -m grpc_tools.protoc -I. --python_out=generated --grpc_python_out=generated --pyi_out=generated setup.proto` from this directory, then re-apply the relative-import fix in `generated/setup_pb2_grpc.py` (`import setup_pb2` → `from . import setup_pb2`); never hand-edit generated files. `service.py` imports them lazily inside each method and inside `serve()`, matching `core/geo_address/service.py`'s own convention, so this package stays importable — and its tests meaningful — on an interpreter with no `grpcio` wheel (this project's own live gap on 3.15, `docs/MAINTENANCE.md` §8.1).
+
+**`RunWizard` is bidirectional streaming, correcting §9's own sketch.** §9 wrote `rpc RunWizard(WizardRequest) returns (stream WizardStep)` — one input, then a one-way stream. That cannot express the wizard's real flow: each step needs the owner's answer before the next step is even decided (which branch a use case takes, whether a decline changes what comes next). `WizardEngine.run()` is an async generator for exactly this reason, and bidirectional streaming (`rpc RunWizard(stream WizardAnswerMessage) returns (stream WizardStepMessage)`) is gRPC's direct mapping of that same shape. Recorded as a correction, not a silent fix — the same category as Execution Core's §7 retry sketch and Reconciliation's §4.1 VAT sketch.
+
+**`dev_fixtures.py` deliberately implements only one of §4.1's three asks.** §4.1 wants "a pre-populated `.env`/config," "sample/fixture receipt images and a seeded SQLite dataset," and "stub/mock provider configurations." Only the first is built. The other two are not gaps — they conflict with standing rules this project holds elsewhere: no synthetic receipt data of any kind, ever (images or database rows), and no package reaching into another API's own Provider Registry to add a provider implementation it doesn't own (`docs/PRINCIPLES.md` §1.2/§1.3). `dev_fixtures.py`'s own module docstring states both conflicts and the resolution in full; read it before "completing" either of those two asks.
 
 **`dev_mode_strip.py` owns the classification lists; `.github/scripts/check_stripped_content_list.py` imports them from here.** That is the reverse of what the CI script originally claimed, and the reversal is not stylistic: `.github/` is itself in `DEV_ONLY_STRIP_LIST`, so the old direction had `strip_development_content()` importing its own strip list out of the directory it deletes — fine on a first run, broken on the second, and Setup is explicitly re-runnable while Update strips every fresh clone. `services/` ships, so the definition lives here where it stays reachable. Do not move it back.
 

@@ -26,16 +26,15 @@ definition rather than a copy.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 
+from .contracts import StripReport
 from .errors import StripError, StripErrorCode
 
 __all__ = [
     "DEV_ONLY_STRIP_LIST",
     "NESTED_STRIP_FILENAMES",
     "SHIPPED_ALLOWLIST",
-    "StripReport",
     "strip_development_content",
 ]
 
@@ -105,27 +104,6 @@ DEV_ONLY_STRIP_LIST = frozenset(
 #: appears," so without this rule every end-user install would carry 52 development-only files it
 #: will never read. That note named this module as the place to close the gap; this is it.
 NESTED_STRIP_FILENAMES = frozenset({"CLAUDE.md"})
-
-
-@dataclass(frozen=True)
-class StripReport:
-    removed: tuple[str, ...]
-    """Entries actually removed, relative to the clone root, in a stable sorted order."""
-
-    skipped_absent: tuple[str, ...]
-    """Classified dev-only but not present in this clone.
-
-    Not an error, and reported separately rather than silently folded into `removed`: a clone
-    legitimately may not contain every dev-only entry (a shallow export, or a re-run after a
-    previous strip). Conflating "removed it" with "it was never there" would make the report
-    unable to answer whether a strip actually did anything.
-    """
-
-    errors: tuple[StripError, ...] = ()
-
-    @property
-    def ok(self) -> bool:
-        return not self.errors
 
 
 def strip_development_content(clone_dir: Path, dev_mode: bool) -> StripReport:
