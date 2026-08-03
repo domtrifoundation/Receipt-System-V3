@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.02`
+`a03.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -58,3 +58,11 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 - `persistence.proto` — the gRPC surface the sub-APIs' own §7/§12 sections each specify a piece of. The layout predates naming a home for the `.proto` itself. `service.py` is transport-agnostic on purpose: the generated servicer is a one-line-per-RPC adapter over it, so behaviour cannot diverge between the gRPC path and an in-process caller.
 
 **Optional dependencies are all lazily imported and all degrade.** `openpyxl` (Excel export and reimport parsing), `b2sdk`, `boto3`, and the Google API client are each imported inside the one adapter that uses them; none is declared in `requirements.txt` yet, and every one of them being absent is a capability reporting itself unavailable, never a crash.
+
+**`core/persistence/generated/` did not exist at all until this session — a real, complete, high-impact gap, not a documented placeholder.** `service.py`'s own module docstring already described "the generated servicer is a one-line-per-RPC adapter over this class" as the intended shape, but nothing had ever compiled `persistence.proto` or written that adapter. Every sub-API behind `PersistenceService` (`db/`, `blob_store/`, `historian/`, `exports/`, `reimport/`, `archive_sync/`, `disaster_recovery/`) was real and independently tested, but nothing outside an in-process Python caller could reach any of it — `core/review_flagging/gateways.py::UnavailablePersistenceWriteGateway` and `core/accounting_sync/persistence_client.py` both named this exact absence by name. `grpc_servicer.py`'s new `PersistenceGrpcServicer` is a thin router holding one lazily-constructed `PersistenceService` per user (the structural per-user isolation the parent docstring describes, never one shared connection multiplexed by row filtering).
+
+**`PutBlobRequest`/`GetBlobRequest` gained a `user_id` field this session** — the blob store is per-user, and the original `.proto` had no way to route a blob operation to the right user's store at all. Added as new fields (never a renumbering), per `docs/templates/new_grpc_endpoint.md`.
+
+**Archive Sync and Disaster Recovery are wired for real but honestly scoped, not faked.** `EnableSync`/`GetSyncStatus` build a real `ArchiveSync` per call and genuinely mirror a file to a `local_folder` target or (unwired, degrades to unavailable) Google Drive — confirmed live: a real file lands on disk, a cursor genuinely advances, and disabling is tracked (there is no real background scheduler here; a live deployment's own Background Workers idle-time job is what would call this repeatedly). `StartRestore` runs `restore_instance()` synchronously to completion (that function has no background-job mechanism of its own) and the resulting `RestoreJob` is cached by `job_id` in an in-memory dict so `GetRestoreStatus` has something real to look up — confirmed live end to end: a real blob backed up through an `InMemoryTarget`, a real SQLite online-backup snapshot, a full restore, a job-id lookup, and a clean `VerifyIntegrity` pass, all against real files on disk, not mocks.
+
+**`persistence.proto` still has no dedicated field-level `ApplyEdit` RPC** — that gap is real and this session left it alone rather than inventing one under time pressure. `core/review_flagging/gateways.py::GrpcPersistenceWriteGateway` closes it functionally instead, composing `GetReceipt`/`SaveReceipt` into a read-modify-write, confirmed live against a real running `PersistenceGrpcServicer`.

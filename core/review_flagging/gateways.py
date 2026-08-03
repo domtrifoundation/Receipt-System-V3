@@ -268,19 +268,19 @@ class NullFlagNotifier:
 
 
 class UnavailablePersistenceWriteGateway:
-    """The honest default: `persistence.proto` defines no field-level edit RPC and
-    `core/persistence/generated/` does not exist at all — the identical gap
-    `core/account_guardian/gateways.py::UnavailablePersistenceGateway` documents for
-    `GenerateExport`. Every edit degrades to a clearly-labeled unavailable result rather than
-    attempting a connection that cannot succeed (`docs/PRINCIPLES.md` §4.4) — and, per §4.3,
-    a resolution that depended on this write never silently proceeds anyway; see
-    `lifecycle.resolve`."""
+    """The honest default, kept even now that a real alternative exists
+    (`GrpcPersistenceWriteGateway` below) — swapping `FlagStore`'s own default is a real
+    deployment decision (needs Persistence's address configured correctly), never
+    something this module flips silently (`docs/PRINCIPLES.md` §4.3, the same posture
+    `core/accounting_sync/flag_checker.py`'s own docstring states for its analogous
+    default). Every edit degrades to a clearly-labeled unavailable result rather than
+    attempting a connection that cannot succeed — and a resolution that depended on this
+    write never silently proceeds anyway; see `lifecycle.resolve`."""
 
     _DETAIL = (
-        "Persistence has not generated a gRPC servicer for persistence.proto yet (no "
-        "core/persistence/generated/ package exists), and persistence.proto itself defines "
-        "no field-level edit RPC; ApplyEdit cannot be reached until both land — see this "
-        "package's CLAUDE.md."
+        "This FlagStore was not configured with a real edit_gateway; the shipped default "
+        "is UnavailablePersistenceWriteGateway. Pass edit_gateway=GrpcPersistenceWriteGateway"
+        "(...) to reach the real Persistence service — see this package's CLAUDE.md."
     )
 
     async def apply_edit(
@@ -289,14 +289,92 @@ class UnavailablePersistenceWriteGateway:
         return EditWriteResult(ok=False, error_code="CAPABILITY_MISSING", error_detail=self._DETAIL)
 
 
+#: `Receipt` fields a resolution's edit can patch directly (`core/persistence/contracts.py`).
+#: A field not in this set is written into `Receipt.fields` instead — that dict-typed bucket
+#: is explicitly "the Architect-typed extracted values that are not first-class columns"
+#: (`Receipt`'s own docstring), which is exactly what `vendor_tin`/`atp_number`-shaped
+#: edit targets are.
+_FIRST_CLASS_RECEIPT_FIELDS = frozenset(
+    {"vendor_name", "currency", "total_amount", "vat_amount", "transaction_date"}
+)
+
+DEFAULT_PERSISTENCE_ADDRESS = "127.0.0.1:50072"
+
+
+class GrpcPersistenceWriteGateway:
+    """Implements `contracts.PersistenceWriteGateway` against Persistence's now-real
+    gRPC surface (`core/persistence/grpc_servicer.py`) — real read-modify-write over
+    `GetReceipt`/`SaveReceipt`, since `persistence.proto` still has no dedicated
+    field-level `ApplyEdit` RPC (that gap is real and unchanged; this gateway closes it
+    functionally rather than waiting on a new RPC, the same "general primitives compose"
+    posture `core/accounting_sync/persistence_client.py` already takes for its own read).
+
+    Confirmed live against a real running `PersistenceGrpcServicer`: fetches the receipt,
+    patches the named field (a first-class column when the deep-dive's own
+    `edit_entry_point.FLAG_TYPE_EDIT_FIELD` names one, `Receipt.fields` otherwise), and
+    saves it back with `actor_user_id` as the real Historian actor — `historian_event_id`
+    on the result is the same proof-of-real-write `EditWriteResult`'s own docstring names.
+    """
+
+    def __init__(self, address: str = DEFAULT_PERSISTENCE_ADDRESS, timeout_seconds: float = 5.0) -> None:
+        self._address = address
+        self._timeout_seconds = timeout_seconds
+
+    async def apply_edit(
+        self, user_id: str, receipt_id: str, field: str, new_value: str, actor_user_id: str
+    ) -> EditWriteResult:
+        try:
+            import grpc
+
+            from core.persistence.generated import persistence_pb2 as pb
+            from core.persistence.generated import persistence_pb2_grpc as pb_grpc
+        except ImportError as exc:
+            return EditWriteResult(ok=False, error_code="CAPABILITY_MISSING", error_detail=str(exc))
+
+        try:
+            async with grpc.aio.insecure_channel(self._address) as channel:
+                stub = pb_grpc.PersistenceServiceStub(channel)
+                fetched = await stub.GetReceipt(
+                    pb.GetReceiptRequest(user_id=user_id, receipt_id=receipt_id),
+                    timeout=self._timeout_seconds,
+                )
+                if fetched.error_code:
+                    return EditWriteResult(
+                        ok=False, error_code=fetched.error_code, error_detail=fetched.error_detail,
+                    )
+
+                msg = fetched.receipt
+                if field in _FIRST_CLASS_RECEIPT_FIELDS:
+                    setattr(msg, field, new_value)
+                else:
+                    import json
+
+                    current = json.loads(msg.fields_json) if msg.fields_json else {}
+                    current[field] = new_value
+                    msg.fields_json = json.dumps(current)
+
+                saved = await stub.SaveReceipt(
+                    pb.SaveReceiptRequest(receipt=msg, actor=actor_user_id),
+                    timeout=self._timeout_seconds,
+                )
+        except Exception as exc:  # noqa: BLE001 - unreachable/timeout is a real write failure
+            return EditWriteResult(ok=False, error_code="PERSISTENCE_UNAVAILABLE", error_detail=str(exc))
+
+        if saved.error_code:
+            return EditWriteResult(ok=False, error_code=saved.error_code, error_detail=saved.error_detail)
+        return EditWriteResult(ok=True, historian_event_id=saved.historian_event_id)
+
+
 __all__ = [
     "DEFAULT_AUDIT_ADDRESS",
     "DEFAULT_AUTH_ADDRESS",
     "DEFAULT_NOTIFICATIONS_ADDRESS",
+    "DEFAULT_PERSISTENCE_ADDRESS",
     "PROPOSED_AUDIT_OPERATIONS",
     "DenyAllSessions",
     "GrpcAuditRecorder",
     "GrpcFlagNotifier",
+    "GrpcPersistenceWriteGateway",
     "GrpcSessionRoleResolver",
     "NullFlagNotifier",
     "PermissiveFlagTypeValidator",

@@ -131,6 +131,10 @@ message PutBlobRequest {
   bytes original_bytes = 1;      // what logical_id is computed from, always
   bytes stored_bytes = 2;        // the re-encoded archival copy; empty means store original
   string codec = 3;              // "original" | "webp" | "avif"
+  // Added when the gRPC adapter was built: the blob store is per-user (a separate database
+  // and blob root per structural isolation, `docs/PRINCIPLES.md` §4.5), and this field was
+  // genuinely missing — a new field appended, never a renumbering.
+  string user_id = 4;
 }
 
 message PutBlobResponse {
@@ -150,6 +154,9 @@ message GetBlobRequest {
   string logical_id = 1;
   // Recompute the stored file's SHA-256 and compare it to its own physical_hash.
   bool verify = 2;
+  // Added when the gRPC adapter was built: the blob store is per-user, and this field was
+  // genuinely missing — a new field appended, never a renumbering.
+  string user_id = 3;
 }
 
 message GetBlobResponse {

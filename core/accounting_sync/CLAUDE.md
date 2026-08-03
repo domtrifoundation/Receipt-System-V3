@@ -83,6 +83,12 @@ One-way push only. Bidirectional sync against an external system's own schema is
 - **The one-time, no-OAuth QuickBooks IIF / Xero CSV export path is deliberately NOT
   here** — see "What this API explicitly does NOT own" above; that's an Export
   Framework provider pair, not this package.
+- **`persistence_client.py` was written speculatively, before `core/persistence/generated/`
+  existed — now confirmed genuinely live** against a real running
+  `PersistenceGrpcServicer` (Persistence shipped its own gRPC surface in a separate
+  session pass): `get_receipt()` correctly fetches a real saved receipt over a real
+  socket. What was a plausible-but-unverified client at the time this file was written
+  is now a proven one.
 
 ## Implementation status
 
