@@ -1,0 +1,64 @@
+// OCR API gRPC surface (`v3-deepdive-01-ocr-api.md` §8).
+//
+// No streaming — a single `Read` call is fast relative to Inference; the run-level
+// "N/M receipts done" progress streaming lives at the orchestration layer, not here.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only
+// ever added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every reading carries an
+// `error_code`/`error_detail` pair, never a bare gRPC status for anything a caller needs
+// to branch on.
+
+syntax = "proto3";
+
+package resibo.ocr.v1;
+
+service OcrService {
+  rpc Read(OcrReadRequest) returns (OcrReadResponse);
+  rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse);  // for Interface API's settings menu — reflects actual availability, not static config
+}
+
+message OcrReadRequest {
+  string run_id = 1;
+  string user_id = 2;
+  string blob_ref = 3;           // content-addressable hash, per Persistence API design
+  repeated string engines = 4;   // EngineName values
+  int32 timeout_ms = 5;
+}
+
+message OcrReadResponse {
+  repeated EngineReading readings = 1;
+  string merged_text = 2;
+  string agreement = 3;   // enum-as-string over the wire, matches AgreementLevel
+  float confidence = 4;
+}
+
+message EngineReading {
+  string engine = 1;
+  string text = 2;
+  int32 duration_ms = 3;
+  string error_code = 4;   // empty string = no error
+  string error_detail = 5;
+  repeated TextRegion regions = 6;   // empty for engines that don't support region-level output
+  string device = 7;                 // "cpu", "cuda", "openvino:npu", etc.
+  bool has_mean_confidence = 8;       // distinguishes "0.0" from "no confidence signal at all"
+  float mean_confidence = 9;
+}
+
+message TextRegion {
+  string text = 1;
+  float confidence = 2;
+  float box_x = 3;
+  float box_y = 4;
+  float box_w = 5;
+  float box_h = 6;
+}
+
+message ListEnginesRequest {
+}
+
+message ListEnginesResponse {
+  repeated string available_engines = 1;
+  repeated string enabled_engines = 2;
+}

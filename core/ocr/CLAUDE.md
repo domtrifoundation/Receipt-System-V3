@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -41,22 +41,61 @@ valid the moment it is removed, and this file is what future sessions will have 
 
 ## Forward-Compatibility Pattern applicability
 
-Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed fields, so they use `common/frozen_dict.py`'s `FrozenDict` rather than a plain `dict` (`docs/PRINCIPLES.md` §2.1). Any `isinstance` check against one must test `collections.abc.Mapping`, never `dict` — the 3.15 builtin is not a `dict` subclass. Module-level lookup tables in this folder are `FrozenDict` too, per §2.1.1.
+**Not applicable to `FrozenDict` specifically** — corrected from a stale generic "Yes"
+copied at scaffold time. None of this package's contracts (`contracts.py`) hold a
+dict-typed field; every collection here is a `tuple`/`frozenset` (`EngineReading.regions`,
+`OcrRequest.engines`, etc.), so there is no plain-`dict` field for `common/frozen_dict.py`'s
+`FrozenDict` to replace. If a future field genuinely needs a mapping shape, it must use
+`FrozenDict` at that point, per `docs/PRINCIPLES.md` §2.1 — this section should flip back
+to "Yes" in the same commit that adds it, not be left stale again.
+
+The Forward-Compatibility Pattern still applies to this package in the other sense that
+matters here: every heavy native dependency (`opencv-python`, `pymupdf`,
+`rapidocr-onnxruntime`, `numpy`) is feature-detected via `pytest.importorskip` in this
+package's own tests rather than assumed installed, since none of them have a 3.15 wheel
+yet (`docs/PRINCIPLES.md` §3.3) — see "Real gotchas" below.
 
 ## Real gotchas specific to this folder
 
 Every engine binding is imported *inside* its own engine module and lazily (`docs/PRINCIPLES.md` §3.3 point 5) — a missing engine dependency degrades that engine to unavailable, it never fails the run (§4.4). Nothing outside `core/ocr/` imports from `engines/` directly; `contracts.py` is the only entry point other APIs use.
 
-## Implementation status
-
-**Not implemented.** Every `.py` file in this folder is a 0-byte scaffold created by the Phase-1
-commit that laid out the repository, and no commit since has put a line of logic into any of
-them. Everything above this section describes the design this package will have, not code that
-exists — a distinction worth stating in the one file a future session is most likely to read
-first, because the folder's file list looks exactly like an implemented package from the
-outside.
-
-Nothing outside this folder imports from it yet, so the emptiness is inert rather than a broken
-dependency. Building it is a full Core API pass against the deep-dive linked above, with the
-`new_core_api` and `new_provider` templates in `docs/templates/`. **Delete this section in the
-commit that implements the package** — a stale "not implemented" note is worse than none.
+- **RapidOCR's and PaddleOCR's own wrapper objects are cached, lazily-constructed
+  module-level singletons, not built fresh per call.** Confirmed live: constructing
+  `RapidOCR()` itself is cheap (~0.5s), but the *first* inference call on a fresh instance
+  pays a real one-time model-load cost (~13s on the development machine) — a warm, reused
+  instance's steady-state inference is ~5s instead. Rebuilding per call was the original
+  implementation and made a real end-to-end registry test time out against the default
+  15-second per-engine budget, not a hypothetical concern. `rapidocr_engine.py`'s
+  `_get_rapidocr_instance()` and `paddleocr_engine.py`'s `_get_paddleocr_instance()` guard
+  first construction with a `threading.Lock` since `loop.run_in_executor`'s default pool
+  runs multiple worker threads concurrently.
+- **`tesseract` is a system binary, not pip-installable, and this adapter shells out to it
+  directly via `asyncio.create_subprocess_exec` rather than going through `pytesseract`'s
+  own high-level `image_to_string`.** The reason is `OMP_THREAD_LIMIT` scoping (§4.2):
+  capping each Tesseract subprocess to one OpenMP thread must be scoped to that one
+  subprocess's own environment, never mutated process-wide (that would race against
+  concurrent calls and cripple any other OpenMP consumer sharing this process). `asyncio`'s
+  own `env=` argument on subprocess spawn gives each call an independent environment dict
+  for free; `pytesseract` stays a declared dependency for exactly one thing —
+  `get_tesseract_version()` as the availability probe.
+- **Windows OCR's `regions` field stays empty on purpose, not because
+  `Windows.Media.Ocr` lacks word-level bounding boxes — it doesn't** (confirmed live: the
+  WinRT API returns real per-word boxes). The deep-dive's own §4.3 decision classifies
+  Windows OCR as plain-text-only by design, alongside the cloud tier and tier-0
+  text-layer extraction, and this adapter matches that documented classification rather
+  than the underlying OS API's actual capability.
+- **RapidOCR's and PaddleOCR's own result shape is a four-corner-point quad box, not an
+  axis-aligned rect** — `engines/base.py`'s shared `quad_to_region()` reduces it to
+  `TextRegion`'s normalized `(x, y, w, h)`, and `decode_image_dims()` supplies the pixel
+  dimensions both engines need to normalize against (neither engine's own wrapper reports
+  image size itself).
+- **Apple Vision's adapter is unverified against real macOS hardware** — this development
+  machine is Windows, so only the platform gate itself (`OcrEnginePlatformUnsupported`)
+  is exercised for real here; the `Vision`/`Quartz` call path inside the macOS branch has
+  not been run on real hardware this session.
+- **`opencv-python`, `pymupdf`, `rapidocr-onnxruntime`, and `numpy` have no prebuilt wheel
+  for Python 3.15 yet** (still beta as of this writing) — the same gap Preprocessing API's
+  own `CLAUDE.md` documents, for the same reason. `PaddleOCR`/`boto3` are simply not
+  installed in this development environment at all (heaviest local engine and a cloud SDK,
+  both genuinely opt-in) — their adapters degrade to unavailable, a real, live-confirmed
+  outcome rather than a gap in what got tested.

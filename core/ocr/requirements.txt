@@ -1,0 +1,39 @@
+# OCR API — third-party runtime dependencies beyond `common/requirements.txt`.
+#
+# Every engine's own import lives lazily inside its adapter module (`docs/PRINCIPLES.md`
+# §3.3 point 5) — a missing dependency here degrades that one engine to unavailable, it
+# never fails this service at process start (§4.4). `tesseract` itself is a system binary,
+# not installable via this file at all — see `engines/tesseract_engine.py`.
+
+# --- Tier 0: PDF text-layer extraction (v3-deepdive-01-ocr-api.md §4.1) -----------------
+pdfplumber>=0.11
+pymupdf>=1.24
+
+# --- Tier 1: Tesseract's Python binding, used only for its version-probe (§4.2) ---------
+pytesseract>=0.3.10
+
+# --- Tier 2: local ONNX/deep-learning engines (§4.3-§4.4) -------------------------------
+rapidocr-onnxruntime>=1.3
+numpy>=1.26
+opencv-python>=4.10
+
+# PaddleOCR is deliberately NOT installed by default here — the heaviest local engine
+# (multi-GB, its own PaddlePaddle framework), off by default in `engines_enabled` (§6).
+# Uncomment for an install that wants it:
+# paddleocr>=2.9
+# paddlepaddle>=3.0
+
+# --- Tier 2: platform-native OCR (§4.5-§4.6) ---------------------------------------------
+# Environment markers are the Forward-Compatibility Pattern's first point
+# (`docs/PRINCIPLES.md` §3.3): on a non-Windows/non-macOS install, these are never even
+# attempted, matching the structural (not degraded) unavailability of these two engines.
+winsdk>=1.0; sys_platform == 'win32'
+pyobjc-framework-Vision>=10.0; sys_platform == 'darwin'
+pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'
+
+# --- Corroboration (§7) ------------------------------------------------------------------
+rapidfuzz>=3.0
+
+# --- Tier 3: cloud engines (§4.7) --------------------------------------------------------
+httpx>=0.27
+boto3>=1.34
