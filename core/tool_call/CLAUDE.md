@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.01`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -83,10 +83,58 @@ This is why `dispatch` looks the entry up once *before* the enforcement gate —
   an audit-sink outage must not corrupt a tool result already computed (§4.4) and therefore
   cannot announce itself by failing the call.
 
-**Known gap, flagged rather than silently filled**: this API has no `.proto` yet. Its own
-deep-dive specifies no gRPC surface — unusually, its §7 is testing hooks rather than a wire
-contract — while `docs/PROCESS_TOPOLOGY.md` establishes that every Core API runs as its own
-process reachable only over internal gRPC. Those two cannot both be right. Inventing a surface
-the deep-dive never specified is a design decision, not an implementation detail, so it is
-recorded here for the PR that resolves it rather than guessed at. The in-process entry point
-(`dispatch.dispatch`) is complete and tested in the meantime.
+**The conflict this section used to describe is now resolved, deliberately, and the same
+decision covers `core/background_workers/CLAUDE.md`'s identical question.**
+`docs/PROCESS_TOPOLOGY.md` wins — every Core API gets a real gRPC surface. Unlike Background
+Workers' own scheduled, in-process job handlers, this API's registered tools are exactly the
+kind of thing a *different* process genuinely needs to invoke remotely: the deep-dive's own
+§3.3 names Inference API's own agentic tool-calling loop as the caller, "consuming this
+registry's manifest to build a constrained-decoding grammar and receiving back which tool the
+model chose." So `tool_call.proto` exposes real dispatch, not just observability —
+`ListTools` for the manifest (filtered to exactly what a `calling_api` is enabled for AND the
+resolved caller's role covers — the same two independent gates `registry.ToolRegistry.check()`
+already enforced at dispatch time), `DispatchTool` routing through that identical `check()`
+gate and `dispatch.dispatch()` pipeline (permission, availability, timeout, audit).
+`GrpcPermissionResolver` (`service.py`) is a real, synchronous client against Auth's
+`ValidateSession` — synchronous because `registry.PermissionResolver`'s own type is a plain
+callable, not a coroutine function.
+
+**Every module in `tools/*.py` was also a 0-byte scaffold until this session — the actual,
+larger gap underneath the wire-contract question.** `registry.py`'s enforcement pipeline and
+`dispatch.py`'s full audit/timeout/error-conversion logic were real and independently tested,
+but there was nothing to register: no tool the deep-dive's own §2 package layout named had a
+single line of logic in it. All five now do:
+
+- `geo_tools.py`'s `geocode_place` — `READ_ONLY`, a thin wrapper over Geo/Address's real
+  `Geocode` RPC, gated by a live reachability probe (§3.3's "only offer the tool if a
+  provider is actually configured" pattern, applied literally rather than assumed).
+- `vendor_tools.py`'s `lookup_vendor_canon` (`READ_ONLY`) and `remember_vendor`
+  (`MUTATING_STAGED`) — wrap Architect's real `SearchVendorDirectory`/`SubmitContribution`
+  RPCs (built this same session). `remember_vendor` self-applies during automated processing
+  precisely because it stages into Architect's own moderation queue, never a live
+  confirmation — confirmed live: a real contribution submitted, correctly `pending` and
+  unmerged, through a real running `ArchitectServicer`.
+- `query_tools.py`'s `persistence_query` — `READ_ONLY`, wraps Search/Query's real `Search`
+  RPC, scoped to the calling user's own receipts. The V3 replacement for V2's `excel_query`
+  (§3.2) — there is no live, directly-queryable workbook in this system at all.
+- `persistence_write_tools.py`'s `persistence_write_field` — `MUTATING_STAGED`, a real
+  read-modify-write over Persistence's `GetReceipt`/`SaveReceipt` (the same composition
+  `core/review_flagging/gateways.py::GrpcPersistenceWriteGateway` already uses, since
+  `persistence.proto` still has no dedicated field-level `ApplyEdit` RPC). §9's own resolved
+  scope — "a narrower, explicitly-enumerated set of writable fields, even within
+  `MUTATING_STAGED`" — is `WRITABLE_FIELDS`, a real, checked allowlist, not a comment.
+  Confirmed live: a real receipt field written through a real running
+  `PersistenceGrpcServicer`, and Historian-logged (`historian_event_id` populated) exactly
+  as any other write is.
+- `settings_tools.py` registers **nothing**, and that is §9's own resolved conclusion, not an
+  unfinished file: "Whether any settings-change tool is needed during automated processing at
+  all, resolved: no, not in the initial design ... not built speculatively now."
+  `register_settings_tools` is a real, callable no-op so `service.py`'s assembly needs no
+  special case, matching `core/migration/steps/`'s own deliberately-empty registration point.
+
+**A real synchronous-vs-async deadlock was found and fixed while testing this** — calling a
+tool handler's synchronous `grpc.insecure_channel` call directly from the same event loop a
+`grpc.aio` test server is running on blocks that loop and the RPC never completes. This is
+exactly why `dispatch.py`'s own design runs every handler on a `ThreadPoolExecutor` future
+rather than calling it inline, and why `service.py`'s `DispatchTool` RPC wraps its own call to
+`dispatch()` in `asyncio.to_thread` — the identical fix, applied one level up.

@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.01`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -106,12 +106,32 @@ designed in their own documents and never made it into the table at all.
 **Files here that the deep-dive's §2 package layout does not list**: none. Every module matches
 §2 exactly.
 
-**Known gap, flagged rather than silently filled**: this API has no `.proto`. Its deep-dive
-specifies no gRPC surface — §8 covers asyncio and §9 testing hooks, with no wire contract anywhere
-— while `docs/PROCESS_TOPOLOGY.md` establishes every Core API as its own gRPC-reachable process.
-This is the same unresolved conflict `core/tool_call/CLAUDE.md` records, and it wants one
-deliberate decision covering both rather than two independent guesses. The in-process entry points
-(`JobRegistry.register`, `JobScheduler.dispatch`) are complete and tested meanwhile — and note §1
-says this API is "a contract and scheduling logic, not new infrastructure to deploy", with
-non-LLM workers running inside Execution Core's own process, which is a real argument that its
-surface may legitimately be in-process only.
+**The conflict this section used to describe is now resolved, deliberately, and the same
+decision covers `core/tool_call/CLAUDE.md`'s identical question.** `docs/PROCESS_TOPOLOGY.md`
+wins — every Core API gets a real gRPC surface — but *what* that surface exposes differs by
+what actually makes sense to call remotely. This API's own §1 boundary is still correct that
+non-LLM workers run in-process inside Execution Core: a registered `handler` is a live Python
+callable held by whichever process registered it, not something a remote caller could invoke
+by name even if there were an RPC for it. So `background_workers.proto` is deliberately
+**observability/control only** — `ListJobs`/`GetJobHealth`/`GetNextDue` give a TUI or webapp
+real visibility into what is registered and how it is running, and `EnableJob` gives staff the
+one explicit action §10's retry guard requires ("re-enabling is an explicit staff action, never
+automatic"). Actually running a job (`JobScheduler.dispatch`) stays an in-process call only.
+
+Contrast with Tool Call API's own resolution of the identical conflict: its registered tools
+are exactly the kind of thing a *different* process (Inference API's own agentic loop)
+genuinely needs to invoke remotely, so its surface exposes real dispatch. Same underlying
+decision — every Core API is gRPC-reachable — applied to two structurally different kinds of
+registered work.
+
+**`errors.py` gained no new codes for this servicer** — `EnableJob`'s own role gate uses a
+servicer-local `RoleForbidden`/`"ROLE_FORBIDDEN"` (`service.py`) rather than a taxonomy
+addition, since this package's own error codes are otherwise entirely about job identity and
+registration validity, not session/role concerns; `EnableJob` is the one RPC in this surface
+that needed one at all.
+
+Confirmed live: a real registered job listed with its class/interval/scope; health read for
+both a never-run and a guard-tripped job; a client-role caller and an unresolvable session both
+denied `EnableJob`; an owner successfully clearing a tripped failure guard (with the clearing
+user id recorded in `disabled_reason`); and `GetNextDue` correctly returning nothing when no
+`next_due_source` is wired in versus real estimates when one is.
