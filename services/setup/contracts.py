@@ -695,6 +695,25 @@ class BootstrapReport:
         return self.strip.ok and self.venv_provision.fully_provisioned
 
 
+@runtime_checkable
+class AgentTokenSeedGateway(Protocol):
+    """Agent Control's own token issuance, as seen from `dev_fixtures.py`.
+
+    **Not a self-provisioning hole** — `core/agent_control/token_lifecycle.py`'s own rule
+    is "a token is always issued by a real human"; this seam is only ever called from the
+    `setup-dev` path, and running `setup-dev` at all is itself the same kind of explicit
+    human decision §4.1 already treats as authorizing the trivial, silent implicit-owner
+    creation for dev mode. `issued_by` is `"setup-dev-bootstrap"`, naming that decision as
+    the authorizing act rather than pretending a specific person did it.
+    """
+
+    async def issue_dev_token(self, label: str) -> str:
+        """Returns the new token's plaintext. Scoped to `DEV_OBSERVABILITY`-tier tools and
+        below by the concrete implementation, never `owner`-equivalent — see
+        `core/agent_control/token_lifecycle.py`'s own hard ceiling."""
+        ...
+
+
 @dataclass(frozen=True)
 class DevFixturesReport:
     """`dev_fixtures.seed_dev_environment()`'s own outcome (§4.1)."""
@@ -703,6 +722,11 @@ class DevFixturesReport:
     written: bool
     """`False` when a dev config already existed and was left alone — idempotent, matching
     every other Setup mechanism's own re-runnability."""
+
+    agent_token_path: Path | None = None
+    """Where the auto-issued dev agent token's plaintext was written, if
+    `seed_dev_environment` was given an `AgentTokenSeedGateway`. `None` when no gateway was
+    supplied — MCP access is opt-in to this seam, never assumed."""
 
 
 @dataclass(frozen=True)

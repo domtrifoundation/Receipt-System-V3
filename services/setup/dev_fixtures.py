@@ -32,14 +32,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .contracts import DevFixturesReport
+from .contracts import AgentTokenSeedGateway, DevFixturesReport
 
 __all__ = [
+    "DEV_AGENT_TOKEN_FILENAME",
     "DEV_DEFAULT_CONFIG",
     "REAL_RECEIPTS_FIXTURE_DIRNAME",
     "real_receipts_fixture_status",
     "seed_dev_environment",
 ]
+
+#: Relative to `<install_root>/config/` — a plaintext file, deliberately: the audience for
+#: this file is an unattended AI agent operating `setup-dev` with no human present to be
+#: shown a one-time secret through any UI (`token_lifecycle.py`'s usual "shown once, not
+#: recoverable" flow assumes a human reading a screen). The file itself is the "shown
+#: once" moment for this specific, dev-only, human-authorized-by-running-setup-dev path.
+DEV_AGENT_TOKEN_FILENAME = "dev_agent_token.txt"
 
 #: Structurally complete so nothing crashes on a missing key (§4.1's own stated goal) — every
 #: value here is either a genuinely free/local default or deliberately empty, never a real or
@@ -91,19 +99,38 @@ def real_receipts_fixture_status(clone_dir: Path) -> tuple[bool, int]:
     return count > 0, count
 
 
-def seed_dev_environment(install_root: Path, *, overwrite: bool = False) -> DevFixturesReport:
+async def seed_dev_environment(
+    install_root: Path, *, overwrite: bool = False, agent_token_gateway: AgentTokenSeedGateway | None = None,
+) -> DevFixturesReport:
     """Writes `DEV_DEFAULT_CONFIG` to `<install_root>/config/dev_defaults.json`.
 
     Idempotent by default: an existing file is left alone (`written=False`) unless
     `overwrite=True` — a contributor's own edits to their local dev config must never be
     silently clobbered by a re-run of setup-dev.
+
+    `agent_token_gateway`, if given, additionally issues one dev-scoped Agent Control
+    token and writes its plaintext to `<install_root>/config/dev_agent_token.txt` — the
+    real mechanism behind "an AI running `setup-dev` unattended gets MCP access without a
+    human present to hand it a token through the UI." `None` (the default) skips this
+    entirely — every non-`setup-dev` install path, and any `setup-dev` run that doesn't
+    wire this gateway in, seeds no token at all, matching `docs/PRINCIPLES.md` §4.4's
+    degrade-to-absent posture for an unsupplied collaborator.
     """
     config_dir = install_root / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / "dev_defaults.json"
 
-    if target.exists() and not overwrite:
-        return DevFixturesReport(config_path=target, written=False)
+    written = False
+    if not target.exists() or overwrite:
+        target.write_text(json.dumps(DEV_DEFAULT_CONFIG, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        written = True
 
-    target.write_text(json.dumps(DEV_DEFAULT_CONFIG, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return DevFixturesReport(config_path=target, written=True)
+    agent_token_path: Path | None = None
+    if agent_token_gateway is not None:
+        token_path = config_dir / DEV_AGENT_TOKEN_FILENAME
+        if not token_path.exists() or overwrite:
+            plaintext = await agent_token_gateway.issue_dev_token("setup-dev unattended AI operator")
+            token_path.write_text(plaintext + "\n", encoding="utf-8")
+        agent_token_path = token_path
+
+    return DevFixturesReport(config_path=target, written=written, agent_token_path=agent_token_path)

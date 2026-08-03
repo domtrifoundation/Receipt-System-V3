@@ -7,10 +7,12 @@ project rule: no synthetic receipt data, ever. These tests pin that this module 
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
 from services.setup.dev_fixtures import (
+    DEV_AGENT_TOKEN_FILENAME,
     DEV_DEFAULT_CONFIG,
     REAL_RECEIPTS_FIXTURE_DIRNAME,
     real_receipts_fixture_status,
@@ -18,8 +20,25 @@ from services.setup.dev_fixtures import (
 )
 
 
+def run(coro):
+    return asyncio.run(coro)
+
+
+class _FakeAgentTokenGateway:
+    """Stands in for `core/agent_control`'s real `TokenLifecycle` — this test module is
+    about `dev_fixtures.py`'s own file-writing/idempotency behavior, not Agent Control's
+    own token issuance (that has its own real tests in `core/agent_control`'s test tree)."""
+
+    def __init__(self) -> None:
+        self.issued_for: list[str] = []
+
+    async def issue_dev_token(self, label: str) -> str:
+        self.issued_for.append(label)
+        return f"rsb_agent_fake_{len(self.issued_for)}"
+
+
 def test_seeding_writes_a_structurally_complete_config(tmp_path):
-    report = seed_dev_environment(tmp_path)
+    report = run(seed_dev_environment(tmp_path))
 
     assert report.written is True
     assert report.config_path.exists()
@@ -49,10 +68,10 @@ def test_no_seeded_config_ever_contains_a_real_looking_credential():
 
 
 def test_seeding_is_idempotent_and_does_not_clobber_a_contributors_own_edits(tmp_path):
-    first = seed_dev_environment(tmp_path)
+    first = run(seed_dev_environment(tmp_path))
     (first.config_path).write_text('{"dev_mode": false, "edited_by_contributor": true}', encoding="utf-8")
 
-    second = seed_dev_environment(tmp_path)
+    second = run(seed_dev_environment(tmp_path))
 
     assert second.written is False
     on_disk = json.loads(second.config_path.read_text(encoding="utf-8"))
@@ -64,14 +83,42 @@ def test_overwrite_true_replaces_an_existing_config():
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        first = seed_dev_environment(root)
+        first = run(seed_dev_environment(root))
         first.config_path.write_text('{"edited_by_contributor": true}', encoding="utf-8")
 
-        second = seed_dev_environment(root, overwrite=True)
+        second = run(seed_dev_environment(root, overwrite=True))
 
         assert second.written is True
         on_disk = json.loads(second.config_path.read_text(encoding="utf-8"))
         assert on_disk == DEV_DEFAULT_CONFIG
+
+
+def test_no_gateway_means_no_token_is_seeded(tmp_path):
+    report = run(seed_dev_environment(tmp_path))
+
+    assert report.agent_token_path is None
+    assert not (tmp_path / "config" / DEV_AGENT_TOKEN_FILENAME).exists()
+
+
+def test_a_supplied_gateway_issues_and_writes_a_real_dev_token(tmp_path):
+    gateway = _FakeAgentTokenGateway()
+
+    report = run(seed_dev_environment(tmp_path, agent_token_gateway=gateway))
+
+    assert report.agent_token_path is not None
+    assert report.agent_token_path.exists()
+    plaintext = report.agent_token_path.read_text(encoding="utf-8").strip()
+    assert plaintext.startswith("rsb_agent_fake_")
+    assert gateway.issued_for == ["setup-dev unattended AI operator"]
+
+
+def test_a_second_run_without_overwrite_does_not_reissue_a_token(tmp_path):
+    gateway = _FakeAgentTokenGateway()
+    run(seed_dev_environment(tmp_path, agent_token_gateway=gateway))
+
+    run(seed_dev_environment(tmp_path, agent_token_gateway=gateway))
+
+    assert len(gateway.issued_for) == 1
 
 
 def test_receipt_fixture_status_never_creates_the_directory(tmp_path):

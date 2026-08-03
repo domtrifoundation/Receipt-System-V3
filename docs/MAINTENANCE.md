@@ -88,6 +88,38 @@ A short list of things that were seriously considered and deliberately reversed 
 ### Switching a normal install to developer mode later
 Not currently supported as a live conversion — `dev_mode` is set once at first install and read by every subsequent Update API clone (Setup deep-dive §4.1). Converting an existing normal install to developer mode means a fresh developer-mode setup run, not a config flag flip on a live instance.
 
+### AI-developer installs — unattended `setup-dev`, no human in the loop, ever
+
+**A distinct scenario from the normal contributor flow above, worth naming explicitly.**
+Once Zircon ships, this project's own next phase of development is expected to be driven
+by an AI developer working genuinely unattended — not a human running Claude Code
+interactively, but an agent that runs `setup-dev`, sets up its own working copy, and
+operates the resulting instance through MCP with no human present at any point in that
+loop. The normal MCP-access story — "a token is always issued by a real human through the
+settings surface" (`core/agent_control/CLAUDE.md`) — is correct for a human-operated
+install, where a human sitting at the controls means MCP typically isn't the interface
+being used anyway. It does not fit this scenario, where there is no human to click
+anything, ever.
+
+**The real mechanism**: `services/setup/dev_fixtures.py`'s `seed_dev_environment()`,
+called with an `AgentTokenSeedGateway` (the real implementation is
+`core/agent_control/dev_token_gateway.py`'s `AgentControlDevTokenGateway`), auto-issues a
+`staff`-role, `read_only`/`mutating_staged`/`dev_observability`-scoped agent token as part
+of running `setup-dev` — attributed to `issued_by="setup-dev-bootstrap"`, the same
+authorizing-act reasoning `v3-deepdive-11-setup-api.md` §4.1 already uses for silently
+creating dev mode's own implicit-owner account. The plaintext is written to
+`<install_root>/config/dev_agent_token.txt` rather than shown once through a UI, since
+there is no human present to show it to. An AI developer following this document's own
+step-by-step setup above, on the developer-mode path, ends up with a working MCP
+connection to its own instance with zero additional manual steps — the explicit goal.
+
+**Not yet wired into the real `setup-dev` entry point** — `bootstrap.py`'s own finalize
+routine does not currently call `seed_dev_environment()` at all (a separate, pre-existing
+gap, not introduced by this note); the mechanism above is real and tested but a future
+session needs to actually call it from the real `setup-dev` script's own handoff before an
+AI developer following these steps gets a token without extra manual wiring. Read
+`core/agent_control/CLAUDE.md`'s own `dev_token_gateway.py` section before touching this.
+
 ---
 
 ## 6. Documentation maintenance
