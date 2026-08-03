@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -101,8 +101,18 @@ deployment's own account. A module-level secret would violate that silently.
 **Files here that the deep-dive's §2 package layout does not list**: none — every module matches
 §2, and `psp/base.py` holds the Provider Registry §3 asks for.
 
-**Known gaps, flagged rather than silently filled**: §7 specifies a four-RPC surface and there is
-no `.proto` yet, and `SubscriptionService` keeps subscriptions in memory rather than in its own
-store. Every behaviour above is implemented and tested; what is missing is the wire translation
-and the persistence adapter. This joins the same open `.proto` question `core/tool_call/`,
-`core/background_workers/`, `core/migration/` and `core/support_ticketing/` each record.
+**The `.proto` gap this section used to describe is now closed.** `billing.proto` defines
+the four RPCs the deep-dive names (`CreateSubscription`/`CancelSubscription`/
+`GetSubscriptionStatus`/`HandleWebhook`), and `service.py`'s `BillingServicer` wires the
+real `SubscriptionService` to all four — it never executes a charge, transfer, or refund
+itself; that stays each PSP provider's own job behind `psp/base.py`. Confirmed live: a
+real subscription created and returned as `active`; a missing-tier request rejected; a
+status lookup on both a real and an unknown subscription id; a cancellation moving to
+`cancelled`/`free`; and a webhook call against a fresh, unconfigured (billing-off-by-
+default) instance correctly failing closed rather than accepting an unverifiable payload.
+
+**`SubscriptionService` still keeps subscriptions in memory rather than in its own
+store** — that half of the original "Known gaps" note is real and unchanged; only the
+wire translation was built this pass. A future session's persistence-adapter work should
+follow the same shape `core/task_scheduler/store.py` already established for a per-user
+Persistence-backed table, not a second in-package SQLite wrapper.
