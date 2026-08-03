@@ -15,30 +15,18 @@ Updated as phases complete. Not a permanent doc — delete or fold into CLAUDE.m
 - **Execution Core** (`services/execution_core/`) — pipeline.py, scheduler.py, state_machine.py,
   checkpointing.py, retry_policy.py, watchdog_hooks.py, real `execution_core.proto` + service.py.
 
-## Phase 1 — Update/Deployment API (`services/update/`)
+## Phase 1 — Update/Deployment API (`services/update/`) — DONE (commit 2b65496)
 
-Real already: `contracts.py`, `keymaster_client.py`. Everything else 0 bytes.
-- [ ] `release_manager.py` — real `CloneRelease` logic: fresh `git clone` into
-  `releases/<version>_<commit-hash>`, call Setup's `finalize_clone` (bootstrap.py, already
-  real) for strip/venv-provision/launcher-copy, GC old releases (current + 1 prior floor,
-  Background-Workers-triggered — expose the primitive, don't build the scheduling here).
-- [ ] `errors.py`, `metrics.py`
-- [ ] `update.proto` + generated + `service.py` — `CloneRelease`, `GetActiveChannels` only
-  (`TriggerRollback` deliberately absent — Supervisor's job).
-- [ ] Tests, live-confirmed against a real temp git repo clone.
+`release_manager.py`, `errors.py`, `metrics.py`, `update.proto` + service.py all built and
+live-confirmed against a real local git remote. `CloneRelease`/`GetActiveChannels` real.
+A real Windows `shutil.rmtree`-on-read-only-git-files bug found and fixed along the way.
 
-## Phase 2 — Proving Grounds (`services/update/proving_grounds/`)
+## Phase 2 — Proving Grounds (`services/update/proving_grounds/`) — DONE
 
-All 0 bytes currently.
-- [ ] `contracts.py` (re-export shape, matching Dependencies Warden's own pattern)
-- [ ] `download.py` — shared multithreaded/async download infra, HF token-auth support
-- [ ] `test_runner.py` — `test_candidate()` dispatching the affected API's own bench suite
-  (kept generic/pluggable — no bench suites exist yet to call for real, degrade honestly)
-- [ ] `promotion.py` — `gate_promotion(channel, candidate, result) -> bool`
-- [ ] `changelog_watcher.py` — human-triggered, not automated from a diff
-- [ ] `errors.py`
-- [ ] `proving_grounds.proto` + service.py — `TestCandidate`, `GetTestHistory`
-- [ ] Tests
+All real: contracts.py, errors.py, download.py (real streamed downloads + HF bearer auth),
+test_runner.py (BenchDispatcherRegistry + real Docker subprocess isolation check),
+promotion.py, changelog_watcher.py (thin, non-triggering), proto + service.py. 19 tests,
+all live-confirmed against real HTTP servers / real Docker-absence detection.
 
 ## Phase 3 — Supervisor (`supervisor/`) — the real "server"
 
