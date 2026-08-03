@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -45,3 +45,14 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 Deduplication is load-bearing, not polish: the same underlying problem recurring must group into one issue that gets updated, never a flood of duplicates — fingerprint the signal, not the occurrence. Authenticate with a GitHub App, not a personal access token: org-owned, scoped to `issues` and nothing else, short-lived auto-rotating tokens. Any diagnostic data leaving an install is scrubbed of receipt and financial content first, and non-DOMTRI installs must opt in explicitly.
+
+**`telemetrees.proto`/`service.py` did not exist at all until this session** — the deep-dive's
+own §6 sketches a real two-RPC contract (`GetTrackedDependencies`, `GetChangelog`), but nothing
+had compiled it. `TelemetreesServicer` wires the real `TrackedDependencyRegistry` (seeded from
+the real, complete `INVENTORY`, confirmed live at 14 tracked dependencies) and the real
+`docs/CHANGELOG.md` file to it. `GetChangelog` returns the file's own raw Markdown rather than a
+structured entry list — this API keeps no separate structured store of past entries;
+`ChangelogWriter` is the single writer and the file itself is the single source of truth.
+Confirmed live: a real repo with no changelog yet returns empty markdown with no error (the
+honest, correct state for this repository today, not a bug), and a real file's content is read
+back verbatim once one exists.

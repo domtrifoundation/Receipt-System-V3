@@ -1,0 +1,47 @@
+// Telemetrees API gRPC surface (`v3-deepdive-28-telemetrees-api.md` §6).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+
+syntax = "proto3";
+
+package resibo.telemetrees.v1;
+
+service TelemetreesService {
+  rpc GetTrackedDependencies(TrackedDepsRequest) returns (TrackedDepsResponse);
+  rpc GetChangelog(ChangelogRequest) returns (ChangelogResponse);
+}
+
+message TrackedDependencyInfo {
+  string name = 1;
+  repeated string fact_kinds = 2;
+  repeated string upstream_issue_refs = 3;
+  string source_deep_dive = 4;
+  string notes = 5;
+}
+
+message TrackedDepsRequest {
+  // Filters to dependencies declaring this fact kind; empty means every tracked dependency.
+  string fact_kind = 1;
+}
+
+message TrackedDepsResponse {
+  repeated TrackedDependencyInfo dependencies = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ChangelogRequest {
+}
+
+message ChangelogResponse {
+  // The raw Markdown content of docs/CHANGELOG.md (Keep a Changelog format, §9) — this API
+  // does not maintain a separate structured entry store; `ChangelogWriter` is the single
+  // writer and this file is the single source of truth it writes into.
+  string markdown = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
