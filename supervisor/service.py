@@ -31,7 +31,14 @@ from .sleep_wake.classification import policy_for
 from .sleep_wake.state import SleepStateStore
 from .version_pins import VersionPinStore
 
-DEFAULT_ADDRESS = "127.0.0.1:50091"
+#: Dynamic (`:0`, OS-assigned), matching every other service's own bind convention. Not a
+#: well-known port callers rely on: `__main__.py`'s `_launch_tui` forwards whatever
+#: `serve()` actually bound to as the TUI's own `--supervisor` argument, so nothing depends
+#: on this being a fixed value. It used to be a fixed 50091 — confirmed live, on a real
+#: install on this machine, that a fixed default silently collides with Windows's own
+#: dynamic-port-exclusion range (`netsh interface ipv4 show excludedportrange`), which
+#: made the real, installed program fail to even start with a raw gRPC bind error.
+DEFAULT_ADDRESS = "127.0.0.1:0"
 DEFAULT_AUDIT_ADDRESS = "127.0.0.1:50058"
 
 __all__ = ["DEFAULT_ADDRESS", "SupervisorServicer", "serve"]
