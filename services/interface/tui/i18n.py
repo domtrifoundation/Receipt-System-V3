@@ -57,6 +57,14 @@ _EN = {
     "find_setting.title": "Find a Setting",
     "find_setting.placeholder": "Type to search settings...",
     "find_setting.no_matches": "No settings match {query!r}.",
+    "monitor.not_connected": "Not connected to a running Supervisor.",
+    "monitor.error": "Could not read fleet status: {detail}",
+    "monitor.release": "Channel: {channel}\nRelease: {release_dir}\nActivated: {activated_at}",
+    "monitor.services.title": "Services ({count})",
+    "monitor.instances.title": "Running instances ({count})",
+    "monitor.instances.none": "No multi-version instances currently tracked.",
+    "monitor.runs.unavailable": "Runs: not available yet — Execution Core has no "
+                                 "list-active-runs RPC (tracked in services/interface/CLAUDE.md).",
 }
 
 _TL = {
@@ -99,6 +107,14 @@ _TL = {
     "find_setting.title": "Maghanap ng Setting",
     "find_setting.placeholder": "Mag-type para maghanap ng setting...",
     "find_setting.no_matches": "Walang tumugmang setting para sa {query!r}.",
+    "monitor.not_connected": "Hindi konektado sa isang tumatakbong Supervisor.",
+    "monitor.error": "Hindi mabasa ang katayuan ng fleet: {detail}",
+    "monitor.release": "Channel: {channel}\nRelease: {release_dir}\nNa-activate: {activated_at}",
+    "monitor.services.title": "Mga Serbisyo ({count})",
+    "monitor.instances.title": "Mga tumatakbong instance ({count})",
+    "monitor.instances.none": "Walang multi-version instance na sinusubaybayan sa ngayon.",
+    "monitor.runs.unavailable": "Mga run: hindi pa available — walang list-active-runs RPC "
+                                 "ang Execution Core (naka-track sa services/interface/CLAUDE.md).",
 }
 
 #: One `FrozenDict` per shipped locale (`docs/PRINCIPLES.md` §2.1.1 — module-level

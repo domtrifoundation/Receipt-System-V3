@@ -22,14 +22,15 @@ from pathlib import Path
 
 from textual.app import App
 
-from services.interface.tui.banners import header_line
 from services.interface.tui.custom_screens.boot_sequence import BootSequenceScreen
 from services.interface.tui.custom_screens.credits import CreditsScreen
 from services.interface.tui.custom_screens.find_setting import FindSettingScreen
 from services.interface.tui.custom_screens.fleet_screen import FleetScreen
+from services.interface.tui.custom_screens.monitor_screen import MonitorScreen
 from services.interface.tui.i18n import DEFAULT_LOCALE, t
 from services.interface.tui.menu_data import ALL_MENU_ITEMS, submenu_items
 from services.interface.tui.menu_screen import MenuScreen, TargetResolver, unwired_target_resolver
+from services.interface.tui.theme import DEFAULT_THEME
 from supervisor.contracts import BootReport
 
 #: The real, current fleet size (`supervisor/fleet.py`'s own discovery) — a display
@@ -50,6 +51,12 @@ class InterfaceApp(App):
     root menu, assuming a fleet is already up and reachable."""
 
     TITLE = "DOMTRI / Resibo"
+
+    #: A real, previously-live-found gap: no `.tcss` file existed anywhere in this
+    #: package, so every screen rendered with Textual's own bare, unstyled defaults —
+    #: no borders, no panel separation, no deliberate color scheme. `app.tcss` is loaded
+    #: once here and every screen's own widget IDs style against it.
+    CSS_PATH = "app.tcss"
 
     def __init__(
         self,
@@ -91,6 +98,12 @@ class InterfaceApp(App):
         return resolver
 
     def on_mount(self) -> None:
+        # `theme.py`'s own `ThemeConfig`/`THEMES` existed as data with nothing ever
+        # applying one — a real, live-found gap, fixed here rather than left silently
+        # unused. `settings.interface.theme` (still an inert placeholder, see
+        # `services/interface/CLAUDE.md`) is meant to change this at runtime once Interface
+        # API's own config target is wired; `DEFAULT_THEME` is the honest starting value.
+        self.theme = DEFAULT_THEME.textual_theme_name
         if self._supervisor_address:
             self.push_screen(
                 BootSequenceScreen(
@@ -99,24 +112,27 @@ class InterfaceApp(App):
                 )
             )
         else:
-            self._push_root_menu()
+            self._push_monitor()
 
     async def _after_boot(self, report: BootReport) -> None:
         self.pop_screen()
         if report.ok:
-            self._push_root_menu()
+            self._push_monitor()
         else:
             failed = ", ".join(report.failed_services)
-            self.push_screen(MenuScreen(f"Boot failed: {failed}", (), resolver=self._resolver, locale=self._locale))
+            self.push_screen(MenuScreen(f"Boot failed: {failed}", (), resolver=self._resolver, locale=self._locale, is_root=True))
 
-    def _push_root_menu(self) -> None:
-        # The persistent codename header (`v3-plan-02-architecture.md`'s own "(b)
-        # persistently at the top of the TUI's main menu navigation, smaller/header-style"
-        # placement) — small, one line, distinct from the Boot Sequence screen's own full
-        # ASCII banner.
+    def _push_monitor(self) -> None:
+        """The real landing screen (`custom_screens/monitor_screen.py`) — a live status
+        dashboard, shown before any menu selection, per the explicit requirement that the
+        first thing an operator sees is what the whole program is doing, not a bare list
+        of labeled actions. The root menu (`_open_menu`) is one keypress away (`m`), never
+        the default view."""
+        self.push_screen(MonitorScreen(self._supervisor_address, self._channel, on_open_menu=self._open_menu, locale=self._locale))
+
+    def _open_menu(self) -> None:
         root_items = tuple(i for i in ALL_MENU_ITEMS if "." not in i.path)
-        title = f"{header_line()} — {t('app.title', self._locale)}"
-        self.push_screen(MenuScreen(title, root_items, resolver=self._resolver, locale=self._locale))
+        self.push_screen(MenuScreen(t("app.title", self._locale), root_items, resolver=self._resolver, locale=self._locale))
 
 
 __all__ = ["ESTIMATED_FLEET_SIZE", "InterfaceApp"]

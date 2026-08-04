@@ -21,6 +21,7 @@ pytest.importorskip("textual", reason="textual is not installed in this interpre
 
 from services.interface.tui.app import InterfaceApp  # noqa: E402
 from services.interface.tui.custom_screens.credits import CreditsScreen  # noqa: E402
+from services.interface.tui.custom_screens.monitor_screen import MonitorScreen  # noqa: E402
 from services.interface.tui.menu_screen import MenuScreen  # noqa: E402
 from supervisor.arbitration import ChannelArbitrator  # noqa: E402
 from supervisor.contracts import ServiceSpec  # noqa: E402
@@ -39,10 +40,26 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def test_launch_without_boot_specs_goes_straight_to_the_root_menu():
+def test_launch_without_boot_specs_goes_straight_to_the_monitor_screen():
+    """The real landing screen is now the Monitor dashboard, not the root menu — the
+    explicit operator requirement that the first thing shown is a live view of the whole
+    program's workings, not a bare list of labeled actions."""
+
     async def scenario():
         app = InterfaceApp()
         async with app.run_test() as pilot:
+            await pilot.pause()
+            assert isinstance(app.screen, MonitorScreen)
+
+    run(scenario())
+
+
+def test_pressing_m_from_the_monitor_screen_opens_the_root_menu():
+    async def scenario():
+        app = InterfaceApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("m")
             await pilot.pause()
             assert isinstance(app.screen, MenuScreen)
 
@@ -53,6 +70,8 @@ def test_selecting_credits_pushes_the_real_credits_screen():
     async def scenario():
         app = InterfaceApp()
         async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("m")
             await pilot.pause()
             list_view = app.screen.query_one("#menu-list")
             credits_index = next(i for i, item in enumerate(list_view.children) if item.id == "item-credits")
@@ -70,6 +89,8 @@ def test_selecting_an_unbuilt_custom_screen_reports_honestly_rather_than_crashin
         app = InterfaceApp()
         async with app.run_test() as pilot:
             await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
             list_view = app.screen.query_one("#menu-list")
             target_index = next(i for i, item in enumerate(list_view.children) if item.id == "item-run_monitor")
             list_view.index = target_index
@@ -86,6 +107,8 @@ def test_settings_submenu_navigates_and_back_returns_to_root():
     async def scenario():
         app = InterfaceApp()
         async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("m")
             await pilot.pause()
             list_view = app.screen.query_one("#menu-list")
             list_view.index = next(i for i, item in enumerate(list_view.children) if item.id == "item-settings")
@@ -121,9 +144,9 @@ def test_boot_sequence_screen_streams_a_real_boot_from_a_real_supervisor(tmp_pat
             async with app.run_test() as pilot:
                 for _ in range(60):
                     await pilot.pause(0.5)
-                    if isinstance(app.screen, MenuScreen):
+                    if isinstance(app.screen, MonitorScreen):
                         break
-                assert isinstance(app.screen, MenuScreen)
+                assert isinstance(app.screen, MonitorScreen)
         finally:
             for pid in server.servicer.spawned_pids:
                 try:

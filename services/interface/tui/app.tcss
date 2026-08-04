@@ -1,0 +1,132 @@
+/* Real visual styling for the TUI shell — previously entirely absent (confirmed live: no
+   .tcss/.css file existed anywhere in this package, so every screen rendered with
+   Textual's own unstyled defaults: no borders, no panel separation, no color scheme
+   beyond the bare built-in dark theme). This file is loaded by every screen through
+   InterfaceApp.CSS_PATH, so a screen only needs new rules here, never inline styling. */
+
+Screen {
+    background: $surface;
+}
+
+#monitor-header {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#monitor-container {
+    height: 1fr;
+}
+
+#monitor-grid {
+    grid-size: 2 2;
+    grid-gutter: 1 1;
+    padding: 1 2;
+    height: 1fr;
+}
+
+#monitor-release, #monitor-services, #monitor-instances, #monitor-runs {
+    border: round $primary;
+    padding: 1 2;
+    background: $panel;
+    height: 1fr;
+}
+
+#menu-title {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#menu-list {
+    height: 1fr;
+    border: round $primary;
+    margin: 1 2;
+}
+
+#menu-tooltip {
+    dock: bottom;
+    height: 3;
+    border: round $accent;
+    padding: 0 1;
+    margin: 0 2 1 2;
+    color: $text-muted;
+}
+
+#boot-banner {
+    content-align: center middle;
+    color: $accent;
+    text-style: bold;
+}
+
+#boot-title {
+    content-align: center middle;
+    padding: 1 0;
+}
+
+#boot-progress {
+    margin: 1 4;
+}
+
+#boot-log {
+    margin: 0 4;
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#restart-banner {
+    content-align: center middle;
+    color: $warning;
+    text-style: bold;
+}
+
+#restart-log {
+    margin: 0 4;
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#fleet-title, #find-title {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+}
+
+#fleet-list, #find-results {
+    height: 1fr;
+    border: round $primary;
+    margin: 1 2;
+}
+
+#fleet-detail, #find-detail {
+    border: round $accent;
+    padding: 0 1;
+    margin: 0 2;
+    height: 3;
+    color: $text-muted;
+}
+
+#fleet-status {
+    color: $success;
+    padding: 0 2;
+}
+
+#credits-container {
+    padding: 1 2;
+}
+
+#credits-title {
+    text-style: bold;
+    color: $accent;
+}

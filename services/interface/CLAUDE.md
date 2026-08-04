@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.05`
+`a02.00.06`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -105,6 +105,29 @@ almost never returns an exact zero, so a gibberish query still surfaces real low
 results rather than an empty list; the screen's "no matches" message is real reachable
 code (fires when rapidfuzz is absent and substring-fallback scoring genuinely finds
 nothing), just not something a rapidfuzz-equipped install's fuzzy scoring typically hits.
+
+**Two real, live-found bugs fixed after direct user reports against a running install**:
+(1) escape at the root menu popped back to Textual's own bare default screen — the app
+kept running (`is_running` stayed `True`) but nothing was left on screen and no binding
+remained to get back, reading as "the TUI closed and won't come back." Fixed by making
+`MenuScreen`'s back action `is_root`-aware: at the root, escape is a no-op, and a real
+`q` binding (surfaced by `Footer`) is the one discoverable way to quit. (2) **no `.tcss`
+stylesheet existed anywhere in this package** — every screen rendered with Textual's bare
+unstyled defaults (no borders, no panel separation, no deliberate color scheme), and
+`theme.py`'s own `ThemeConfig`/`THEMES` were real data that nothing ever applied. Fixed
+with `app.tcss` (loaded via `InterfaceApp.CSS_PATH`) and `self.theme = DEFAULT_THEME.
+textual_theme_name` set in `on_mount`.
+
+**The real landing screen is now `MonitorScreen`** (`custom_screens/monitor_screen.py`),
+not the root menu — an explicit operator requirement: the first thing shown must be a
+live view of the whole program's workings (V2's `dashboard.py` precedent), not a bare
+list of labeled actions. Shows the active release/channel, per-service sleep/health state
+(`Supervisor.GetSleepStatus`, one real call per fleet member discovered via `supervisor.
+fleet.build_fleet_specs`), and every currently-tracked multi-version instance
+(`Supervisor.ListRunningInstances`) — all real, live gRPC data. The run-count panel is
+honestly labeled unavailable: `ExecutionCoreService` has no RPC that lists active runs,
+only `GetRunStatus(run_id)` for an id already known, so this panel cannot show a real
+number without inventing one. `m` opens the root menu from here; `q` quits.
 
 **Three of §3.2's eight enumerated custom screens remain named in `root.py` but not yet
 built**: `run_monitor`, `staff_audit_queue`, `vendor_branch_editor`, `groups` minus

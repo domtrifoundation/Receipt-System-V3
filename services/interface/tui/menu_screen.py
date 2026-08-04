@@ -39,7 +39,14 @@ class MenuScreen(Screen):
     `find_setting` already treats it).
     """
 
-    BINDINGS = [("escape", "app.pop_screen", "Back")]
+    #: A real, previously-live-found bug: with a single "escape" binding always
+    #: `app.pop_screen`, escaping the *root* menu popped back to Textual's own bare
+    #: default screen underneath — the app kept running (`is_running` stayed `True`), but
+    #: nothing was left on screen and no binding remained to get back to the menu. Fixed
+    #: by making the action `is_root`-aware: at the root, escape is a no-op (nothing to go
+    #: back to) and `q` is the one real, discoverable way to quit, surfaced by `Footer`
+    #: the same as every other binding.
+    BINDINGS = [("escape", "handle_back", "Back"), ("q", "handle_quit", "Quit")]
 
     def __init__(
         self,
@@ -48,12 +55,21 @@ class MenuScreen(Screen):
         *,
         resolver: TargetResolver = unwired_target_resolver,
         locale: str = "en-PH",
+        is_root: bool = False,
     ) -> None:
         super().__init__()
         self._title = title
         self._items = items
         self._resolver = resolver
         self._locale = locale
+        self._is_root = is_root
+
+    def action_handle_back(self) -> None:
+        if not self._is_root:
+            self.app.pop_screen()
+
+    def action_handle_quit(self) -> None:
+        self.app.exit()
 
     def compose(self) -> ComposeResult:
         yield Header()
