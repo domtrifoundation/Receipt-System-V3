@@ -57,6 +57,34 @@ service AuthService {
   // this, every client would have to hard-code the method list, which is exactly the
   // hardcoding §4.1's registry exists to prevent.
   rpc ListAuthMethods(ListAuthMethodsRequest) returns (ListAuthMethodsResponse);
+
+  // Real, persisted tenancy-mode config, added post-§9 for the TUI's own Settings screen
+  // (`services/interface/tui/menu_data/settings.py`). Reads/writes
+  // `<install_root>/auth/config.json` directly rather than this servicer's own in-memory
+  // `InstallProfile` (constructed once, at process start, from whatever was persisted at
+  // that time) — a `SetTenancyMode` call is honestly reported as taking effect on the
+  // *next* restart, matching `setup.get_dev_mode`'s own "not convertible on a live
+  // install" posture for the identical underlying reason (tenancy mode is baked into
+  // collaborators wired once at construction, not re-read per request).
+  rpc GetTenancyMode(TenancyConfigRequest) returns (TenancyModeResponse);
+  rpc SetTenancyMode(SetTenancyModeRequest) returns (TenancyModeResponse);
+}
+
+message TenancyConfigRequest {
+  // Empty means "resolve from this running process's own file location"
+  // (`common/install_paths.py`'s `resolve_install_root()`).
+  string install_root = 1;
+}
+
+message TenancyModeResponse {
+  string tenancy_mode = 1;   // "single" | "multi"
+  bool known = 2;            // false when install_root is unknown
+  bool takes_effect_on_restart = 3;   // true only on a real SetTenancyMode call
+}
+
+message SetTenancyModeRequest {
+  string install_root = 1;
+  string tenancy_mode = 2;   // "single" | "multi"
 }
 
 // Group management RPCs live in `GroupsService` (`v3-deepdive-41-groups.md` §9). Groups was

@@ -130,3 +130,35 @@ Screen {
     text-style: bold;
     color: $accent;
 }
+
+#setting-title {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+}
+
+#setting-tooltip {
+    padding: 1 2;
+    color: $text-muted;
+}
+
+#setting-value {
+    padding: 0 2;
+    text-style: bold;
+}
+
+#setting-choices {
+    height: auto;
+    max-height: 10;
+    border: round $primary;
+    margin: 1 2;
+}
+
+#setting-status {
+    padding: 0 2;
+    color: $success;
+}
+

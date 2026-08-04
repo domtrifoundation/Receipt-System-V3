@@ -27,9 +27,11 @@ from services.interface.tui.custom_screens.credits import CreditsScreen
 from services.interface.tui.custom_screens.find_setting import FindSettingScreen
 from services.interface.tui.custom_screens.fleet_screen import FleetScreen
 from services.interface.tui.custom_screens.monitor_screen import MonitorScreen
+from services.interface.tui.custom_screens.setting_value_screen import SettingValueScreen
 from services.interface.tui.i18n import DEFAULT_LOCALE, t
 from services.interface.tui.menu_data import ALL_MENU_ITEMS, submenu_items
 from services.interface.tui.menu_screen import MenuScreen, TargetResolver, unwired_target_resolver
+from services.interface.tui.settings_backend import SETTINGS_BACKENDS
 from services.interface.tui.theme import DEFAULT_THEME
 from supervisor.contracts import BootReport
 
@@ -87,6 +89,9 @@ class InterfaceApp(App):
                 return ""
             if item.target == "interface.open_screen.find_setting":
                 self.push_screen(FindSettingScreen(resolver=self._resolver, locale=self._locale))
+                return ""
+            if item.target in SETTINGS_BACKENDS:
+                self.push_screen(SettingValueScreen(item, SETTINGS_BACKENDS[item.target]))
                 return ""
             if item.target in _BUILT_CUSTOM_SCREENS:
                 self.push_screen(_BUILT_CUSTOM_SCREENS[item.target](self._locale))

@@ -24,9 +24,11 @@ from services.setup.bootstrap import (
     copy_launcher_scripts,
     finalize_clone,
     read_dev_mode,
+    read_run_on_startup,
     run_first_run_wizard,
     wizard_command,
     write_install_config,
+    write_run_on_startup,
 )
 from services.setup.venv_provisioning import BASE_REQUIREMENTS_RELPATH, venv_python
 
@@ -258,6 +260,46 @@ def test_read_dev_mode_returns_none_for_a_corrupted_config_rather_than_raising(t
     target.write_text("not valid json{{{", encoding="utf-8")
 
     assert read_dev_mode(tmp_path) is None
+
+
+# --- read_run_on_startup / write_run_on_startup -------------------------------------------------
+
+
+def test_read_run_on_startup_defaults_to_false_when_nothing_written(tmp_path):
+    assert read_run_on_startup(tmp_path) is False
+
+
+def test_write_run_on_startup_and_read_it_back(tmp_path):
+    write_run_on_startup(tmp_path, True)
+
+    assert read_run_on_startup(tmp_path) is True
+
+
+def test_write_run_on_startup_is_freely_re_toggleable_unlike_dev_mode(tmp_path):
+    """The real, deliberate asymmetry from `dev_mode`'s write-once semantics — this can
+    change any number of times."""
+    write_run_on_startup(tmp_path, True)
+    write_run_on_startup(tmp_path, False)
+    write_run_on_startup(tmp_path, True)
+
+    assert read_run_on_startup(tmp_path) is True
+
+
+def test_write_run_on_startup_never_touches_the_dev_mode_key(tmp_path):
+    write_install_config(tmp_path, dev_mode=True)
+
+    write_run_on_startup(tmp_path, True)
+
+    assert read_dev_mode(tmp_path) is True
+    assert read_run_on_startup(tmp_path) is True
+
+
+def test_setting_dev_mode_first_then_run_on_startup_preserves_both(tmp_path):
+    write_install_config(tmp_path, dev_mode=False)
+    write_run_on_startup(tmp_path, True)
+
+    assert read_dev_mode(tmp_path) is False
+    assert read_run_on_startup(tmp_path) is True
 
 
 # --- finalize_clone now includes both new steps -----------------------------------------------

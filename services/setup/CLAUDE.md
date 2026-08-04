@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.09`
+`a03.00.10`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -71,6 +71,20 @@ Idempotent, safely re-runnable *is* the fix for V2's sprawl — not a nicer wrap
 **`ensure_wizard_dependencies()` exists because a "clean" venv provisioning report is not a guarantee, confirmed by a real live failure, not a hypothetical.** A real `setup.bat` run (this exact commit, this exact machine) reported `venvs: ok (34 services, 0 failed)` and then the wizard subprocess crashed with a raw `ModuleNotFoundError: No module named 'textual'` — the interface venv's own provisioning genuinely lied. Root cause traced to a *different*, real, live-confirmed bug: `core/ocr/requirements.txt`'s `rapidocr-onnxruntime>=1.3` has no published wheel for Python 3.13+ at all, and under concurrent 8-way venv provisioning, a failure in one service occasionally left a sibling service's own venv in an inconsistent state without that failure surfacing on its own outcome (exact mechanism not fully isolated — Windows + concurrent `pip`/`venv` subprocess creation is the suspected culprit, not confirmed with full certainty). Fixed at the actual source (`core/ocr/requirements.txt` now marks that dependency `; python_version < '3.13'`, matching this file's own header comment's promise that a missing OCR dependency degrades gracefully rather than failing the whole install) *and* defensively (`ensure_wizard_dependencies()` re-verifies `import textual` actually works in the target venv before handing control to it, with one bounded `pip install` repair attempt, reporting a clear actionable message instead of a raw traceback if it still can't). Belt and suspenders, deliberately — the OCR fix addresses the confirmed root cause; the defensive check means a *different* future silent-provisioning-failure can't produce the same scary crash again.
 
 **`bootstrap.py`'s own CLI now actually runs the interactive first-run wizard in normal mode — it did not before.** `run_first_run_wizard()`/`wizard_command()`, called from `__main__` right after a successful `finalize_clone()`, only on the non-`--dev-mode` path (§4.1's own normal/dev split). This re-execs into `.venvs/services.interface/`'s own provisioned interpreter to run `services/interface/tui/wizard_entrypoint.py` — Setup's own `bootstrap.py` process has no `textual` dependency itself and never will (`services/interface/requirements.txt` is a new file, Interface API's own, that is what actually gets `textual` into the interface service's venv during `venv_provisioning.provision_clone()`, itself a step inside the same `finalize_clone()` call). Live-confirmed the whole chain resolves through a freshly-provisioned real venv, not just this repo's own dev `.venv`.
+
+**Real `GetDevMode`/`GetRunOnStartup`/`SetRunOnStartup` RPCs, added for the TUI's own
+Settings screen.** `read_dev_mode`/`write_install_config` already existed and are real;
+`read_run_on_startup`/`write_run_on_startup` are new, sharing `INSTALL_CONFIG_RELPATH`
+with `dev_mode` but never touching that key. **Real, deliberate asymmetry**:
+`run_on_startup` is freely re-toggleable at any time (an ordinary operational
+preference), unlike `dev_mode`'s write-once-at-first-clone semantics — the two functions'
+own docstrings state this explicitly rather than leaving it to be inferred. `SetupServicer`
+now takes an optional `install_root`, resolved in `__main__` via the new
+`common/install_paths.resolve_install_root()` (a service launched by Boot Sequence runs
+with `cwd` set to its own release clone, not the install root — this was a real, previously-
+unfilled gap: no service anywhere threaded `install_root` before this pass, because there
+was never a shared, honest way to compute it from an arbitrary launched module's own file
+location).
 
 **`bootstrap.py`'s own `python -m services.setup.bootstrap <clone_dir> [--dev-mode]` CLI is the real handoff target `installer/common.sh`/`installer/common.bat` invoke.** This was genuinely missing and un-exercised for a while during development — the top-level `installer/*.sh`/`*.bat` scripts clone real committed history, and testing them against *uncommitted* working-tree changes to this file silently exercises the *previous* commit's version instead, which looks like a working end-to-end flow using pytest (pytest reads the working tree directly) while the actual installer script would clone something else entirely. Worth remembering the next time this file changes: commit before testing `installer/` against it, not after.
 

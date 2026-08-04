@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.02`
+`a01.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -56,3 +56,11 @@ structured entry list — this API keeps no separate structured store of past en
 Confirmed live: a real repo with no changelog yet returns empty markdown with no error (the
 honest, correct state for this repository today, not a bug), and a real file's content is read
 back verbatim once one exists.
+
+**Real `GetOptIn`/`SetOptIn` RPCs, added for the TUI's own Settings screen**
+(`telemetrees_opt_in`). Backed by `common/local_config_store.LocalConfigStore` at
+`<install_root>/telemetrees/config.json`, defaulting to `False` — data only ever leaves
+the install once explicitly turned on, matching this API's own stated opt-in-by-default
+posture. `TelemetreesServicer` takes an optional `install_root`, resolved in `__main__`
+via `common/install_paths.resolve_install_root()` (new shared utility — see `services/
+setup/CLAUDE.md` for why no service had a way to compute this before this pass).

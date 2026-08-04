@@ -44,6 +44,16 @@ class TelemetreesServiceStub:
                 request_serializer=telemetrees__pb2.ChangelogRequest.SerializeToString,
                 response_deserializer=telemetrees__pb2.ChangelogResponse.FromString,
                 _registered_method=True)
+        self.GetOptIn = channel.unary_unary(
+                '/resibo.telemetrees.v1.TelemetreesService/GetOptIn',
+                request_serializer=telemetrees__pb2.OptInConfigRequest.SerializeToString,
+                response_deserializer=telemetrees__pb2.OptInResponse.FromString,
+                _registered_method=True)
+        self.SetOptIn = channel.unary_unary(
+                '/resibo.telemetrees.v1.TelemetreesService/SetOptIn',
+                request_serializer=telemetrees__pb2.SetOptInRequest.SerializeToString,
+                response_deserializer=telemetrees__pb2.OptInResponse.FromString,
+                _registered_method=True)
 
 
 class TelemetreesServiceServicer:
@@ -61,6 +71,21 @@ class TelemetreesServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetOptIn(self, request, context):
+        """Real, persisted opt-in flag, added post-§6 for the TUI's own Settings screen
+        (`services/interface/tui/menu_data/settings.py`'s `telemetrees_opt_in`). Off by
+        default -- data only ever leaves the install when explicitly turned on.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetOptIn(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TelemetreesServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -73,6 +98,16 @@ def add_TelemetreesServiceServicer_to_server(servicer, server):
                     servicer.GetChangelog,
                     request_deserializer=telemetrees__pb2.ChangelogRequest.FromString,
                     response_serializer=telemetrees__pb2.ChangelogResponse.SerializeToString,
+            ),
+            'GetOptIn': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetOptIn,
+                    request_deserializer=telemetrees__pb2.OptInConfigRequest.FromString,
+                    response_serializer=telemetrees__pb2.OptInResponse.SerializeToString,
+            ),
+            'SetOptIn': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetOptIn,
+                    request_deserializer=telemetrees__pb2.SetOptInRequest.FromString,
+                    response_serializer=telemetrees__pb2.OptInResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -129,6 +164,60 @@ class TelemetreesService:
             '/resibo.telemetrees.v1.TelemetreesService/GetChangelog',
             telemetrees__pb2.ChangelogRequest.SerializeToString,
             telemetrees__pb2.ChangelogResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetOptIn(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.telemetrees.v1.TelemetreesService/GetOptIn',
+            telemetrees__pb2.OptInConfigRequest.SerializeToString,
+            telemetrees__pb2.OptInResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetOptIn(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.telemetrees.v1.TelemetreesService/SetOptIn',
+            telemetrees__pb2.SetOptInRequest.SerializeToString,
+            telemetrees__pb2.OptInResponse.FromString,
             options,
             channel_credentials,
             insecure,

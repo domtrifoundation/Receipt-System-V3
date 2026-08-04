@@ -83,3 +83,42 @@ def test_get_tracked_dependencies_reflects_a_custom_registry():
     response = run(servicer.GetTrackedDependencies(pb.TrackedDepsRequest()))
 
     assert [d.name for d in response.dependencies] == ["example-pkg"]
+
+
+# --- GetOptIn / SetOptIn -----------------------------------------------------------------------
+
+
+def test_get_opt_in_reports_unknown_with_no_install_root():
+    servicer = TelemetreesServicer()
+
+    response = run(servicer.GetOptIn(pb.OptInConfigRequest()))
+
+    assert response.known is False
+
+
+def test_get_opt_in_defaults_to_false(tmp_path):
+    servicer = TelemetreesServicer(install_root=tmp_path)
+
+    response = run(servicer.GetOptIn(pb.OptInConfigRequest()))
+
+    assert response.known is True
+    assert response.opt_in is False
+
+
+def test_set_opt_in_persists_for_real(tmp_path):
+    servicer = TelemetreesServicer(install_root=tmp_path)
+
+    set_response = run(servicer.SetOptIn(pb.SetOptInRequest(opt_in=True)))
+    get_response = run(servicer.GetOptIn(pb.OptInConfigRequest()))
+
+    assert set_response.opt_in is True
+    assert get_response.opt_in is True
+
+
+def test_set_opt_in_honors_an_explicit_install_root_override(tmp_path):
+    servicer = TelemetreesServicer()  # no constructor install_root at all
+
+    run(servicer.SetOptIn(pb.SetOptInRequest(install_root=str(tmp_path), opt_in=True)))
+    response = run(servicer.GetOptIn(pb.OptInConfigRequest(install_root=str(tmp_path))))
+
+    assert response.opt_in is True

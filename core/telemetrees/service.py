@@ -38,9 +38,13 @@ class TelemetreesServicer:
         registry: TrackedDependencyRegistry | None = None,
         *,
         repo_root: Path | str | None = None,
+        install_root: Path | str | None = None,
     ) -> None:
         self._registry = registry if registry is not None else default_registry()
         self._repo_root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[2]
+        #: `None` in a dev checkout — `GetOptIn`/`SetOptIn` report `known=false` rather
+        #: than fabricating a value (`common/install_paths.resolve_install_root()`).
+        self._install_root = Path(install_root) if install_root is not None else None
 
     async def GetTrackedDependencies(self, request, context=None):  # noqa: N802 - gRPC naming
         from .generated import telemetrees_pb2 as pb
@@ -72,15 +76,40 @@ class TelemetreesServicer:
             return pb.ChangelogResponse(error_code="CHANGELOG_UNREADABLE", error_detail=str(exc))
         return pb.ChangelogResponse(markdown=markdown)
 
+    def _resolve_install_root(self, request_install_root: str) -> Path | None:
+        if request_install_root:
+            return Path(request_install_root)
+        return self._install_root
 
-async def serve(address: str = DEFAULT_ADDRESS, *, registry: TrackedDependencyRegistry | None = None):
+    async def GetOptIn(self, request, context=None):  # noqa: N802 - gRPC naming
+        from .generated import telemetrees_pb2 as pb
+        from common.local_config_store import LocalConfigStore
+
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.OptInResponse(known=False)
+        opt_in = LocalConfigStore(install_root, "telemetrees/config.json").get("opt_in", False)
+        return pb.OptInResponse(opt_in=bool(opt_in), known=True)
+
+    async def SetOptIn(self, request, context=None):  # noqa: N802 - gRPC naming
+        from .generated import telemetrees_pb2 as pb
+        from common.local_config_store import LocalConfigStore
+
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.OptInResponse(known=False)
+        LocalConfigStore(install_root, "telemetrees/config.json").set("opt_in", request.opt_in)
+        return pb.OptInResponse(opt_in=request.opt_in, known=True)
+
+
+async def serve(address: str = DEFAULT_ADDRESS, *, registry: TrackedDependencyRegistry | None = None, install_root: Path | str | None = None):
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
     import grpc
 
     from .generated import telemetrees_pb2_grpc
 
     server = grpc.aio.server()
-    telemetrees_pb2_grpc.add_TelemetreesServiceServicer_to_server(TelemetreesServicer(registry), server)
+    telemetrees_pb2_grpc.add_TelemetreesServiceServicer_to_server(TelemetreesServicer(registry, install_root=install_root), server)
     port = server.add_insecure_port(address)
     host = address.rsplit(":", 1)[0]
     server.bound_address = f"{host}:{port}"  # type: ignore[attr-defined]
@@ -93,8 +122,10 @@ if __name__ == "__main__":  # pragma: no cover
     import sys
 
     async def _main() -> None:
+        from common.install_paths import resolve_install_root
+
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        srv = await serve(addr)
+        srv = await serve(addr, install_root=resolve_install_root(Path(__file__)))
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)
         from common.watchdog_client import start_kicking_for_service, stop_kick_loop

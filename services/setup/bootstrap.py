@@ -35,9 +35,11 @@ __all__ = [
     "ensure_wizard_dependencies",
     "finalize_clone",
     "read_dev_mode",
+    "read_run_on_startup",
     "run_first_run_wizard",
     "wizard_command",
     "write_install_config",
+    "write_run_on_startup",
 ]
 
 #: The launcher scripts every clone carries, copied to the install root once as a real §4/§1.6
@@ -138,6 +140,42 @@ def write_install_config(install_root: Path, dev_mode: bool) -> bool:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps({"dev_mode": dev_mode}, indent=2) + "\n", encoding="utf-8")
     return True
+
+
+def read_run_on_startup(install_root: Path) -> bool:
+    """`run_on_startup` (§4.1's own "offered as a genuinely skippable step during
+    first-run setup") is freely re-toggleable at any time, unlike `dev_mode` above —
+    real, deliberate asymmetry, not an oversight: `dev_mode` is a first-clone-only
+    structural choice ("not convertible on a live install"), while whether the cluster
+    launches at machine boot is an ordinary operational preference an owner can change
+    whenever they like. Defaults to `False` (not offered unless explicitly turned on)
+    when nothing has been written yet.
+    """
+    target = install_root / INSTALL_CONFIG_RELPATH
+    if not target.is_file():
+        return False
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    value = data.get("run_on_startup")
+    return bool(value) if isinstance(value, bool) else False
+
+
+def write_run_on_startup(install_root: Path, run_on_startup: bool) -> None:
+    """Always overwrites — the real read-modify-write counterpart to `read_run_on_startup`,
+    sharing `INSTALL_CONFIG_RELPATH` with `dev_mode` but never touching that key, so a
+    `run_on_startup` toggle can never accidentally reset `dev_mode` or vice versa."""
+    target = install_root / INSTALL_CONFIG_RELPATH
+    data: dict = {}
+    if target.is_file():
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    data["run_on_startup"] = run_on_startup
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 async def finalize_clone(

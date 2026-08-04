@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.06`
+`a02.00.07`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -128,6 +128,33 @@ fleet.build_fleet_specs`), and every currently-tracked multi-version instance
 honestly labeled unavailable: `ExecutionCoreService` has no RPC that lists active runs,
 only `GetRunStatus(run_id)` for an id already known, so this panel cannot show a real
 number without inventing one. `m` opens the root menu from here; `q` quits.
+
+**A real settings backend now exists for a genuine subset of `menu_data/settings.py`,
+closing the exact gap the user reported live: every setting leaf used to resolve to
+`"<target> is not wired to a live backend yet"`, confirmed against a running install
+before this pass — not a crash, but genuinely inert, since zero of the ~8 owning APIs
+exposed a single config RPC anywhere in the codebase (verified by grep, not assumed).**
+`settings_backend.py`'s `SETTINGS_BACKENDS` now wires four real, tested RPCs:
+`setup.get_dev_mode` (real read, `bool_ro` — matches its own "not convertible on a live
+install" tooltip), `setup.set_run_on_startup` (real read+write, `bool_rw`),
+`auth.get_tenancy_mode` (real read+write, `choice_rw` over `single`/`multi`, honestly
+`takes_effect_on_restart` since Auth's own collaborators are wired once at process start
+and don't re-read the persisted file), and `telemetrees.set_opt_in` (real read+write,
+`bool_rw`). The new `custom_screens/setting_value_screen.py` is the actual missing piece
+underneath all of them — previously *no* screen existed that could toggle a bool or pick
+a choice at all; selecting any setting leaf only ever called a resolver once and displayed
+a string. Live-tested end to end (`tests/unit/services/interface/
+test_setting_value_screen.py`) against genuine running `SetupServicer`/`AuthServicer`
+instances, address-resolved the same way every other Core API resolves a peer
+(`common/blob_client.resolve_service_address` + the new `common/install_paths.
+resolve_install_root()`), never a mocked gRPC stub.
+
+**The remaining settings are honestly still unwired, not silently claimed done**:
+`update.set_channel`, `update.set_dependency_testing_opt_in`, `logs.set_verbosity`,
+`ingestion.set_source_enabled`, `ingestion.set_archival_codec` need the identical
+mechanical pattern applied to Update/Logs/Ingestion (each gets its own `Get`/`Set` RPC
+pair backed by `LocalConfigStore`); `gateway.set_tunnel_enabled` is blocked on Gateway not
+existing as a package at all yet.
 
 **Three of §3.2's eight enumerated custom screens remain named in `root.py` but not yet
 built**: `run_monitor`, `staff_audit_queue`, `vendor_branch_editor`, `groups` minus

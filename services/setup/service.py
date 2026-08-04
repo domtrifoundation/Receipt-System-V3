@@ -27,6 +27,7 @@ import json
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 
+from .bootstrap import read_dev_mode, read_run_on_startup, write_run_on_startup
 from .contracts import HardwareProfile, WizardAnswer, WizardStepId
 from .hardware.detect import default_detector
 from .hardware.report_import import DEFAULT_CANDIDATE_DIRS, find_and_merge
@@ -91,8 +92,14 @@ class SetupServicer:
         *,
         launcher_path: Path = Path("start.sh"),
         wizard_engine_factory=None,
+        install_root: Path | None = None,
     ) -> None:
         self._launcher_path = launcher_path
+        #: `None` in a dev checkout (`common/install_paths.resolve_install_root()`
+        #: returns `None` there) — `GetDevMode`/`GetRunOnStartup`/`SetRunOnStartup` report
+        #: `known=false` rather than fabricating a value when this is unset and the
+        #: request carries no explicit `install_root` override either.
+        self._install_root = install_root
         # A factory rather than one shared WizardEngine: `docs/VENV_AND_IMPORTS.md`-adjacent
         # reasoning applies here too — one wizard run per install, and a fresh WizardEngine's
         # own `self.progress` must never leak between two concurrent RunWizard calls (e.g. a
@@ -176,8 +183,39 @@ class SetupServicer:
                 msg.error_detail = outcome.error.detail
         return response
 
+    def _resolve_install_root(self, request_install_root: str) -> Path | None:
+        if request_install_root:
+            return Path(request_install_root)
+        return self._install_root
 
-async def serve(address: str = DEFAULT_ADDRESS, *, launcher_path: Path = Path("start.sh")):
+    async def GetDevMode(self, request, context=None):  # noqa: N802 - gRPC naming
+        from .generated import setup_pb2 as pb
+
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.DevModeResponse(known=False)
+        value = read_dev_mode(install_root)
+        return pb.DevModeResponse(dev_mode=bool(value), known=value is not None)
+
+    async def GetRunOnStartup(self, request, context=None):  # noqa: N802 - gRPC naming
+        from .generated import setup_pb2 as pb
+
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.RunOnStartupResponse(known=False)
+        return pb.RunOnStartupResponse(run_on_startup=read_run_on_startup(install_root), known=True)
+
+    async def SetRunOnStartup(self, request, context=None):  # noqa: N802 - gRPC naming
+        from .generated import setup_pb2 as pb
+
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.RunOnStartupResponse(known=False)
+        write_run_on_startup(install_root, request.run_on_startup)
+        return pb.RunOnStartupResponse(run_on_startup=request.run_on_startup, known=True)
+
+
+async def serve(address: str = DEFAULT_ADDRESS, *, launcher_path: Path = Path("start.sh"), install_root: Path | None = None):
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
     import grpc
 
@@ -185,7 +223,7 @@ async def serve(address: str = DEFAULT_ADDRESS, *, launcher_path: Path = Path("s
 
     server = grpc.aio.server()
     setup_pb2_grpc.add_SetupServiceServicer_to_server(
-        SetupServicer(launcher_path=launcher_path), server
+        SetupServicer(launcher_path=launcher_path, install_root=install_root), server
     )
     port = server.add_insecure_port(address)
     host = address.rsplit(":", 1)[0]
@@ -199,8 +237,10 @@ if __name__ == "__main__":  # pragma: no cover
     import sys
 
     async def _main():
+        from common.install_paths import resolve_install_root
+
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        server = await serve(addr)
+        server = await serve(addr, install_root=resolve_install_root(Path(__file__)))
         print(f"BOUND_ADDRESS={server.bound_address}", flush=True)
         print(f"listening on {server.bound_address}", file=sys.stderr)
         from common.watchdog_client import start_kicking_for_service, stop_kick_loop

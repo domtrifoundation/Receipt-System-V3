@@ -6,6 +6,28 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class OptInConfigRequest(_message.Message):
+    __slots__ = ("install_root",)
+    INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]
+    install_root: str
+    def __init__(self, install_root: _Optional[str] = ...) -> None: ...
+
+class OptInResponse(_message.Message):
+    __slots__ = ("opt_in", "known")
+    OPT_IN_FIELD_NUMBER: _ClassVar[int]
+    KNOWN_FIELD_NUMBER: _ClassVar[int]
+    opt_in: bool
+    known: bool
+    def __init__(self, opt_in: _Optional[bool] = ..., known: _Optional[bool] = ...) -> None: ...
+
+class SetOptInRequest(_message.Message):
+    __slots__ = ("install_root", "opt_in")
+    INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]
+    OPT_IN_FIELD_NUMBER: _ClassVar[int]
+    install_root: str
+    opt_in: bool
+    def __init__(self, install_root: _Optional[str] = ..., opt_in: _Optional[bool] = ...) -> None: ...
+
 class TrackedDependencyInfo(_message.Message):
     __slots__ = ("name", "fact_kinds", "upstream_issue_refs", "source_deep_dive", "notes")
     NAME_FIELD_NUMBER: _ClassVar[int]

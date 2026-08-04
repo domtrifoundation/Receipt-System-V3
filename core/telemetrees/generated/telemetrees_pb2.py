@@ -24,23 +24,29 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11telemetrees.proto\x12\x15resibo.telemetrees.v1\"\x7f\n\x15TrackedDependencyInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x12\n\nfact_kinds\x18\x02 \x03(\t\x12\x1b\n\x13upstream_issue_refs\x18\x03 \x03(\t\x12\x18\n\x10source_deep_dive\x18\x04 \x01(\t\x12\r\n\x05notes\x18\x05 \x01(\t\"\'\n\x12TrackedDepsRequest\x12\x11\n\tfact_kind\x18\x01 \x01(\t\"\x83\x01\n\x13TrackedDepsResponse\x12\x42\n\x0c\x64\x65pendencies\x18\x01 \x03(\x0b\x32,.resibo.telemetrees.v1.TrackedDependencyInfo\x12\x12\n\nerror_code\x18\x02 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x03 \x01(\t\"\x12\n\x10\x43hangelogRequest\"O\n\x11\x43hangelogResponse\x12\x10\n\x08markdown\x18\x01 \x01(\t\x12\x12\n\nerror_code\x18\x02 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x03 \x01(\t2\xe8\x01\n\x12TelemetreesService\x12o\n\x16GetTrackedDependencies\x12).resibo.telemetrees.v1.TrackedDepsRequest\x1a*.resibo.telemetrees.v1.TrackedDepsResponse\x12\x61\n\x0cGetChangelog\x12\'.resibo.telemetrees.v1.ChangelogRequest\x1a(.resibo.telemetrees.v1.ChangelogResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11telemetrees.proto\x12\x15resibo.telemetrees.v1\"*\n\x12OptInConfigRequest\x12\x14\n\x0cinstall_root\x18\x01 \x01(\t\".\n\rOptInResponse\x12\x0e\n\x06opt_in\x18\x01 \x01(\x08\x12\r\n\x05known\x18\x02 \x01(\x08\"7\n\x0fSetOptInRequest\x12\x14\n\x0cinstall_root\x18\x01 \x01(\t\x12\x0e\n\x06opt_in\x18\x02 \x01(\x08\"\x7f\n\x15TrackedDependencyInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x12\n\nfact_kinds\x18\x02 \x03(\t\x12\x1b\n\x13upstream_issue_refs\x18\x03 \x03(\t\x12\x18\n\x10source_deep_dive\x18\x04 \x01(\t\x12\r\n\x05notes\x18\x05 \x01(\t\"\'\n\x12TrackedDepsRequest\x12\x11\n\tfact_kind\x18\x01 \x01(\t\"\x83\x01\n\x13TrackedDepsResponse\x12\x42\n\x0c\x64\x65pendencies\x18\x01 \x03(\x0b\x32,.resibo.telemetrees.v1.TrackedDependencyInfo\x12\x12\n\nerror_code\x18\x02 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x03 \x01(\t\"\x12\n\x10\x43hangelogRequest\"O\n\x11\x43hangelogResponse\x12\x10\n\x08markdown\x18\x01 \x01(\t\x12\x12\n\nerror_code\x18\x02 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x03 \x01(\t2\x9f\x03\n\x12TelemetreesService\x12o\n\x16GetTrackedDependencies\x12).resibo.telemetrees.v1.TrackedDepsRequest\x1a*.resibo.telemetrees.v1.TrackedDepsResponse\x12\x61\n\x0cGetChangelog\x12\'.resibo.telemetrees.v1.ChangelogRequest\x1a(.resibo.telemetrees.v1.ChangelogResponse\x12[\n\x08GetOptIn\x12).resibo.telemetrees.v1.OptInConfigRequest\x1a$.resibo.telemetrees.v1.OptInResponse\x12X\n\x08SetOptIn\x12&.resibo.telemetrees.v1.SetOptInRequest\x1a$.resibo.telemetrees.v1.OptInResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'telemetrees_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_TRACKEDDEPENDENCYINFO']._serialized_start=44
-  _globals['_TRACKEDDEPENDENCYINFO']._serialized_end=171
-  _globals['_TRACKEDDEPSREQUEST']._serialized_start=173
-  _globals['_TRACKEDDEPSREQUEST']._serialized_end=212
-  _globals['_TRACKEDDEPSRESPONSE']._serialized_start=215
-  _globals['_TRACKEDDEPSRESPONSE']._serialized_end=346
-  _globals['_CHANGELOGREQUEST']._serialized_start=348
-  _globals['_CHANGELOGREQUEST']._serialized_end=366
-  _globals['_CHANGELOGRESPONSE']._serialized_start=368
-  _globals['_CHANGELOGRESPONSE']._serialized_end=447
-  _globals['_TELEMETREESSERVICE']._serialized_start=450
-  _globals['_TELEMETREESSERVICE']._serialized_end=682
+  _globals['_OPTINCONFIGREQUEST']._serialized_start=44
+  _globals['_OPTINCONFIGREQUEST']._serialized_end=86
+  _globals['_OPTINRESPONSE']._serialized_start=88
+  _globals['_OPTINRESPONSE']._serialized_end=134
+  _globals['_SETOPTINREQUEST']._serialized_start=136
+  _globals['_SETOPTINREQUEST']._serialized_end=191
+  _globals['_TRACKEDDEPENDENCYINFO']._serialized_start=193
+  _globals['_TRACKEDDEPENDENCYINFO']._serialized_end=320
+  _globals['_TRACKEDDEPSREQUEST']._serialized_start=322
+  _globals['_TRACKEDDEPSREQUEST']._serialized_end=361
+  _globals['_TRACKEDDEPSRESPONSE']._serialized_start=364
+  _globals['_TRACKEDDEPSRESPONSE']._serialized_end=495
+  _globals['_CHANGELOGREQUEST']._serialized_start=497
+  _globals['_CHANGELOGREQUEST']._serialized_end=515
+  _globals['_CHANGELOGRESPONSE']._serialized_start=517
+  _globals['_CHANGELOGRESPONSE']._serialized_end=596
+  _globals['_TELEMETREESSERVICE']._serialized_start=599
+  _globals['_TELEMETREESSERVICE']._serialized_end=1014
 # @@protoc_insertion_point(module_scope)

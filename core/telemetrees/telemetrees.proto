@@ -13,6 +13,26 @@ package resibo.telemetrees.v1;
 service TelemetreesService {
   rpc GetTrackedDependencies(TrackedDepsRequest) returns (TrackedDepsResponse);
   rpc GetChangelog(ChangelogRequest) returns (ChangelogResponse);
+
+  // Real, persisted opt-in flag, added post-§6 for the TUI's own Settings screen
+  // (`services/interface/tui/menu_data/settings.py`'s `telemetrees_opt_in`). Off by
+  // default -- data only ever leaves the install when explicitly turned on.
+  rpc GetOptIn(OptInConfigRequest) returns (OptInResponse);
+  rpc SetOptIn(SetOptInRequest) returns (OptInResponse);
+}
+
+message OptInConfigRequest {
+  string install_root = 1;   // empty means "resolve from this process's own file location"
+}
+
+message OptInResponse {
+  bool opt_in = 1;
+  bool known = 2;   // false when install_root is unknown
+}
+
+message SetOptInRequest {
+  string install_root = 1;
+  bool opt_in = 2;
 }
 
 message TrackedDependencyInfo {

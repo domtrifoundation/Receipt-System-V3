@@ -244,3 +244,75 @@ def test_a_real_client_can_drive_the_whole_wizard_over_an_actual_grpc_connection
         "sms_notifications", "receipt_ingestion", "address_checking", "hardware_tier",
         "terms_of_service", "finalize",
     ]
+
+
+# --- GetDevMode / GetRunOnStartup / SetRunOnStartup ------------------------------------------
+
+
+def test_get_dev_mode_reports_unknown_with_no_install_root(tmp_path):
+    from services.setup.generated import setup_pb2
+
+    servicer = SetupServicer()
+
+    response = asyncio.run(servicer.GetDevMode(setup_pb2.ConfigRequest()))
+
+    assert response.known is False
+
+
+def test_get_dev_mode_reads_the_real_persisted_flag(tmp_path):
+    from services.setup.bootstrap import write_install_config
+    from services.setup.generated import setup_pb2
+
+    write_install_config(tmp_path, dev_mode=True)
+    servicer = SetupServicer(install_root=tmp_path)
+
+    response = asyncio.run(servicer.GetDevMode(setup_pb2.ConfigRequest()))
+
+    assert response.known is True
+    assert response.dev_mode is True
+
+
+def test_get_dev_mode_honors_an_explicit_install_root_override(tmp_path):
+    from services.setup.bootstrap import write_install_config
+    from services.setup.generated import setup_pb2
+
+    write_install_config(tmp_path, dev_mode=True)
+    servicer = SetupServicer()  # no constructor install_root at all
+
+    response = asyncio.run(servicer.GetDevMode(setup_pb2.ConfigRequest(install_root=str(tmp_path))))
+
+    assert response.known is True
+    assert response.dev_mode is True
+
+
+def test_get_run_on_startup_defaults_to_false(tmp_path):
+    from services.setup.generated import setup_pb2
+
+    servicer = SetupServicer(install_root=tmp_path)
+
+    response = asyncio.run(servicer.GetRunOnStartup(setup_pb2.ConfigRequest()))
+
+    assert response.known is True
+    assert response.run_on_startup is False
+
+
+def test_set_run_on_startup_persists_for_real(tmp_path):
+    from services.setup.generated import setup_pb2
+
+    servicer = SetupServicer(install_root=tmp_path)
+
+    set_response = asyncio.run(servicer.SetRunOnStartup(setup_pb2.SetRunOnStartupRequest(run_on_startup=True)))
+    get_response = asyncio.run(servicer.GetRunOnStartup(setup_pb2.ConfigRequest()))
+
+    assert set_response.run_on_startup is True
+    assert get_response.run_on_startup is True
+
+
+def test_set_run_on_startup_reports_unknown_with_no_install_root():
+    from services.setup.generated import setup_pb2
+
+    servicer = SetupServicer()
+
+    response = asyncio.run(servicer.SetRunOnStartup(setup_pb2.SetRunOnStartupRequest(run_on_startup=True)))
+
+    assert response.known is False

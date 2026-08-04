@@ -36,6 +36,38 @@ service SetupService {
   // caller (Update API's own `release_manager.py`, or Setup's own finalize routine) wants the
   // whole `ProvisionReport` at once, not a live per-service progress stream.
   rpc ProvisionVenvs(ProvisionVenvsRequest) returns (ProvisionVenvsResponse);
+
+  // Real install-config surface, added post-§9 for the TUI's own Settings screen
+  // (`services/interface/tui/menu_data/settings.py`). `dev_mode` is read-only on the
+  // wire — §4.1's own "not convertible on a live install" — `run_on_startup` is freely
+  // re-toggleable. `install_root=""` (unknown — a dev checkout, not inside a real
+  // release clone) reports `known=false` rather than fabricating a value.
+  rpc GetDevMode(ConfigRequest) returns (DevModeResponse);
+  rpc GetRunOnStartup(ConfigRequest) returns (RunOnStartupResponse);
+  rpc SetRunOnStartup(SetRunOnStartupRequest) returns (RunOnStartupResponse);
+}
+
+message ConfigRequest {
+  // Empty means "resolve from this running process's own file location"
+  // (`common/install_paths.py`'s `resolve_install_root()`) -- a caller with its own
+  // known install_root (e.g. a test, or a client running on the same host) may supply
+  // it explicitly instead.
+  string install_root = 1;
+}
+
+message DevModeResponse {
+  bool dev_mode = 1;
+  bool known = 2;   // false when no install config exists yet, or install_root is unknown
+}
+
+message RunOnStartupResponse {
+  bool run_on_startup = 1;
+  bool known = 2;
+}
+
+message SetRunOnStartupRequest {
+  string install_root = 1;
+  bool run_on_startup = 2;
 }
 
 message DetectHardwareRequest {
