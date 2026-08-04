@@ -263,6 +263,21 @@ echo Handing off to Setup API's own finalize routine...
 
 call :detect_python_bin
 echo Using interpreter: %PYTHON_BIN%
+
+REM bootstrap.py itself (run by this bare, no-venv interpreter, before any per-service venv
+REM exists) imports common\frozen_dict.py transitively via services\setup\contracts.py -- on
+REM any interpreter below 3.15 that needs the real `frozendict` PyPI package, not just the
+REM per-service venvs bootstrap.py goes on to create. Confirmed the hard way: a fresh install
+REM on a bare 3.13/3.14 interpreter with no `frozendict` already present fails immediately
+REM with a raw ModuleNotFoundError before finalize does anything at all. Same environment
+REM marker as every other consumer of this shim (common/requirements.txt) -- installing it
+REM unconditionally on 3.15+ would be harmless but pointless, since the builtin already wins.
+%PYTHON_BIN% -m pip install --quiet "frozendict; python_version < '3.15'"
+if errorlevel 1 (
+    echo Error: failed to install bootstrap's own frozendict dependency 1>&2
+    exit /b 1
+)
+
 set "_finalize_args=%_final_dir%"
 if /i "%_dev_mode%"=="true" set "_finalize_args=%_final_dir% --dev-mode"
 

@@ -303,6 +303,18 @@ do_bootstrap() {
     detect_python_bin   # a plain call, not $(...) — PYTHON_CMD is an array and would not
     #                      survive being set inside a command-substitution subshell.
     bootstrap_log "Using interpreter: ${PYTHON_CMD[*]}"
+
+    # bootstrap.py itself (run by this bare, no-venv interpreter, before any per-service venv
+    # exists) imports common/frozen_dict.py transitively via services/setup/contracts.py — on
+    # any interpreter below 3.15 that needs the real `frozendict` PyPI package, not just the
+    # per-service venvs bootstrap.py goes on to create. Confirmed the hard way: a fresh install
+    # on a bare 3.13/3.14 interpreter with no `frozendict` already present fails immediately
+    # with a raw ModuleNotFoundError before finalize does anything at all. The same environment
+    # marker as every other consumer of this shim (common/requirements.txt) — installing it
+    # unconditionally on 3.15+ would be harmless but pointless, since the builtin already wins.
+    "${PYTHON_CMD[@]}" -m pip install --quiet "frozendict; python_version < '3.15'" \
+        || bootstrap_die "failed to install bootstrap's own frozendict dependency"
+
     local finalize_args=("$final_dir")
     if [ "$dev_mode" = "true" ]; then
         finalize_args+=(--dev-mode)
