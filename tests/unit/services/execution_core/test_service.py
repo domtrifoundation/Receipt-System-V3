@@ -200,3 +200,44 @@ def test_the_stage_output_retention_job_is_registered_with_background_workers():
 
     assert STAGE_OUTPUT_RETENTION_DAYS == 30
     assert "stage_checkpoint_purge" in KNOWN_JOBS
+
+
+# --------------------------------------------------------------------------------------------
+# ListActiveRuns -- real, previously-missing enumeration
+# --------------------------------------------------------------------------------------------
+
+
+def test_list_active_runs_is_empty_with_no_runs_started():
+    pytest.importorskip("grpc")
+    servicer = ExecutionCoreServicer()
+
+    from services.execution_core.generated import execution_core_pb2
+
+    response = run(servicer.ListActiveRuns(execution_core_pb2.ListActiveRunsRequest()))
+    assert len(response.runs) == 0
+
+
+def test_list_active_runs_returns_every_known_run():
+    pytest.importorskip("grpc")
+    servicer = ExecutionCoreServicer()
+
+    from services.execution_core.generated import execution_core_pb2
+
+    run(servicer.StartRun(execution_core_pb2.StartRunRequest(user_id="u-1", file_count=1)))
+    run(servicer.StartRun(execution_core_pb2.StartRunRequest(user_id="u-2", file_count=1)))
+
+    response = run(servicer.ListActiveRuns(execution_core_pb2.ListActiveRunsRequest()))
+    assert {r.user_id for r in response.runs} == {"u-1", "u-2"}
+
+
+def test_list_active_runs_filters_by_user_id_when_given():
+    pytest.importorskip("grpc")
+    servicer = ExecutionCoreServicer()
+
+    from services.execution_core.generated import execution_core_pb2
+
+    run(servicer.StartRun(execution_core_pb2.StartRunRequest(user_id="u-1", file_count=1)))
+    run(servicer.StartRun(execution_core_pb2.StartRunRequest(user_id="u-2", file_count=1)))
+
+    response = run(servicer.ListActiveRuns(execution_core_pb2.ListActiveRunsRequest(user_id="u-1")))
+    assert [r.user_id for r in response.runs] == ["u-1"]

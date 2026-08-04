@@ -47,6 +47,7 @@ service ExecutionCoreService {
   // (`receipt_orchestration.py`'s own docstring states plainly which stages are wired and
   // which are not yet).
   rpc SubmitReceipt(SubmitReceiptRequest) returns (SubmitReceiptResponse);
+  rpc ListActiveRuns(ListActiveRunsRequest) returns (ListActiveRunsResponse);
 }
 
 message SubmitReceiptRequest {
@@ -64,6 +65,17 @@ message SubmitReceiptRequest {
   // A caller pins specific engines only when it has a real reason to (a known-digital
   // PDF wanting text_layer specifically, a test wanting deterministic, fast results).
   repeated string ocr_engines = 7;
+}
+
+// Real, previously-missing enumeration -- `GetRunStatus` requires already knowing a
+// run_id, and nothing exposed the actual set of runs this process knows about. The real
+// gap behind the TUI's own Run Monitor screen never being buildable at all.
+message ListActiveRunsRequest {
+  string user_id = 1;   // empty means "every user's runs" (owner/staff view)
+}
+
+message ListActiveRunsResponse {
+  repeated Run runs = 1;
 }
 
 message SubmitReceiptResponse {

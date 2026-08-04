@@ -57,6 +57,13 @@ class RunRegistry:
         self._runs[run.run_id] = run
         return run
 
+    def list_all(self) -> tuple[Run, ...]:
+        """Real, previously-missing enumeration — every run this process currently
+        knows about, in memory (`RunRegistry` keeps no durable store yet, same known gap
+        `CLAUDE.md` already documents). What the TUI's own Run Monitor screen needs to
+        show anything at all; `GetRunStatus` alone requires already knowing a `run_id`."""
+        return tuple(self._runs.values())
+
     def get(self, run_id: str) -> Run | None:
         return self._runs.get(run_id)
 
@@ -220,6 +227,20 @@ class ExecutionCoreServicer:
             written_checkpoint = await self._checkpoint_store.get_checkpoint(request.receipt_id, ReceiptStage.WRITTEN)
             if written_checkpoint is not None:
                 response.persisted_receipt_id = written_checkpoint.stage_output_ref
+        return response
+
+    async def ListActiveRuns(self, request, context=None):  # noqa: N802 - gRPC naming
+        """Real, previously-missing enumeration -- the actual gap behind the TUI's own
+        Run Monitor screen never being buildable at all: `GetRunStatus` requires already
+        knowing a `run_id`, and nothing exposed the set of runs this process knows
+        about."""
+        from .generated import execution_core_pb2 as pb
+
+        response = pb.ListActiveRunsResponse()
+        for run in self._registry.list_all():
+            if request.user_id and run.user_id != request.user_id:
+                continue
+            _run_to_wire(run, response.runs.add())
         return response
 
     def _transition_response(self, run_id: str, state: RunState):

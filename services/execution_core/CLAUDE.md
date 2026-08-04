@@ -17,7 +17,7 @@ commits that got there.
 
 ## Current API version
 
-`a01.00.03`
+`a01.00.04`
 
 The **running** value, distinct from the Zircon target above. The target states where this API
 lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp` in the
@@ -153,6 +153,10 @@ so the next package does not have to re-derive it from whichever neighbour it ha
   per-run progress.** The stream, its framing and its termination conditions are real; what is
   missing is a per-run progress record, which belongs with the run registry once runs are
   durable rather than in-memory.
+- **`ListActiveRuns` is new and real** — closes the actual gap behind the TUI's own Run
+  Monitor screen never being buildable: `GetRunStatus` requires already knowing a `run_id`,
+  and nothing exposed the set of runs this process knows about. `RunRegistry.list_all()`
+  is the same in-memory `dict.values()` every other method here already reads from.
 - **`RunRegistry` keeps runs in memory.** Every behaviour above is implemented and tested; what
   is missing is the persistence adapter. This joins the same open question `core/billing/` and
   `core/support_ticketing/` each record for their own stores.

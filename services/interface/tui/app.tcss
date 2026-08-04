@@ -182,3 +182,43 @@ Screen {
     color: $text-muted;
 }
 
+#run-monitor-title {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+}
+
+#run-monitor-list {
+    height: 1fr;
+    border: round $primary;
+    margin: 1 2;
+}
+
+#run-monitor-detail {
+    padding: 0 2;
+    color: $text-muted;
+}
+
+#groups-title {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+}
+
+#groups-members {
+    height: 10;
+    border: round $primary;
+    margin: 1 2;
+}
+
+#groups-status {
+    padding: 0 2;
+    color: $success;
+}
+

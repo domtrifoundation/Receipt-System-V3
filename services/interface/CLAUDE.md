@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.08`
+`a02.00.09`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -166,21 +166,33 @@ mechanical pattern applied to Update/Logs/Ingestion (each gets its own `Get`/`Se
 pair backed by `LocalConfigStore`); `gateway.set_tunnel_enabled` is blocked on Gateway not
 existing as a package at all yet.
 
-**Three of §3.2's eight enumerated custom screens remain named in `root.py` but not yet
-built**: `run_monitor`, `staff_audit_queue`, `vendor_branch_editor`, `groups` minus
-`find_setting` (now built) — checked this pass, not assumed: Execution Core
-(`services/execution_core/execution_core.proto`), Review/Flagging
-(`core/review_flagging/review_flagging.proto`), and Groups
-(`core/groups/groups.proto`) all now have real, reachable gRPC surfaces (a change since
-the previous pass's note that none did), so these are genuinely buildable, just not yet
-built. **A real, separate gap found while checking**: neither `GroupsService` nor
-`ExecutionCoreService` exposes a "list all groups" / "list active runs" RPC — a screen for
-either can act against a known `group_id`/`run_id` but cannot yet enumerate them from a
-cold start. `vendor_branch_editor` remains genuinely blocked — `core/temporal_learning/`
-is still 0-byte scaffolding, so there is no owning API to call at all. Selecting any of
-the four in the running TUI reports `"<label> isn't built yet"` rather than crashing or
-rendering something fabricated — the same `docs/PRINCIPLES.md` "never plausible-looking
-data" discipline `core/agent_control/backends/local.py`'s `CoreUnavailable` already applies.
+**`run_monitor` and `groups` are now real, closing two of the four remaining gaps from
+the previous pass.** `run_monitor` (`custom_screens/run_monitor_screen.py`) needed
+Execution Core's new `ListActiveRuns` RPC (the actual missing piece — `GetRunStatus`
+alone requires already knowing a `run_id`); selecting a run streams its real, live
+`GetRunStatus`. `groups` (`custom_screens/groups_screen.py`) needed a real Auth session —
+built on Auth's `ValidateSession("")`, which resolves to the real implicit-owner session
+in single-tenant mode (not a full multi-provider login flow, which remains real, separate,
+larger follow-up work); in multi-tenant mode with no prior login this screen reports
+"no session available" honestly rather than pretending one exists. **Building this
+screen's own backend call path surfaced and fixed a real, separate, previously-
+undiscovered bug in Groups' own deployment**: `core/groups/service.py`'s `__main__`
+never constructed a real `SessionResolver`, so the actual running Groups service denied
+every gated call it ever received — see `core/groups/CLAUDE.md` for the full account.
+**A real, live UI bug was also found and fixed while testing the Groups screen**:
+`textual`'s default test terminal (80×24) clipped this screen's own bottom controls, and
+a click computed for an off-screen button's position landed on the Footer's own binding
+hint instead, silently triggering "Back" — fixed by using `VerticalScroll` (matching
+`CreditsScreen`'s own established pattern for content that can exceed one screen's
+height), the same fix any real short terminal would have needed too.
+
+**Two of §3.2's eight enumerated custom screens remain named in `root.py` but not yet
+built**: `staff_audit_queue` (needs Review/Flagging's own TUI-facing wiring) and
+`vendor_branch_editor` (genuinely blocked — `core/temporal_learning/` is still 0-byte
+scaffolding, no owning API to call at all). Selecting either in the running TUI reports
+`"<label> isn't built yet"` rather than crashing or rendering something fabricated — the
+same `docs/PRINCIPLES.md` "never plausible-looking data" discipline `core/agent_control/
+backends/local.py`'s `CoreUnavailable` already applies.
 **`find_setting`'s own root-menu entry is similarly a placeholder** — the real fuzzy-match
 mechanism already exists and is tested (`core/agent_control/backends/local.py`), but this
 pass did not build a screen presenting it interactively; it currently reports the same

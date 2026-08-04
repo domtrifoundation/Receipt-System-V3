@@ -24,6 +24,18 @@ class SubmitReceiptRequest(_message.Message):
     ocr_engines: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, run_id: _Optional[str] = ..., user_id: _Optional[str] = ..., receipt_id: _Optional[str] = ..., source_blob_ref: _Optional[str] = ..., content_hash: _Optional[str] = ..., ocr_source: _Optional[str] = ..., ocr_engines: _Optional[_Iterable[str]] = ...) -> None: ...
 
+class ListActiveRunsRequest(_message.Message):
+    __slots__ = ("user_id",)
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    def __init__(self, user_id: _Optional[str] = ...) -> None: ...
+
+class ListActiveRunsResponse(_message.Message):
+    __slots__ = ("runs",)
+    RUNS_FIELD_NUMBER: _ClassVar[int]
+    runs: _containers.RepeatedCompositeFieldContainer[Run]
+    def __init__(self, runs: _Optional[_Iterable[_Union[Run, _Mapping]]] = ...) -> None: ...
+
 class SubmitReceiptResponse(_message.Message):
     __slots__ = ("receipt_id", "reached_stage", "outcome", "persisted_receipt_id", "error_code", "error_detail")
     RECEIPT_ID_FIELD_NUMBER: _ClassVar[int]

@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.01`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -50,7 +50,9 @@ Partially, and the distinction is worth stating precisely rather than a blanket 
 
 The other real instance behind `docs/PRINCIPLES.md` §1.8 — this was buried inside Auth's deep-dive and had to be extracted later. Groups adds a visibility grant and a tagging convention; it never creates a shared data store. Members' receipts stay in their own Persistence databases exactly as isolated as they would otherwise be, which is structural isolation doing the work rather than a permission check (§4.5). It is a genuinely distinct third access shape, not break-glass that never expires.
 
-**Every gated call resolves the caller from a real, live session — never a caller-asserted `user_id`/role/group fact.** `permission_gate.py` is the one place in this package that is deliberately *not* graceful (`docs/PRINCIPLES.md` §4.2): an unresolvable session, a resolver that raises, and a resolved-but-forbidden session all collapse to the identical denial. Wiring a real Auth-backed `SessionResolver` in later means passing one to `PermissionGate`/`GroupsServicer`, not removing a permissive default — the shipped default (`DenyAllSessions`) denies everything.
+**Every gated call resolves the caller from a real, live session — never a caller-asserted `user_id`/role/group fact.** `permission_gate.py` is the one place in this package that is deliberately *not* graceful (`docs/PRINCIPLES.md` §4.2): an unresolvable session, a resolver that raises, and a resolved-but-forbidden session all collapse to the identical denial. The shipped default (`DenyAllSessions`) denies everything, by design, until a real `SessionResolver` is wired in.
+
+**The real `SessionResolver` is now wired in — `auth_client.py`'s `GrpcSessionResolver`, calling Auth's own `ValidateSession` RPC.** Confirmed live, not assumed: before this, `service.py`'s own `__main__` called `serve(addr)` with no `resolver` argument at all, so every real running Groups instance actually denied every gated call it ever received — this was the documented-but-not-yet-closed gap the paragraph above already named. `GrpcSessionResolver` never raises (every failure mode — expired, revoked, unknown, Auth unreachable — collapses to `None`, matching the Protocol's own contract), and is live-tested against a genuine running `AuthServicer` in both single- and multi-tenant mode (`tests/unit/core/groups/test_auth_client.py`), including a full `CreateGroup` round trip actually succeeding end to end.
 
 **`is_group_manager` is read live from `store.py` on every call, with no caching layer anywhere.** §7's own testing hook — revoking manager status must deny the very next `search_group()`-shaped call — is only true because nothing in this package remembers a prior answer.
 

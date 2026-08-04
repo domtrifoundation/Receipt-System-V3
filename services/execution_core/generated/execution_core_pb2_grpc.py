@@ -59,6 +59,11 @@ class ExecutionCoreServiceStub:
                 request_serializer=execution__core__pb2.SubmitReceiptRequest.SerializeToString,
                 response_deserializer=execution__core__pb2.SubmitReceiptResponse.FromString,
                 _registered_method=True)
+        self.ListActiveRuns = channel.unary_unary(
+                '/resibo.execution_core.v1.ExecutionCoreService/ListActiveRuns',
+                request_serializer=execution__core__pb2.ListActiveRunsRequest.SerializeToString,
+                response_deserializer=execution__core__pb2.ListActiveRunsResponse.FromString,
+                _registered_method=True)
 
 
 class ExecutionCoreServiceServicer:
@@ -111,6 +116,12 @@ class ExecutionCoreServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListActiveRuns(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ExecutionCoreServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -138,6 +149,11 @@ def add_ExecutionCoreServiceServicer_to_server(servicer, server):
                     servicer.SubmitReceipt,
                     request_deserializer=execution__core__pb2.SubmitReceiptRequest.FromString,
                     response_serializer=execution__core__pb2.SubmitReceiptResponse.SerializeToString,
+            ),
+            'ListActiveRuns': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListActiveRuns,
+                    request_deserializer=execution__core__pb2.ListActiveRunsRequest.FromString,
+                    response_serializer=execution__core__pb2.ListActiveRunsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -275,6 +291,33 @@ class ExecutionCoreService:
             '/resibo.execution_core.v1.ExecutionCoreService/SubmitReceipt',
             execution__core__pb2.SubmitReceiptRequest.SerializeToString,
             execution__core__pb2.SubmitReceiptResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListActiveRuns(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.execution_core.v1.ExecutionCoreService/ListActiveRuns',
+            execution__core__pb2.ListActiveRunsRequest.SerializeToString,
+            execution__core__pb2.ListActiveRunsResponse.FromString,
             options,
             channel_credentials,
             insecure,

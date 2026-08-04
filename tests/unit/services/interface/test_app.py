@@ -92,7 +92,7 @@ def test_selecting_an_unbuilt_custom_screen_reports_honestly_rather_than_crashin
             await pilot.press("m")
             await pilot.pause()
             list_view = app.screen.query_one("#menu-list")
-            target_index = next(i for i, item in enumerate(list_view.children) if item.id == "item-run_monitor")
+            target_index = next(i for i, item in enumerate(list_view.children) if item.id == "item-staff_audit_queue")
             list_view.index = target_index
             await pilot.pause()
             await pilot.press("enter")

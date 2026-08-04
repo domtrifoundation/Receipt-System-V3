@@ -203,8 +203,20 @@ if __name__ == "__main__":  # pragma: no cover
     import sys
 
     async def _main() -> None:
+        from pathlib import Path
+
+        from common.blob_client import resolve_service_address
+        from common.install_paths import resolve_install_root
+
+        from .auth_client import DEFAULT_AUTH_ADDRESS, GrpcSessionResolver
+
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        srv = serve(addr)
+        install_root = resolve_install_root(Path(__file__))
+        auth_address = (
+            DEFAULT_AUTH_ADDRESS if install_root is None
+            else resolve_service_address(install_root, "auth", DEFAULT_AUTH_ADDRESS)
+        )
+        srv = serve(addr, resolver=GrpcSessionResolver(auth_address))
         await srv.start()
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)

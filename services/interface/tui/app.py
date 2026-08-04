@@ -27,7 +27,9 @@ from services.interface.tui.custom_screens.credits import CreditsScreen
 from services.interface.tui.custom_screens.filed_issues_screen import FiledIssuesScreen
 from services.interface.tui.custom_screens.find_setting import FindSettingScreen
 from services.interface.tui.custom_screens.fleet_screen import FleetScreen
+from services.interface.tui.custom_screens.groups_screen import GroupsScreen
 from services.interface.tui.custom_screens.monitor_screen import MonitorScreen
+from services.interface.tui.custom_screens.run_monitor_screen import RunMonitorScreen
 from services.interface.tui.custom_screens.setting_value_screen import SettingValueScreen
 from services.interface.tui.i18n import DEFAULT_LOCALE, t
 from services.interface.tui.menu_data import ALL_MENU_ITEMS, submenu_items
@@ -96,6 +98,12 @@ class InterfaceApp(App):
                 return ""
             if item.target == "interface.open_screen.filed_issues":
                 self.push_screen(FiledIssuesScreen(self._supervisor_address, self._channel))
+                return ""
+            if item.target == "interface.open_screen.run_monitor":
+                self.push_screen(RunMonitorScreen())
+                return ""
+            if item.target == "interface.open_screen.groups":
+                self.push_screen(GroupsScreen())
                 return ""
             if item.target in _BUILT_CUSTOM_SCREENS:
                 self.push_screen(_BUILT_CUSTOM_SCREENS[item.target](self._locale))
