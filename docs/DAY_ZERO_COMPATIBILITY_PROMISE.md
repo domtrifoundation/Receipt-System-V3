@@ -36,7 +36,7 @@ Python 3.15 introduces a genuine built-in frozen-dict-shaped type. This project'
 - **BIR's own SLSP threshold values** — a government-set numeric fact that can change independent of anything in this project's own control, tracked the same way (`v3-deepdive-31-export-framework.md` §4.1).
 
 ### 2.5 The Python interpreter itself
-3.14.6 as the current development baseline; 3.15 and 3.16 tracked as real, ongoing adoption-readiness questions, not a one-time migration decision made once and considered closed.
+3.13 as the current default/pinned baseline (moved from 3.14, confirmed directly against PyPI: `rapidocr-onnxruntime` has no build for 3.13 or newer in any released version, so 3.14 bought nothing over 3.13 for that one dependency while everything else — `grpcio` included — already works on 3.13); 3.14, 3.15, and 3.16 tracked as real, ongoing adoption-readiness questions, not a one-time migration decision made once and considered closed.
 
 ---
 

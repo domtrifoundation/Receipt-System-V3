@@ -149,14 +149,24 @@ REM
 REM Confirmed the hard way, not assumed: a bare PYTHON_BIN=python default silently hung on this
 REM project's own already-documented Day-0 gap (docs/MAINTENANCE.md section 8.1 -- grpcio has
 REM no prebuilt wheel for 3.15, and building it from source has already failed outright in this
-REM project's own environment). Every one of the ~30 service venvs this script provisions needs
-REM grpcio, so this prefers a real 3.14 via the py launcher before falling back. A two-word
-REM value like "py -3.14" works correctly here because batch variable expansion is plain text
-REM substitution (%PYTHON_BIN% -m ...), unlike a POSIX shell where the same value would need
-REM array handling to avoid being treated as one literal command name (see common.sh's own
-REM detect_python_bin for that distinction).
+REM project's own environment). 3.13 is preferred first, not 3.14: confirmed directly against
+REM PyPI that rapidocr-onnxruntime has no build at all for 3.13 or newer in any released
+REM version (every 1.3.x/1.4.x release caps at "Requires-Python <3.13"), so 3.14 buys nothing
+REM over 3.13 for that specific dependency while every other real requirement (grpcio included)
+REM already works on 3.13. rapidocr stays unavailable either way; text_layer/pytesseract/
+REM WindowsOCR remain real, working engines on 3.13. 3.14 is the fallback for a machine that
+REM has it but not 3.13, ahead of the last-resort bare "python". A two-word value like
+REM "py -3.13" works correctly here because batch variable expansion is plain text substitution
+REM (%PYTHON_BIN% -m ...), unlike a POSIX shell where the same value would need array handling
+REM to avoid being treated as one literal command name (see common.sh's own detect_python_bin
+REM for that distinction).
 :detect_python_bin
 if defined PYTHON_BIN exit /b 0
+py -3.13 --version >nul 2>&1
+if not errorlevel 1 (
+    set "PYTHON_BIN=py -3.13"
+    exit /b 0
+)
 py -3.14 --version >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON_BIN=py -3.14"

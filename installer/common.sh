@@ -159,15 +159,15 @@ keymaster_get_clone_token() {
 # noxfile.py's own narrow forward_compat dependency set gets away with — is not available here.
 #
 # start.sh's own header comment already states the real intent: "default pinned interpreter
-# (currently 3.14)". Nothing yet actually enforces that pin on a fresh machine (Setup API's own
+# (currently 3.13)". Nothing yet actually enforces that pin on a fresh machine (Setup API's own
 # hardware/environment detection does not manage interpreter installation) — this function is a
-# best-effort step toward it, preferring a real 3.14 if one is discoverable, before falling back
-# to whatever `python`/`python3` happens to resolve to. `PYTHON_BIN` set explicitly always wins
-# and skips this probing entirely.
+# best-effort step toward it, preferring a real 3.13 if one is discoverable, before falling back
+# to 3.14 and then to whatever `python`/`python3` happens to resolve to. `PYTHON_BIN` set
+# explicitly always wins and skips this probing entirely.
 # Populates the global array PYTHON_CMD (never a scalar) — confirmed the hard way why a scalar
-# does not work here: on Windows there is typically no literal `python3.14` binary on PATH, only
-# the `py` launcher's own multi-word invocation (`py -3.14`), and a bash *scalar* holding
-# "py -3.14" passed as `"$python_bin" -m ...` is treated as one literal, nonexistent command
+# does not work here: on Windows there is typically no literal `python3.13` binary on PATH, only
+# the `py` launcher's own multi-word invocation (`py -3.13`), and a bash *scalar* holding
+# "py -3.13" passed as `"$python_bin" -m ...` is treated as one literal, nonexistent command
 # name rather than a command plus an argument — the same class of bug this function exists to
 # avoid, just one layer further in. An array is what lets `"${PYTHON_CMD[@]}" -m ...` expand
 # correctly either way, whether PYTHON_CMD is one word or two.
@@ -176,15 +176,26 @@ keymaster_get_clone_token() {
 # `PYTHON_BIN=python` default silently hung on this project's own already-documented Day-0 gap
 # (docs/MAINTENANCE.md §8.1 — grpcio has no prebuilt wheel for 3.15, and building it from source
 # has already failed outright in this project's own environment). Every one of the ~30 service
-# venvs this script provisions needs grpcio, so this prefers a real 3.14 before falling back —
-# `start.sh`'s own header comment already states the real intent ("default pinned interpreter
-# (currently 3.14)"); nothing yet actually enforces that pin on a fresh machine.
+# venvs this script provisions needs grpcio, so this prefers a real interpreter before falling
+# back. **3.13 over 3.14, confirmed directly against PyPI, not assumed**: `rapidocr-onnxruntime`
+# has no build at all for 3.13 or newer in any released version (every 1.3.x/1.4.x release caps
+# at "Requires-Python <3.13"), so 3.14 buys nothing over 3.13 for that one dependency while every
+# other real requirement (grpcio included) already works on 3.13. rapidocr stays unavailable
+# either way — text_layer/pytesseract/WindowsOCR remain real, working OCR engines on 3.13.
 detect_python_bin() {
     if [ -n "${PYTHON_BIN:-}" ]; then
         # shellcheck disable=SC2206 # deliberate word-splitting: an operator-supplied override
-        # may legitimately be multi-word ("py -3.14"), same as PYTHON_BIN's own documented
+        # may legitimately be multi-word ("py -3.13"), same as PYTHON_BIN's own documented
         # shape in start.sh's header comment.
         PYTHON_CMD=($PYTHON_BIN)
+        return 0
+    fi
+    if command -v python3.13 >/dev/null 2>&1; then
+        PYTHON_CMD=("python3.13")
+        return 0
+    fi
+    if command -v py >/dev/null 2>&1 && py -3.13 --version >/dev/null 2>&1; then
+        PYTHON_CMD=("py" "-3.13")
         return 0
     fi
     if command -v python3.14 >/dev/null 2>&1; then
