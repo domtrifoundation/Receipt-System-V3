@@ -37,6 +37,7 @@ class BootSequenceScreen(Screen):
     def __init__(
         self, specs: tuple[ServiceSpec, ...], clone_dir: Path, channel: str,
         *, on_complete: OnBootComplete, locale: str = "en-PH",
+        on_service_result: Callable[[ServiceLaunchResult], None] | None = None,
     ) -> None:
         super().__init__()
         self._specs = specs
@@ -45,6 +46,11 @@ class BootSequenceScreen(Screen):
         self._on_complete = on_complete
         self._locale = locale
         self._skip_animation = False
+        #: Real, per-service side effects the caller needs as results come in — PID
+        #: tracking for cleanup, writing Supervisor's own dynamic-address registry
+        #: (`supervisor/__main__.py`'s previous job, now this screen's since the boot
+        #: itself moved here — see `app.py`'s own docstring for why).
+        self._on_service_result = on_service_result
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -77,6 +83,8 @@ class BootSequenceScreen(Screen):
             lines.append(t(key, self._locale, service=result.name, detail=result.error_detail or ""))
             log.update("\n".join(lines))
             progress.advance(1)
+            if self._on_service_result is not None:
+                self._on_service_result(result)
 
         report = await boot_many(self._specs, self._clone_dir, channel=self._channel, on_result=on_result)
         if report.ok:
