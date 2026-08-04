@@ -32,6 +32,20 @@ _SEARCHABLE_SECONDARY_SIGNATURES: tuple[tuple[str, bytes], ...] = (
     ("image/gif", b"GIF8"),
 )
 
+#: A real, live-found false-positive this project's own core use case (a scanned receipt)
+#: tripped on every single sample: PDF is a *container* format that legitimately embeds a
+#: complete, independently-valid JPEG/PNG byte stream as the content of a `/DCTDecode`- or
+#: `/FlateDecode`-filtered image object — that is normal, universal PDF structure, not a
+#: polyglot attack, and every real-world scanned/photographed receipt saved as a PDF has
+#: exactly this shape. Confirmed live: `polyglot_detection.check()` flagged 20/20 real
+#: receipt PDFs as `is_polyglot=True` before this fix, which would have rejected the
+#: entire real-world input this product exists to process. Raster-image signatures are
+#: therefore never searched for when the primary type is a *container* format already
+#: known to legitimately embed them — the genuinely suspicious direction (a JPEG/PNG that
+#: *also* parses as a PDF, or a ZIP End-Of-Central-Directory record appearing in a file
+#: that isn't a ZIP) has no legitimate benign explanation and stays fully checked.
+_CONTAINER_TYPES_THAT_LEGITIMATELY_EMBED_RASTER_IMAGES = frozenset({"application/pdf"})
+
 #: ZIP's own End-Of-Central-Directory record. A ZIP reader locates an archive's real content
 #: by seeking to this signature, searched backwards from the end of the file (the comment
 #: field after it is at most 65535 bytes, so this is the standard bounded search window every
@@ -57,8 +71,11 @@ def check(content: bytes, *, primary: DetectedFileType | None = None) -> Polyglo
 
     header_len = len(bytes.fromhex(primary.matched_signature)) if primary.matched_signature else 0
     search_region = content[header_len:]
+    raster_image_types = {"image/jpeg", "image/png", "image/gif"}
     for mime_type, signature in _SEARCHABLE_SECONDARY_SIGNATURES:
         if mime_type == primary.mime_type:
+            continue
+        if mime_type in raster_image_types and primary.mime_type in _CONTAINER_TYPES_THAT_LEGITIMATELY_EMBED_RASTER_IMAGES:
             continue
         if signature in search_region:
             embedded.add(mime_type)

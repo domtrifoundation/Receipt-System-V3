@@ -78,6 +78,36 @@ def test_a_real_zip_is_not_flagged_as_a_zip_polyglot():
     assert not polyglot_detection.check(make_zip({"a.txt": b"hello"})).is_polyglot
 
 
+def test_a_pdf_that_legitimately_embeds_a_jpeg_is_not_a_polyglot():
+    """A PDF containing a `/DCTDecode` image object legitimately carries a full JPEG byte
+    stream, including its own `\\xff\\xd8\\xff` header, as ordinary PDF structure — this is
+    the shape of every real scanned or photographed receipt saved as a PDF, not an attack.
+    Live-found: this exact construction previously made `check()` flag 20/20 real receipt
+    PDF samples as polyglot, which would reject the product's entire real-world input.
+    """
+    jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 128 + b"\xff\xd9"
+    pdf_with_embedded_jpeg = (
+        PDF_BYTES + b"\n7 0 obj << /Type /XObject /Subtype /Image /Filter /DCTDecode >>\n"
+        b"stream\n" + jpeg_bytes + b"\nendstream endobj\n"
+    )
+
+    finding = polyglot_detection.check(pdf_with_embedded_jpeg)
+
+    assert not finding.is_polyglot
+
+
+def test_a_jpeg_that_also_parses_as_a_pdf_is_still_flagged():
+    """The reverse direction has no legitimate benign explanation and must stay fully checked:
+    a JPEG is not a container format that's supposed to embed a PDF inside itself.
+    """
+    crafted = b"\xff\xd8\xff\xe0" + b"\x00" * 32 + PDF_BYTES
+
+    finding = polyglot_detection.check(crafted)
+
+    assert finding.is_polyglot
+    assert "application/pdf" in finding.embedded_types
+
+
 def test_polyglot_never_reaches_a_scan_provider_and_goes_to_review(png):
     """A polyglot is denied before any provider is asked, and a human sees it.
 
