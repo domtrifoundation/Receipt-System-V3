@@ -28,6 +28,22 @@ service TelemetreesService {
   // `ListFiledIssues` does a real, live GitHub status check per record.
   rpc RecordFiledIssue(RecordFiledIssueRequest) returns (RecordFiledIssueResponse);
   rpc ListFiledIssues(ListFiledIssuesRequest) returns (ListFiledIssuesResponse);
+
+  // Real, live detection -> dedup -> GitHub-App-authenticated filing pipeline
+  // (`diagnostics/detector.py`'s own docstring has the full account, including which
+  // signal sources are wired -- Watchdog's silent-service detection -- and which
+  // aren't yet). Real and callable, not yet invoked on a timer by anything.
+  rpc DetectAndFileIssues(DetectAndFileIssuesRequest) returns (DetectAndFileIssuesResponse);
+}
+
+message DetectAndFileIssuesRequest {
+  string install_root = 1;
+  string health_address = 2;
+}
+
+message DetectAndFileIssuesResponse {
+  repeated FiledIssueStatus filed = 1;
+  bool known = 2;   // false when install_root is unknown
 }
 
 message RecordFiledIssueRequest {

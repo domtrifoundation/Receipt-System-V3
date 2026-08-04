@@ -6,6 +6,22 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class DetectAndFileIssuesRequest(_message.Message):
+    __slots__ = ("install_root", "health_address")
+    INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]
+    HEALTH_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    install_root: str
+    health_address: str
+    def __init__(self, install_root: _Optional[str] = ..., health_address: _Optional[str] = ...) -> None: ...
+
+class DetectAndFileIssuesResponse(_message.Message):
+    __slots__ = ("filed", "known")
+    FILED_FIELD_NUMBER: _ClassVar[int]
+    KNOWN_FIELD_NUMBER: _ClassVar[int]
+    filed: _containers.RepeatedCompositeFieldContainer[FiledIssueStatus]
+    known: bool
+    def __init__(self, filed: _Optional[_Iterable[_Union[FiledIssueStatus, _Mapping]]] = ..., known: _Optional[bool] = ...) -> None: ...
+
 class RecordFiledIssueRequest(_message.Message):
     __slots__ = ("install_root", "fingerprint", "issue_number", "url", "title")
     INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]

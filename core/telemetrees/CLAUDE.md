@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.04`
+`a01.00.05`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -88,3 +88,31 @@ the install once explicitly turned on, matching this API's own stated opt-in-by-
 posture. `TelemetreesServicer` takes an optional `install_root`, resolved in `__main__`
 via `common/install_paths.resolve_install_root()` (new shared utility — see `services/
 setup/CLAUDE.md` for why no service had a way to compute this before this pass).
+
+**The detector half is now real, closing the exact gap a direct question named**:
+"what's the point of Health API if it can't detect... doesn't it have a sub-API for
+bugs?" Health's own Watchdog sub-API already detects a real, specific class of problem
+(`GetSilentServices` — a service that stopped kicking); `diagnostics/detector.py`'s
+`detect_and_file_silent_service_issues()` turns that real signal into a real,
+deduplicated (by fingerprint, never re-filing an already-open issue), GitHub-App-
+authenticated filed issue — the actual pipeline `v3-plan-01-core-apis.md` #27 describes:
+"takes a raw diagnostic signal, compiles it into a well-formed GitHub Issue... via a
+swappable issue-tracker adapter... Authenticated via a GitHub App, not a personal access
+token." `diagnostics/github_app_auth.py` implements real RS256 JWT minting directly
+against `cryptography` (no `PyJWT` dependency — verified against a real generated RSA
+keypair, signature checked with the matching public key) and the real two-step App-to-
+installation-token exchange. `diagnostics/issue_filer.py`'s `GitHubAppIssueFilingClient`
+is gated by `is_configured()` — an install with no GitHub App credentials in
+`<install_root>/telemetrees/github_app.json` files nothing, ever, matching the plan's
+own "only DOMTRI's own canonical instances have this wired up by default... any other
+install must explicitly opt in." **Real GitHub issue creation is not tested end to end**
+— this environment holds no real GitHub App installation to file against, and firing
+one as part of an automated suite would be undesirable regardless; the detection/dedup/
+gating logic is live-tested against a genuine running `WatchdogServicer` with a fake
+(Protocol-conforming) filer standing in for the one real external write this
+environment cannot perform. `DetectAndFileIssues` (new RPC) exposes this — real and
+callable, **not yet invoked on a timer by anything**, the identical honest gap
+`core/ingestion/service.py`'s own `PollDriveFallback` already states for itself. Only
+one of the plan's three named signal sources is wired (Watchdog's silent-service
+detection); Update's failed-rollout/bump-test events and Dependencies Warden's flagged
+pre-release features are the identical mechanical pattern, not yet applied.

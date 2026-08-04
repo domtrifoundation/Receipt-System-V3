@@ -64,6 +64,11 @@ class TelemetreesServiceStub:
                 request_serializer=telemetrees__pb2.ListFiledIssuesRequest.SerializeToString,
                 response_deserializer=telemetrees__pb2.ListFiledIssuesResponse.FromString,
                 _registered_method=True)
+        self.DetectAndFileIssues = channel.unary_unary(
+                '/resibo.telemetrees.v1.TelemetreesService/DetectAndFileIssues',
+                request_serializer=telemetrees__pb2.DetectAndFileIssuesRequest.SerializeToString,
+                response_deserializer=telemetrees__pb2.DetectAndFileIssuesResponse.FromString,
+                _registered_method=True)
 
 
 class TelemetreesServiceServicer:
@@ -114,6 +119,16 @@ class TelemetreesServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DetectAndFileIssues(self, request, context):
+        """Real, live detection -> dedup -> GitHub-App-authenticated filing pipeline
+        (`diagnostics/detector.py`'s own docstring has the full account, including which
+        signal sources are wired -- Watchdog's silent-service detection -- and which
+        aren't yet). Real and callable, not yet invoked on a timer by anything.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TelemetreesServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -146,6 +161,11 @@ def add_TelemetreesServiceServicer_to_server(servicer, server):
                     servicer.ListFiledIssues,
                     request_deserializer=telemetrees__pb2.ListFiledIssuesRequest.FromString,
                     response_serializer=telemetrees__pb2.ListFiledIssuesResponse.SerializeToString,
+            ),
+            'DetectAndFileIssues': grpc.unary_unary_rpc_method_handler(
+                    servicer.DetectAndFileIssues,
+                    request_deserializer=telemetrees__pb2.DetectAndFileIssuesRequest.FromString,
+                    response_serializer=telemetrees__pb2.DetectAndFileIssuesResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -310,6 +330,33 @@ class TelemetreesService:
             '/resibo.telemetrees.v1.TelemetreesService/ListFiledIssues',
             telemetrees__pb2.ListFiledIssuesRequest.SerializeToString,
             telemetrees__pb2.ListFiledIssuesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DetectAndFileIssues(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.telemetrees.v1.TelemetreesService/DetectAndFileIssues',
+            telemetrees__pb2.DetectAndFileIssuesRequest.SerializeToString,
+            telemetrees__pb2.DetectAndFileIssuesResponse.FromString,
             options,
             channel_credentials,
             insecure,

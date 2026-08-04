@@ -163,3 +163,29 @@ def test_list_filed_issues_on_an_empty_ledger_returns_no_issues(tmp_path):
 
     assert response.known is True
     assert len(response.issues) == 0
+
+
+# --- DetectAndFileIssues -----------------------------------------------------------------------
+
+
+def test_detect_and_file_issues_reports_unknown_with_no_install_root():
+    servicer = TelemetreesServicer()
+
+    response = run(servicer.DetectAndFileIssues(pb.DetectAndFileIssuesRequest()))
+
+    assert response.known is False
+
+
+def test_detect_and_file_issues_files_nothing_when_github_app_not_configured(tmp_path):
+    from core.health.service import serve as health_serve
+
+    health_server = health_serve("127.0.0.1:0")
+    try:
+        servicer = TelemetreesServicer(install_root=tmp_path)
+
+        response = run(servicer.DetectAndFileIssues(pb.DetectAndFileIssuesRequest(health_address=health_server.bound_address)))
+
+        assert response.known is True
+        assert len(response.filed) == 0
+    finally:
+        health_server.stop(None)

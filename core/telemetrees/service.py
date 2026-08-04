@@ -146,6 +146,29 @@ class TelemetreesServicer:
             ))
         return response
 
+    async def DetectAndFileIssues(self, request, context=None):  # noqa: N802 - gRPC naming
+        """Real, live pipeline — see `diagnostics/detector.py`'s own docstring for what
+        signal sources are wired (Watchdog's silent-service detection) and what isn't
+        yet. Filing itself is a real no-op when the GitHub App isn't configured for this
+        install (`diagnostics/issue_filer.py`'s own opt-in gate)."""
+        from .generated import telemetrees_pb2 as pb
+        from .diagnostics.detector import detect_and_file_silent_service_issues
+
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.DetectAndFileIssuesResponse(known=False)
+
+        health_address = request.health_address or "127.0.0.1:50061"
+        filed = await detect_and_file_silent_service_issues(install_root, health_address)
+
+        response = pb.DetectAndFileIssuesResponse(known=True)
+        for record in filed:
+            response.filed.append(pb.FiledIssueStatus(
+                issue_number=record.issue_number, title=record.title, url=record.url,
+                filed_at=record.filed_at.isoformat(),
+            ))
+        return response
+
 
 async def serve(address: str = DEFAULT_ADDRESS, *, registry: TrackedDependencyRegistry | None = None, install_root: Path | str | None = None):
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
