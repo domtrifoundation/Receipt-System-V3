@@ -22,7 +22,9 @@ pytest.importorskip("textual", reason="textual is not installed in this interpre
 from services.interface.tui.app import InterfaceApp  # noqa: E402
 from services.interface.tui.custom_screens.credits import CreditsScreen  # noqa: E402
 from services.interface.tui.menu_screen import MenuScreen  # noqa: E402
+from supervisor.arbitration import ChannelArbitrator  # noqa: E402
 from supervisor.contracts import ServiceSpec  # noqa: E402
+from supervisor.service import serve as supervisor_serve  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -100,27 +102,34 @@ def test_settings_submenu_navigates_and_back_returns_to_root():
     run(scenario())
 
 
-def test_boot_sequence_screen_boots_a_real_service_then_reaches_the_root_menu():
-    pids: list[int] = []
+def test_boot_sequence_screen_streams_a_real_boot_from_a_real_supervisor(tmp_path, monkeypatch):
+    """The real, corrected architecture end to end: a genuine `SupervisorServicer` boots
+    a real service and streams the result over `StreamBootProgress`; `InterfaceApp` is a
+    pure display client of that stream, never calling `boot_many()` itself."""
+    spec = ServiceSpec(
+        name="geo_address", import_path="core.geo_address", serve_module="core.geo_address.service",
+        address=f"127.0.0.1:{_free_port()}",
+    )
+    monkeypatch.setattr("supervisor.fleet.build_fleet_specs", lambda clone_dir: (spec,))
 
     async def scenario():
-        spec = ServiceSpec(
-            name="geo_address", import_path="core.geo_address", serve_module="core.geo_address.service",
-            address=f"127.0.0.1:{_free_port()}",
-        )
-        app = InterfaceApp(boot_specs=(spec,), clone_dir=REPO_ROOT, channel="dev")
-        async with app.run_test() as pilot:
-            for _ in range(60):
-                await pilot.pause(0.5)
-                if isinstance(app.screen, MenuScreen):
-                    break
-            assert isinstance(app.screen, MenuScreen)
+        arbitrator = ChannelArbitrator(tmp_path)
+        arbitrator.set_active("local", REPO_ROOT)
+        server = await supervisor_serve(install_root=tmp_path, specs={})
+        try:
+            app = InterfaceApp(supervisor_address=server.bound_address, channel="local")
+            async with app.run_test() as pilot:
+                for _ in range(60):
+                    await pilot.pause(0.5)
+                    if isinstance(app.screen, MenuScreen):
+                        break
+                assert isinstance(app.screen, MenuScreen)
+        finally:
+            for pid in server.servicer.spawned_pids:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+            await server.stop(grace=1.0)
 
-    try:
-        run(scenario())
-    finally:
-        for pid in pids:
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
+    run(scenario())

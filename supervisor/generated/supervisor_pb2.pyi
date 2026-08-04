@@ -133,3 +133,29 @@ class RestartProgress(_message.Message):
     stage: str
     error_detail: str
     def __init__(self, service_name: _Optional[str] = ..., target_version: _Optional[str] = ..., stage: _Optional[str] = ..., error_detail: _Optional[str] = ...) -> None: ...
+
+class BootProgressRequest(_message.Message):
+    __slots__ = ("channel",)
+    CHANNEL_FIELD_NUMBER: _ClassVar[int]
+    channel: str
+    def __init__(self, channel: _Optional[str] = ...) -> None: ...
+
+class BootProgressUpdate(_message.Message):
+    __slots__ = ("service_name", "ok", "pid", "address", "error_detail", "boot_complete", "boot_ok", "failed_services")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    OK_FIELD_NUMBER: _ClassVar[int]
+    PID_FIELD_NUMBER: _ClassVar[int]
+    ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_DETAIL_FIELD_NUMBER: _ClassVar[int]
+    BOOT_COMPLETE_FIELD_NUMBER: _ClassVar[int]
+    BOOT_OK_FIELD_NUMBER: _ClassVar[int]
+    FAILED_SERVICES_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    ok: bool
+    pid: int
+    address: str
+    error_detail: str
+    boot_complete: bool
+    boot_ok: bool
+    failed_services: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, service_name: _Optional[str] = ..., ok: _Optional[bool] = ..., pid: _Optional[int] = ..., address: _Optional[str] = ..., error_detail: _Optional[str] = ..., boot_complete: _Optional[bool] = ..., boot_ok: _Optional[bool] = ..., failed_services: _Optional[_Iterable[str]] = ...) -> None: ...

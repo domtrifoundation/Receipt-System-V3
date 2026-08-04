@@ -1,25 +1,21 @@
 """`python -m supervisor` — run from Supervisor's own top-level install (`install.py`),
-never from inside a clone. Resolves the active release via `ChannelArbitrator` and hands
-off to the TUI, which drives the real fleet boot itself.
+never from inside a clone. Starts Supervisor's own real gRPC service (`service.py`) —
+including `StreamBootProgress`, the RPC that actually calls `boot_many()` — then launches
+the TUI as a genuinely detachable *display* client of it.
 
-**Boot ownership, corrected from an earlier wrong turn this same session.** This module
-originally called `boot_many()` itself, headlessly, printing raw progress lines, and only
-launched the TUI *after* the fleet was already up. That is backwards from
-`v3-deepdive-14-interface-api.md`'s own "only once every service is confirmed healthy
-does Interface API's loading screen hand off to the running TUI" — the loading screen
-*belongs to the TUI*, and the operator should watch the real boot happen there (the BETA
-banner, real per-service progress via `BootSequenceScreen`), not read console text before
-the TUI even starts. Fixed: this module now only resolves the active clone and launches
-`services.interface.tui.app` with `clone_dir`/`channel`/`install_root` — that process
-builds the fleet registry and calls `boot_many()` itself, on screen, from the start.
-`services.interface`'s own venv already has both `textual` and `grpc`
-(`common/requirements.txt`'s own base), so it needs nothing from Supervisor's own
-grpc-only venv to do this.
+**Boot ownership, corrected twice this session and now actually right.** Attempt one
+(headless): this module called `boot_many()` itself and printed raw progress, launching
+the TUI only after. Attempt two: moved `boot_many()` into the TUI process so the operator
+would see real progress instead of console text — but that put Supervisor's own job in
+the wrong process; `v3-deepdive-14-interface-api.md` §1 is explicit that Interface API is
+a genuinely detachable *display* client, never the thing doing the starting. This is the
+actual design: Supervisor's own `SupervisorServicer.StreamBootProgress` calls
+`boot_many()` and streams real per-service results over gRPC; the TUI's
+`BootSequenceScreen` is a thin client that only renders what arrives.
 """
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,16 +25,15 @@ from .arbitration import ChannelArbitrator
 DEFAULT_CHANNEL = "local"
 
 
-def _launch_tui(clone_dir: Path, channel: str, install_root: Path) -> int:
+def _launch_tui(clone_dir: Path, supervisor_address: str, channel: str) -> int:
     """Runs the TUI from the active clone's own `services.interface` venv (it needs
     `textual`, which Supervisor's own grpc-only venv deliberately does not have — the
     same reasoning `services/setup/bootstrap.py`'s own `wizard_command()` already
     established for the first-run wizard). Foreground, inherited stdio — this is the
     actual program the operator is meant to be looking at.
     """
-    # fleet.py (imported inside the TUI process, not here) needs services.setup.
-    # venv_provisioning, which only exists inside a clone — this module only needs it
-    # for resolving the venv interpreter itself, so the import stays local and minimal.
+    import os
+
     if str(clone_dir) not in sys.path:
         sys.path.insert(0, str(clone_dir))
     from services.setup.venv_provisioning import VENVS_DIRNAME, venv_python
@@ -51,13 +46,17 @@ def _launch_tui(clone_dir: Path, channel: str, install_root: Path) -> int:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(clone_dir)
     result = subprocess.run(
-        [str(interpreter), "-m", "services.interface.tui.app", str(clone_dir), channel, str(install_root)],
+        [str(interpreter), "-m", "services.interface.tui.app", "--supervisor", supervisor_address, "--channel", channel],
         cwd=str(clone_dir), env=env,
     )
     return result.returncode
 
 
-def main() -> int:
+async def _main() -> int:
+    import asyncio
+    import os
+    import signal
+
     install_root = Path(__file__).resolve().parent.parent
     arbitrator = ChannelArbitrator(install_root)
     active = arbitrator.get_active(DEFAULT_CHANNEL)
@@ -65,8 +64,35 @@ def main() -> int:
         print(f"No active release recorded for channel {DEFAULT_CHANNEL!r} — run setup first.", file=sys.stderr)
         return 1
 
-    return _launch_tui(active.release_dir, DEFAULT_CHANNEL, install_root)
+    clone_dir = active.release_dir
+    if str(clone_dir) not in sys.path:
+        sys.path.insert(0, str(clone_dir))
+
+    from .service import serve
+
+    server = await serve(install_root=install_root, specs={})
+    print(f"Supervisor's own gRPC service is up at {server.bound_address}.")
+
+    try:
+        tui_exit_code = await asyncio.to_thread(_launch_tui, clone_dir, server.bound_address, DEFAULT_CHANNEL)
+        # The TUI closing is the operator closing the program — the fleet shuts down
+        # with it rather than lingering headless. A detachable-client re-attach flow
+        # (start the TUI again against an already-running fleet, without this shutdown)
+        # is real, named future work, not silently assumed solved by this pass.
+        return tui_exit_code
+    finally:
+        for pid in server.servicer.spawned_pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        await server.stop(grace=2.0)
 
 
 if __name__ == "__main__":  # pragma: no cover
-    sys.exit(main())
+    import asyncio
+
+    try:
+        sys.exit(asyncio.run(_main()))
+    except KeyboardInterrupt:
+        sys.exit(0)

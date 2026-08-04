@@ -69,6 +69,11 @@ class SupervisorServiceStub:
                 request_serializer=supervisor__pb2.RestartRequest.SerializeToString,
                 response_deserializer=supervisor__pb2.RestartProgress.FromString,
                 _registered_method=True)
+        self.StreamBootProgress = channel.unary_stream(
+                '/resibo.supervisor.v1.SupervisorService/StreamBootProgress',
+                request_serializer=supervisor__pb2.BootProgressRequest.SerializeToString,
+                response_deserializer=supervisor__pb2.BootProgressUpdate.FromString,
+                _registered_method=True)
 
 
 class SupervisorServiceServicer:
@@ -116,6 +121,17 @@ class SupervisorServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StreamBootProgress(self, request, context):
+        """Added post-§8: Interface API is a genuine display-only client of Supervisor's own
+        boot — Supervisor is the thing that actually calls boot_many(), the TUI's own
+        loading screen streams real progress from here rather than running the boot itself
+        (v3-deepdive-14-interface-api.md's own "the TUI is a genuinely detachable client",
+        never the process doing the starting).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SupervisorServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -153,6 +169,11 @@ def add_SupervisorServiceServicer_to_server(servicer, server):
                     servicer.RestartServiceOnVersion,
                     request_deserializer=supervisor__pb2.RestartRequest.FromString,
                     response_serializer=supervisor__pb2.RestartProgress.SerializeToString,
+            ),
+            'StreamBootProgress': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamBootProgress,
+                    request_deserializer=supervisor__pb2.BootProgressRequest.FromString,
+                    response_serializer=supervisor__pb2.BootProgressUpdate.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -344,6 +365,33 @@ class SupervisorService:
             '/resibo.supervisor.v1.SupervisorService/RestartServiceOnVersion',
             supervisor__pb2.RestartRequest.SerializeToString,
             supervisor__pb2.RestartProgress.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamBootProgress(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/resibo.supervisor.v1.SupervisorService/StreamBootProgress',
+            supervisor__pb2.BootProgressRequest.SerializeToString,
+            supervisor__pb2.BootProgressUpdate.FromString,
             options,
             channel_credentials,
             insecure,

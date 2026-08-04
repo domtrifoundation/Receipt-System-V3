@@ -55,6 +55,12 @@ class SupervisorServicer:
     """Implements `SupervisorService`. Registered by name, so importing the generated
     stubs is `serve()`'s business and this class stays importable without them."""
 
+    #: Relative to the install root — every service's own real, dynamically-bound
+    #: address, written as each one comes up. The real answer to "how does one service
+    #: find another when ports are ephemeral, not fixed constants"
+    #: (`common/blob_client.py`'s own Persistence lookup reads this same file).
+    SERVICE_ADDRESSES_RELPATH = Path("supervisor") / "service_addresses.json"
+
     def __init__(
         self,
         install_root: Path | str,
@@ -69,6 +75,17 @@ class SupervisorServicer:
         self._arbitrator = arbitrator if arbitrator is not None else ChannelArbitrator(install_root)
         self._pins = pins if pins is not None else VersionPinStore(install_root)
         self._sleep_state = sleep_state if sleep_state is not None else SleepStateStore()
+        #: Every PID Supervisor has spawned via a boot — real cleanup on process exit
+        #: needs this list; see `__main__.py`'s own docstring for why that ownership
+        #: belongs here now, not the TUI's.
+        self.spawned_pids: list[int] = []
+
+    def _write_service_addresses(self, addresses: dict[str, str]) -> None:
+        import json
+
+        target = self._install_root / self.SERVICE_ADDRESSES_RELPATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(addresses, indent=2) + "\n", encoding="utf-8")
 
     async def GetActiveRelease(self, request, context=None):  # noqa: N802 - gRPC naming
         from .generated import supervisor_pb2 as pb
@@ -150,6 +167,67 @@ class SupervisorServicer:
             ))
         return response
 
+    async def StreamBootProgress(self, request, context=None):  # noqa: N802 - gRPC naming
+        """The real fix for a real, live-found inversion: the TUI's own loading screen
+        used to call `boot_many()` itself, which put Supervisor's own job in the wrong
+        process — Interface API is a genuinely detachable *display* client, never the
+        thing doing the starting. Supervisor calls `boot_many()` here, on its own real
+        fleet registry (`fleet.build_fleet_specs`, resolved fresh against the active
+        release for `request.channel`), and streams each service's own result as it
+        happens — the TUI's `BootSequenceScreen` just renders what arrives.
+        """
+        import asyncio
+
+        from .generated import supervisor_pb2 as pb
+
+        channel = request.channel or "local"
+        active = self._arbitrator.get_active(channel)
+        if active is None:
+            yield pb.BootProgressUpdate(
+                boot_complete=True, boot_ok=False,
+                error_detail=f"no active release recorded for channel {channel!r}",
+            )
+            return
+
+        from .boot_sequence import boot_many
+        from .fleet import build_fleet_specs
+
+        specs = build_fleet_specs(active.release_dir)
+        queue: asyncio.Queue = asyncio.Queue()
+        _DONE = object()
+
+        addresses: dict[str, str] = {}
+
+        def on_result(result):
+            queue.put_nowait(result)
+            if result.pid is not None:
+                self.spawned_pids.append(result.pid)
+            if result.address:
+                addresses[result.name] = result.address
+                self._write_service_addresses(addresses)
+
+        async def _run_boot():
+            report = await boot_many(specs, active.release_dir, channel=channel, on_result=on_result)
+            queue.put_nowait((_DONE, report))
+
+        boot_task = asyncio.ensure_future(_run_boot())
+        try:
+            while True:
+                item = await queue.get()
+                if isinstance(item, tuple) and item and item[0] is _DONE:
+                    report = item[1]
+                    yield pb.BootProgressUpdate(
+                        boot_complete=True, boot_ok=report.ok,
+                        failed_services=list(report.failed_services),
+                    )
+                    break
+                yield pb.BootProgressUpdate(
+                    service_name=item.name, ok=item.ok, pid=item.pid or 0,
+                    address=item.address, error_detail=item.error_detail,
+                )
+        finally:
+            await boot_task
+
     async def RestartServiceOnVersion(self, request, context=None):  # noqa: N802 - gRPC naming
         from .generated import supervisor_pb2 as pb
 
@@ -179,13 +257,23 @@ class SupervisorServicer:
 
 
 async def serve(address: str = DEFAULT_ADDRESS, *, install_root: Path | str, specs: dict[str, ServiceSpec]):
-    """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
+    """Start the servicer on `address`. Imports gRPC lazily — see the module docstring.
+
+    Returns the running server with its own `servicer` attribute attached — `__main__.py`
+    reads `server.servicer.spawned_pids` after the TUI exits, for real cleanup of
+    whatever this run actually spawned (the boot happens inside `StreamBootProgress`,
+    called by whichever TUI client connects, so this is the one place that list lives).
+    """
     import grpc
 
     from .generated import supervisor_pb2_grpc
 
+    servicer = SupervisorServicer(install_root, specs)
     server = grpc.aio.server()
-    supervisor_pb2_grpc.add_SupervisorServiceServicer_to_server(SupervisorServicer(install_root, specs), server)
-    server.add_insecure_port(address)
+    supervisor_pb2_grpc.add_SupervisorServiceServicer_to_server(servicer, server)
+    port = server.add_insecure_port(address)
+    host = address.rsplit(":", 1)[0]
+    server.bound_address = f"{host}:{port}"  # type: ignore[attr-defined]
+    server.servicer = servicer  # type: ignore[attr-defined]
     await server.start()
     return server

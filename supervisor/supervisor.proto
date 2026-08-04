@@ -22,6 +22,12 @@ service SupervisorService {
   rpc PinServiceVersion(PinRequest) returns (ServiceVersionPinResponse);
   rpc ListServiceVersionPins(ChannelRequest) returns (PinListResponse);
   rpc RestartServiceOnVersion(RestartRequest) returns (stream RestartProgress);
+  // Added post-§8: Interface API is a genuine display-only client of Supervisor's own
+  // boot — Supervisor is the thing that actually calls boot_many(), the TUI's own
+  // loading screen streams real progress from here rather than running the boot itself
+  // (v3-deepdive-14-interface-api.md's own "the TUI is a genuinely detachable client",
+  // never the process doing the starting).
+  rpc StreamBootProgress(BootProgressRequest) returns (stream BootProgressUpdate);
 }
 
 message ChannelRequest {
@@ -99,4 +105,19 @@ message RestartProgress {
   string target_version = 2;
   string stage = 3;            // "confirming_target" | "stopping_old" | "launching_new" | "waiting_healthy" | "complete" | "failed"
   string error_detail = 4;
+}
+
+message BootProgressRequest {
+  string channel = 1;
+}
+
+message BootProgressUpdate {
+  string service_name = 1;
+  bool ok = 2;
+  int32 pid = 3;
+  string address = 4;          // the real, dynamically-bound address once known
+  string error_detail = 5;
+  bool boot_complete = 6;      // true on the final update -- every service has a result
+  bool boot_ok = 7;            // only meaningful when boot_complete is true
+  repeated string failed_services = 8;   // only meaningful when boot_complete is true
 }
