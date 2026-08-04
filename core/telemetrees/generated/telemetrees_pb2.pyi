@@ -6,6 +6,60 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class RecordFiledIssueRequest(_message.Message):
+    __slots__ = ("install_root", "fingerprint", "issue_number", "url", "title")
+    INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]
+    FINGERPRINT_FIELD_NUMBER: _ClassVar[int]
+    ISSUE_NUMBER_FIELD_NUMBER: _ClassVar[int]
+    URL_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    install_root: str
+    fingerprint: str
+    issue_number: int
+    url: str
+    title: str
+    def __init__(self, install_root: _Optional[str] = ..., fingerprint: _Optional[str] = ..., issue_number: _Optional[int] = ..., url: _Optional[str] = ..., title: _Optional[str] = ...) -> None: ...
+
+class RecordFiledIssueResponse(_message.Message):
+    __slots__ = ("known",)
+    KNOWN_FIELD_NUMBER: _ClassVar[int]
+    known: bool
+    def __init__(self, known: _Optional[bool] = ...) -> None: ...
+
+class ListFiledIssuesRequest(_message.Message):
+    __slots__ = ("install_root",)
+    INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]
+    install_root: str
+    def __init__(self, install_root: _Optional[str] = ...) -> None: ...
+
+class FiledIssueStatus(_message.Message):
+    __slots__ = ("issue_number", "title", "url", "filed_at", "state", "linked_pr_numbers", "checked_at", "error_detail")
+    ISSUE_NUMBER_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    URL_FIELD_NUMBER: _ClassVar[int]
+    FILED_AT_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    LINKED_PR_NUMBERS_FIELD_NUMBER: _ClassVar[int]
+    CHECKED_AT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_DETAIL_FIELD_NUMBER: _ClassVar[int]
+    issue_number: int
+    title: str
+    url: str
+    filed_at: str
+    state: str
+    linked_pr_numbers: _containers.RepeatedScalarFieldContainer[int]
+    checked_at: str
+    error_detail: str
+    def __init__(self, issue_number: _Optional[int] = ..., title: _Optional[str] = ..., url: _Optional[str] = ..., filed_at: _Optional[str] = ..., state: _Optional[str] = ..., linked_pr_numbers: _Optional[_Iterable[int]] = ..., checked_at: _Optional[str] = ..., error_detail: _Optional[str] = ...) -> None: ...
+
+class ListFiledIssuesResponse(_message.Message):
+    __slots__ = ("issues", "known")
+    ISSUES_FIELD_NUMBER: _ClassVar[int]
+    KNOWN_FIELD_NUMBER: _ClassVar[int]
+    issues: _containers.RepeatedCompositeFieldContainer[FiledIssueStatus]
+    known: bool
+    def __init__(self, issues: _Optional[_Iterable[_Union[FiledIssueStatus, _Mapping]]] = ..., known: _Optional[bool] = ...) -> None: ...
+
 class OptInConfigRequest(_message.Message):
     __slots__ = ("install_root",)
     INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]

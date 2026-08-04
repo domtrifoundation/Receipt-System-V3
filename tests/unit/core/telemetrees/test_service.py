@@ -122,3 +122,44 @@ def test_set_opt_in_honors_an_explicit_install_root_override(tmp_path):
     response = run(servicer.GetOptIn(pb.OptInConfigRequest(install_root=str(tmp_path))))
 
     assert response.opt_in is True
+
+
+# --- RecordFiledIssue / ListFiledIssues --------------------------------------------------------
+
+
+def test_record_filed_issue_reports_unknown_with_no_install_root():
+    servicer = TelemetreesServicer()
+
+    response = run(servicer.RecordFiledIssue(pb.RecordFiledIssueRequest(fingerprint="f1", issue_number=1, url="u", title="t")))
+
+    assert response.known is False
+
+
+def test_record_and_list_filed_issues_round_trip_with_real_local_storage(tmp_path):
+    servicer = TelemetreesServicer(install_root=tmp_path)
+
+    run(servicer.RecordFiledIssue(pb.RecordFiledIssueRequest(
+        fingerprint="f1", issue_number=1, url="https://github.com/domtrifoundation/Receipt-System-V3/issues/1", title="Test issue",
+    )))
+
+    from core.telemetrees.diagnostics.ledger import FiledIssueLedger
+    records = FiledIssueLedger(tmp_path).list_all()
+    assert len(records) == 1
+    assert records[0].issue_number == 1
+
+
+def test_list_filed_issues_reports_unknown_with_no_install_root():
+    servicer = TelemetreesServicer()
+
+    response = run(servicer.ListFiledIssues(pb.ListFiledIssuesRequest()))
+
+    assert response.known is False
+
+
+def test_list_filed_issues_on_an_empty_ledger_returns_no_issues(tmp_path):
+    servicer = TelemetreesServicer(install_root=tmp_path)
+
+    response = run(servicer.ListFiledIssues(pb.ListFiledIssuesRequest()))
+
+    assert response.known is True
+    assert len(response.issues) == 0

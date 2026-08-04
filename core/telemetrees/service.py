@@ -15,8 +15,17 @@ from pathlib import Path
 
 from .dependencies_warden.registry import TrackedDependencyRegistry, default_registry
 from .dependencies_warden.contracts import TrackedFactKind
+from .diagnostics.contracts import FiledIssueRecord
+from .diagnostics.github_status_client import GitHubIssueStatusClient
+from .diagnostics.ledger import FiledIssueLedger
 
 DEFAULT_ADDRESS = "127.0.0.1:50088"
+
+#: This project's own real repository — the one place `RecordFiledIssue`/
+#: `ListFiledIssues` ever look, since this project only ever files issues against
+#: itself, never a third party's repo.
+DIAGNOSTICS_REPO_OWNER = "domtrifoundation"
+DIAGNOSTICS_REPO_NAME = "Receipt-System-V3"
 
 __all__ = ["DEFAULT_ADDRESS", "TelemetreesServicer", "serve"]
 
@@ -100,6 +109,42 @@ class TelemetreesServicer:
             return pb.OptInResponse(known=False)
         LocalConfigStore(install_root, "telemetrees/config.json").set("opt_in", request.opt_in)
         return pb.OptInResponse(opt_in=request.opt_in, known=True)
+
+    async def RecordFiledIssue(self, request, context=None):  # noqa: N802 - gRPC naming
+        from .generated import telemetrees_pb2 as pb
+
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.RecordFiledIssueResponse(known=False)
+        FiledIssueLedger(install_root).record(FiledIssueRecord(
+            fingerprint=request.fingerprint, issue_number=request.issue_number,
+            url=request.url, title=request.title,
+        ))
+        return pb.RecordFiledIssueResponse(known=True)
+
+    async def ListFiledIssues(self, request, context=None):  # noqa: N802 - gRPC naming
+        """Real, live per-issue GitHub status — see `diagnostics/github_status_client.py`'s
+        own docstring for why this is unauthenticated and read-only. Each record's live
+        status is fetched fresh on every call rather than cached, so `checked_at` is
+        always genuinely "just now," never a stale value presented as current."""
+        from .generated import telemetrees_pb2 as pb
+
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.ListFiledIssuesResponse(known=False)
+
+        records = FiledIssueLedger(install_root).list_all()
+        client = GitHubIssueStatusClient(DIAGNOSTICS_REPO_OWNER, DIAGNOSTICS_REPO_NAME)
+        response = pb.ListFiledIssuesResponse(known=True)
+        for record in records:
+            status = await client.get_status(record.issue_number)
+            response.issues.append(pb.FiledIssueStatus(
+                issue_number=record.issue_number, title=status.title or record.title,
+                url=status.url or record.url, filed_at=record.filed_at.isoformat(),
+                state=status.state, linked_pr_numbers=list(status.linked_pr_numbers),
+                checked_at=status.checked_at.isoformat(), error_detail=status.error_detail,
+            ))
+        return response
 
 
 async def serve(address: str = DEFAULT_ADDRESS, *, registry: TrackedDependencyRegistry | None = None, install_root: Path | str | None = None):

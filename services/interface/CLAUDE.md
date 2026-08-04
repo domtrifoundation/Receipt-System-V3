@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.07`
+`a02.00.08`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -148,6 +148,16 @@ test_setting_value_screen.py`) against genuine running `SetupServicer`/`AuthServ
 instances, address-resolved the same way every other Core API resolves a peer
 (`common/blob_client.resolve_service_address` + the new `common/install_paths.
 resolve_install_root()`), never a mocked gRPC stub.
+
+**A new screen, `custom_screens/filed_issues_screen.py`, answers a direct user question
+about GitHub bug-reporting observability** — real, live status (open/closed, linked PRs)
+of every issue this install has filed, via Telemetrees' new `ListFiledIssues` RPC (see
+`core/telemetrees/CLAUDE.md` for the real ledger/GitHub-status-client details, and the
+honest statement that the *filing* pipeline itself doesn't exist yet — this screen renders
+real data from a real, currently-empty ledger, which is the correct state today). Reached
+via a new `settings.diagnostics.filed_issues` menu-data entry, `target=
+"interface.open_screen.filed_issues"`, intercepted in `app.py`'s resolver the same way
+`fleet_updates`/`find_setting` already are.
 
 **The remaining settings are honestly still unwired, not silently claimed done**:
 `update.set_channel`, `update.set_dependency_testing_opt_in`, `logs.set_verbosity`,

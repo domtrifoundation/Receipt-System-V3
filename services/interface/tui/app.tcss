@@ -162,3 +162,23 @@ Screen {
     color: $success;
 }
 
+#filed-issues-title {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+}
+
+#filed-issues-list {
+    height: 1fr;
+    border: round $primary;
+    margin: 1 2;
+}
+
+#filed-issues-detail {
+    padding: 0 2;
+    color: $text-muted;
+}
+

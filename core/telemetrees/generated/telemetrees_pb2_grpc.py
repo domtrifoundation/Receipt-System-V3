@@ -54,6 +54,16 @@ class TelemetreesServiceStub:
                 request_serializer=telemetrees__pb2.SetOptInRequest.SerializeToString,
                 response_deserializer=telemetrees__pb2.OptInResponse.FromString,
                 _registered_method=True)
+        self.RecordFiledIssue = channel.unary_unary(
+                '/resibo.telemetrees.v1.TelemetreesService/RecordFiledIssue',
+                request_serializer=telemetrees__pb2.RecordFiledIssueRequest.SerializeToString,
+                response_deserializer=telemetrees__pb2.RecordFiledIssueResponse.FromString,
+                _registered_method=True)
+        self.ListFiledIssues = channel.unary_unary(
+                '/resibo.telemetrees.v1.TelemetreesService/ListFiledIssues',
+                request_serializer=telemetrees__pb2.ListFiledIssuesRequest.SerializeToString,
+                response_deserializer=telemetrees__pb2.ListFiledIssuesResponse.FromString,
+                _registered_method=True)
 
 
 class TelemetreesServiceServicer:
@@ -86,6 +96,24 @@ class TelemetreesServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RecordFiledIssue(self, request, context):
+        """Real filed-issue tracking, added for the TUI's own "what has this install reported
+        to the developers, and what's its status" screen. `RecordFiledIssue` is the seam a
+        future bug-detector calls once it exists (`core/telemetrees/diagnostics/contracts.py`'s
+        own docstring is explicit that no such detector exists yet -- this ledger and status
+        lookup are real, but nothing in this codebase currently calls RecordFiledIssue).
+        `ListFiledIssues` does a real, live GitHub status check per record.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListFiledIssues(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TelemetreesServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -108,6 +136,16 @@ def add_TelemetreesServiceServicer_to_server(servicer, server):
                     servicer.SetOptIn,
                     request_deserializer=telemetrees__pb2.SetOptInRequest.FromString,
                     response_serializer=telemetrees__pb2.OptInResponse.SerializeToString,
+            ),
+            'RecordFiledIssue': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecordFiledIssue,
+                    request_deserializer=telemetrees__pb2.RecordFiledIssueRequest.FromString,
+                    response_serializer=telemetrees__pb2.RecordFiledIssueResponse.SerializeToString,
+            ),
+            'ListFiledIssues': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListFiledIssues,
+                    request_deserializer=telemetrees__pb2.ListFiledIssuesRequest.FromString,
+                    response_serializer=telemetrees__pb2.ListFiledIssuesResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -218,6 +256,60 @@ class TelemetreesService:
             '/resibo.telemetrees.v1.TelemetreesService/SetOptIn',
             telemetrees__pb2.SetOptInRequest.SerializeToString,
             telemetrees__pb2.OptInResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RecordFiledIssue(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.telemetrees.v1.TelemetreesService/RecordFiledIssue',
+            telemetrees__pb2.RecordFiledIssueRequest.SerializeToString,
+            telemetrees__pb2.RecordFiledIssueResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListFiledIssues(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.telemetrees.v1.TelemetreesService/ListFiledIssues',
+            telemetrees__pb2.ListFiledIssuesRequest.SerializeToString,
+            telemetrees__pb2.ListFiledIssuesResponse.FromString,
             options,
             channel_credentials,
             insecure,

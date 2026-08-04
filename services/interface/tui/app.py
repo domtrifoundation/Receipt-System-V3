@@ -24,6 +24,7 @@ from textual.app import App
 
 from services.interface.tui.custom_screens.boot_sequence import BootSequenceScreen
 from services.interface.tui.custom_screens.credits import CreditsScreen
+from services.interface.tui.custom_screens.filed_issues_screen import FiledIssuesScreen
 from services.interface.tui.custom_screens.find_setting import FindSettingScreen
 from services.interface.tui.custom_screens.fleet_screen import FleetScreen
 from services.interface.tui.custom_screens.monitor_screen import MonitorScreen
@@ -92,6 +93,9 @@ class InterfaceApp(App):
                 return ""
             if item.target in SETTINGS_BACKENDS:
                 self.push_screen(SettingValueScreen(item, SETTINGS_BACKENDS[item.target]))
+                return ""
+            if item.target == "interface.open_screen.filed_issues":
+                self.push_screen(FiledIssuesScreen(self._supervisor_address, self._channel))
                 return ""
             if item.target in _BUILT_CUSTOM_SCREENS:
                 self.push_screen(_BUILT_CUSTOM_SCREENS[item.target](self._locale))

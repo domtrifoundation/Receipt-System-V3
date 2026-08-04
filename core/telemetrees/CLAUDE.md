@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.03`
+`a01.00.04`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -56,6 +56,30 @@ structured entry list — this API keeps no separate structured store of past en
 Confirmed live: a real repo with no changelog yet returns empty markdown with no error (the
 honest, correct state for this repository today, not a bug), and a real file's content is read
 back verbatim once one exists.
+
+**Real, live-tested `RecordFiledIssue`/`ListFiledIssues` RPCs and a new `diagnostics/`
+sub-package, answering a direct user question: "we should have honest stats about when
+it reports anything to GitHub — issue link, status, whether a fix PR is already
+developing."** `diagnostics/ledger.py`'s `FiledIssueLedger` is a real, persisted,
+append-only record of every issue this install has ever filed (deduped by `fingerprint`,
+never overwriting an existing entry). `diagnostics/github_status_client.py`'s
+`GitHubIssueStatusClient` is a real, unauthenticated, read-only GitHub REST client —
+live-tested against `python/cpython#1` (a stable public fixture, not this project's own
+issue tracker, which is currently empty) confirming both the real open/closed state lookup
+and the real cross-referenced-PR lookup via GitHub's own Timeline API. `ListFiledIssues`
+fetches live status per ledger entry on every call rather than caching it, so `checked_at`
+is always genuinely current.
+
+**Stated as plainly as `docs/PRINCIPLES.md`'s "never plausible-looking data" demands**:
+this is the real *ledger and status-reporting* half of "Telemetrees compiles diagnosed
+errors into tracked issues." The *detector* half — deciding a diagnosed error is worth
+filing, deduplicating by fingerprint, and calling GitHub's App-authenticated
+issue-creation API to actually open one — does not exist anywhere in this codebase yet.
+`RecordFiledIssue` is the real seam that future component calls once built; nothing here
+fabricates a filing that never happened. The TUI's own `custom_screens/
+filed_issues_screen.py` (`services/interface/CLAUDE.md`) is real and tested against this
+real backend, and correctly renders "no issues have been filed by this install yet" today
+— the honest, correct state, not a bug.
 
 **Real `GetOptIn`/`SetOptIn` RPCs, added for the TUI's own Settings screen**
 (`telemetrees_opt_in`). Backed by `common/local_config_store.LocalConfigStore` at

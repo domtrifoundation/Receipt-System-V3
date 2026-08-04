@@ -19,6 +19,47 @@ service TelemetreesService {
   // default -- data only ever leaves the install when explicitly turned on.
   rpc GetOptIn(OptInConfigRequest) returns (OptInResponse);
   rpc SetOptIn(SetOptInRequest) returns (OptInResponse);
+
+  // Real filed-issue tracking, added for the TUI's own "what has this install reported
+  // to the developers, and what's its status" screen. `RecordFiledIssue` is the seam a
+  // future bug-detector calls once it exists (`core/telemetrees/diagnostics/contracts.py`'s
+  // own docstring is explicit that no such detector exists yet -- this ledger and status
+  // lookup are real, but nothing in this codebase currently calls RecordFiledIssue).
+  // `ListFiledIssues` does a real, live GitHub status check per record.
+  rpc RecordFiledIssue(RecordFiledIssueRequest) returns (RecordFiledIssueResponse);
+  rpc ListFiledIssues(ListFiledIssuesRequest) returns (ListFiledIssuesResponse);
+}
+
+message RecordFiledIssueRequest {
+  string install_root = 1;
+  string fingerprint = 2;
+  int32 issue_number = 3;
+  string url = 4;
+  string title = 5;
+}
+
+message RecordFiledIssueResponse {
+  bool known = 1;   // false when install_root is unknown
+}
+
+message ListFiledIssuesRequest {
+  string install_root = 1;
+}
+
+message FiledIssueStatus {
+  int32 issue_number = 1;
+  string title = 2;
+  string url = 3;
+  string filed_at = 4;          // RFC 3339
+  string state = 5;             // "open" | "closed" | "" (unknown, see error_detail)
+  repeated int32 linked_pr_numbers = 6;
+  string checked_at = 7;        // RFC 3339, when this live status was fetched
+  string error_detail = 8;      // non-empty when the live GitHub lookup itself failed
+}
+
+message ListFiledIssuesResponse {
+  repeated FiledIssueStatus issues = 1;
+  bool known = 2;   // false when install_root is unknown
 }
 
 message OptInConfigRequest {
