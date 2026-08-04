@@ -176,8 +176,21 @@ def serve(address: str = DEFAULT_ADDRESS, *, registry: ProviderRegistry | None =
 if __name__ == "__main__":  # pragma: no cover
     import sys
 
+    from .providers.clamav_provider import ClamAVProvider
+
+    #: Real, previously-live-found gap: `serve()`'s own empty-registry default is a
+    #: deliberate, correct fail-closed *fallback* (see its docstring), but nothing ever
+    #: actually registered the deep-dive's own documented default provider here — meaning
+    #: every real install, ClamAV present or not, denied every single upload forever.
+    #: `ClamAVProvider.is_available()` already degrades to unavailable (still fail-closed,
+    #: §4.4) when `clamscan` isn't on PATH, so registering it unconditionally is safe on a
+    #: self-hosted box that doesn't have ClamAV installed — it just changes nothing for that
+    #: box, while finally letting the intended default actually take effect where it exists.
+    default_registry = ProviderRegistry()
+    default_registry.register(ClamAVProvider())
+
     addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-    srv = serve(addr)
+    srv = serve(addr, registry=default_registry)
     print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
     print(f"ContentSecurityService listening on {srv.bound_address}", file=sys.stderr)
     print(f"running under: {sys.executable} ({sys.version.split()[0]})", file=sys.stderr)
