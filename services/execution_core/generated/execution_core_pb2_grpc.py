@@ -54,6 +54,11 @@ class ExecutionCoreServiceStub:
                 request_serializer=execution__core__pb2.PauseRunRequest.SerializeToString,
                 response_deserializer=execution__core__pb2.RunResponse.FromString,
                 _registered_method=True)
+        self.SubmitReceipt = channel.unary_unary(
+                '/resibo.execution_core.v1.ExecutionCoreService/SubmitReceipt',
+                request_serializer=execution__core__pb2.SubmitReceiptRequest.SerializeToString,
+                response_deserializer=execution__core__pb2.SubmitReceiptResponse.FromString,
+                _registered_method=True)
 
 
 class ExecutionCoreServiceServicer:
@@ -93,6 +98,19 @@ class ExecutionCoreServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SubmitReceipt(self, request, context):
+        """Real per-receipt processing, added post-§11 to close a genuine, previously-confirmed
+        gap: StartRun only ever tracked run metadata (debounce coalescing, state) -- nothing
+        anywhere constructed a real ReceiptWork and called pipeline.process_receipt. This is
+        the actual trigger a caller (Ingestion, after normalizing an upload) uses to run one
+        receipt through Preprocessing -> OCR -> Persistence for real
+        (`receipt_orchestration.py`'s own docstring states plainly which stages are wired and
+        which are not yet).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ExecutionCoreServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -115,6 +133,11 @@ def add_ExecutionCoreServiceServicer_to_server(servicer, server):
                     servicer.PauseRun,
                     request_deserializer=execution__core__pb2.PauseRunRequest.FromString,
                     response_serializer=execution__core__pb2.RunResponse.SerializeToString,
+            ),
+            'SubmitReceipt': grpc.unary_unary_rpc_method_handler(
+                    servicer.SubmitReceipt,
+                    request_deserializer=execution__core__pb2.SubmitReceiptRequest.FromString,
+                    response_serializer=execution__core__pb2.SubmitReceiptResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -225,6 +248,33 @@ class ExecutionCoreService:
             '/resibo.execution_core.v1.ExecutionCoreService/PauseRun',
             execution__core__pb2.PauseRunRequest.SerializeToString,
             execution__core__pb2.RunResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SubmitReceipt(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.execution_core.v1.ExecutionCoreService/SubmitReceipt',
+            execution__core__pb2.SubmitReceiptRequest.SerializeToString,
+            execution__core__pb2.SubmitReceiptResponse.FromString,
             options,
             channel_credentials,
             insecure,

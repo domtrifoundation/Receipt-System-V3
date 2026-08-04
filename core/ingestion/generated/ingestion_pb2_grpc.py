@@ -64,6 +64,11 @@ class IngestionServiceStub:
                 request_serializer=ingestion__pb2.DriveWebhookPayload.SerializeToString,
                 response_deserializer=ingestion__pb2.WebhookAck.FromString,
                 _registered_method=True)
+        self.PollDriveFallback = channel.unary_unary(
+                '/resibo.ingestion.v1.IngestionService/PollDriveFallback',
+                request_serializer=ingestion__pb2.PollDriveFallbackRequest.SerializeToString,
+                response_deserializer=ingestion__pb2.WebhookAck.FromString,
+                _registered_method=True)
 
 
 class IngestionServiceServicer:
@@ -105,6 +110,16 @@ class IngestionServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def PollDriveFallback(self, request, context):
+        """The real "every 24h by default" scheduled fallback (`GoogleDriveConfig.
+        fallback_poll_interval_hours`) -- real and callable, not yet invoked on a timer by
+        anything (`service.py`'s own `PollDriveFallback` docstring has the full account of
+        what's real vs. what still needs a periodic caller).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_IngestionServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -136,6 +151,11 @@ def add_IngestionServiceServicer_to_server(servicer, server):
             'HandleDriveWebhook': grpc.unary_unary_rpc_method_handler(
                     servicer.HandleDriveWebhook,
                     request_deserializer=ingestion__pb2.DriveWebhookPayload.FromString,
+                    response_serializer=ingestion__pb2.WebhookAck.SerializeToString,
+            ),
+            'PollDriveFallback': grpc.unary_unary_rpc_method_handler(
+                    servicer.PollDriveFallback,
+                    request_deserializer=ingestion__pb2.PollDriveFallbackRequest.FromString,
                     response_serializer=ingestion__pb2.WebhookAck.SerializeToString,
             ),
     }
@@ -300,6 +320,33 @@ class IngestionService:
             target,
             '/resibo.ingestion.v1.IngestionService/HandleDriveWebhook',
             ingestion__pb2.DriveWebhookPayload.SerializeToString,
+            ingestion__pb2.WebhookAck.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PollDriveFallback(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.ingestion.v1.IngestionService/PollDriveFallback',
+            ingestion__pb2.PollDriveFallbackRequest.SerializeToString,
             ingestion__pb2.WebhookAck.FromString,
             options,
             channel_credentials,

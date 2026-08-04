@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.02`
+`a03.00.04`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -109,6 +109,50 @@ Every source is an independently enableable Provider Registry entry. A self-host
   check. Fixed: `GoogleDriveSource` now takes an optional metrics collector and
   increments it on a real download; `service.py` passes its own `self._metrics` through
   `drive_assembly.build_google_drive_source()`.
+
+**`SubmitDirectUpload` now actually triggers Execution Core processing — a real,
+previously-confirmed gap closed.** It used to normalize a file and stop; nothing anywhere
+told Execution Core a receipt existed to process, confirmed by direct code inspection
+before this fix (no RPC call to Execution Core existed anywhere in this file).
+`IngestionServicer` takes an optional `execution_core_address` (`None` degrades to
+"normalize only," e.g. an isolated unit test of normalization alone); when set, a
+successful normalization calls `StartRun` then `SubmitReceipt` per normalized page.
+Failures in that trigger call are logged-and-swallowed rather than failing the upload
+response — the file is genuinely, safely normalized and stored either way. Live-tested
+end to end against six genuine running servicers (`tests/unit/core/ingestion/
+test_execution_core_trigger.py`) — no mocked gRPC stub anywhere in the chain. **The
+Google Drive webhook path (`HandleDriveWebhook` → `WebhookManager.pending_events`) and
+the scheduled fallback poll do not yet call `SubmitReceipt`** — that queue was built as
+"a stand-in for Execution Core's own not-yet-built debounce consumer" per its own
+docstring below, and wiring it is the identical pattern just applied to direct upload.
+
+**The Google Drive push-webhook and scheduled-fallback-poll paths now also trigger real
+processing — closing the two remaining trigger gaps.** `HandleDriveWebhook` downloads,
+normalizes, and submits every real/modified `ChangeEvent` it receives immediately,
+reusing the identical `normalize_source_file`/`_submit_for_processing` path direct
+upload uses. `PollDriveFallback` (new RPC) lists every file currently in the configured
+Drive folder and processes it the same way — real and callable, **but nothing yet
+invokes it on a timer**: `GoogleDriveConfig.fallback_poll_interval_hours` configures
+`CircadianMonitor`'s own "is a poll overdue" check, but there is still no periodic
+caller (Task Scheduler API is the real owner of that missing piece, not this package).
+Drive ingestion has no real per-user mapping today (one shared folder, `WebhookProvider`/
+`ChangeEvent` carry no user identity) — `"local"` is the honest single-tenant-mode
+default every Drive-triggered receipt is submitted under, matching `common/blob_client.
+py`'s own default; a real per-user Drive connection is separate, larger follow-up work.
+
+**A real, live-found receipt-id collision bug, fixed in the same pass.**
+`_submit_for_processing` originally keyed each submitted receipt's id on
+`f"{run_id}:{page_index}"` — two *different* uploads from the same user that the
+debounce coalescer merges into one run (§5.2 of Execution Core's own deep-dive) both
+start at `page_index=0`, so the second `SubmitReceipt` call silently overwrote the
+first's Persistence row under the identical id. Caught by a real live test asserting
+two distinct uploaded files produced two distinct receipts — it produced one. Fixed by
+keying on the blob's own content hash instead (`image.image_ref.logical_id`), which is
+unique per real file regardless of how many uploads a debounce window merges together.
+Live-tested end to end against real Content Security/Persistence/Preprocessing/OCR/
+Execution Core servicers with a fake `GoogleDriveSource` standing in only for the one
+seam real Drive credentials don't exist for in this environment (`tests/unit/core/
+ingestion/test_drive_trigger.py`).
 
 ## Implementation status
 

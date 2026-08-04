@@ -138,7 +138,7 @@ def test_boot_sequence_screen_streams_a_real_boot_from_a_real_supervisor(tmp_pat
     async def scenario():
         arbitrator = ChannelArbitrator(tmp_path)
         arbitrator.set_active("local", REPO_ROOT)
-        server = await supervisor_serve(install_root=tmp_path, specs={})
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
         try:
             app = InterfaceApp(supervisor_address=server.bound_address, channel="local")
             async with app.run_test() as pilot:

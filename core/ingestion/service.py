@@ -137,8 +137,15 @@ class IngestionServicer:
         archival_quality: int = DEFAULT_ARCHIVAL_QUALITY,
         google_drive: GoogleDriveConfig | None = None,
         source_registry_config: SourceRegistryConfig | None = None,
+        execution_core_address: str | None = None,
     ) -> None:
         self._blob_store = blob_store
+        #: Real trigger wiring, added post-launch: `None` degrades to "normalize only,
+        #: don't submit for processing" (matches a caller with no Execution Core to talk
+        #: to, e.g. an isolated unit test of normalization alone) rather than raising.
+        #: `"127.0.0.1:50068"` (Execution Core's own `DEFAULT_ADDRESS`) is the real
+        #: default for an actual running install.
+        self._execution_core_address = execution_core_address
         self._content_security = content_security or ContentSecurityClient()
         self._archival_codec = archival_codec
         self._archival_quality = archival_quality
@@ -183,6 +190,15 @@ class IngestionServicer:
         self._drive_credentials = drive_credentials
 
     async def SubmitDirectUpload(self, request, context=None):  # noqa: N802 - gRPC naming
+        """Real webapp/direct-upload trigger, closing a genuine, previously-confirmed
+        gap: this method used to normalize a file and stop — nothing anywhere told
+        Execution Core a receipt existed to process. Now calls `StartRun` then
+        `SubmitReceipt` per normalized page once normalization succeeds. Errors from
+        that call are logged-and-swallowed rather than failing the upload response — the
+        file is genuinely, safely normalized and stored either way; a receipt that never
+        got processed is a real gap the run-monitoring surface should show, not a reason
+        to tell the uploader their upload failed when it plainly did not.
+        """
         from .generated import ingestion_pb2 as pb
 
         source_file = await self._direct_upload.receive(
@@ -193,7 +209,40 @@ class IngestionServicer:
             archival_codec=self._archival_codec, archival_quality=self._archival_quality,
         )
         self._record_metrics(result)
+        if result.error is None:
+            await self._submit_for_processing(request.run_id, request.user_id, result)
         return _normalization_response(pb, result)
+
+    async def _submit_for_processing(self, run_id: str, user_id: str, result: NormalizationResult) -> None:
+        if self._execution_core_address is None:
+            return
+        try:
+            import grpc
+
+            from services.execution_core.generated import execution_core_pb2 as ec_pb
+            from services.execution_core.generated import execution_core_pb2_grpc as ec_pb_grpc
+
+            async with grpc.aio.insecure_channel(self._execution_core_address) as channel:
+                stub = ec_pb_grpc.ExecutionCoreServiceStub(channel)
+                start_response = await stub.StartRun(ec_pb.StartRunRequest(user_id=user_id, file_count=len(result.images)))
+                if start_response.error_code:
+                    return
+                for image in result.images:
+                    if image.image_ref is None:
+                        continue
+                    # A real, live-found bug: `run_id:page_index` collides across two
+                    # different uploads that the debounce coalescer merges into the same
+                    # run (both start at page_index 0) -- the second SubmitReceipt
+                    # silently overwrote the first's Persistence row under the same
+                    # receipt_id. The blob's own content hash is unique per real file
+                    # regardless of coalescing, so it's what receipt_id is keyed on now.
+                    await stub.SubmitReceipt(ec_pb.SubmitReceiptRequest(
+                        run_id=start_response.run.run_id, user_id=user_id,
+                        receipt_id=f"{image.image_ref.logical_id}:{image.page_index}",
+                        source_blob_ref=image.image_ref.logical_id, content_hash=image.image_ref.logical_id,
+                    ))
+        except Exception:  # noqa: BLE001 - best-effort, see this method's own caller's docstring
+            pass
 
     async def StartScanSession(self, request, context=None):  # noqa: N802 - gRPC naming
         from .generated import ingestion_pb2 as pb
@@ -254,16 +303,89 @@ class IngestionServicer:
         (`webhook_manager`'s entire sub-API was disconnected from the running service).
         `accepted=False` for an unknown/unregistered channel or a Drive API failure —
         Drive's own retry behavior for a webhook that returns an error response is the
-        real backstop here, not a design gap in this RPC."""
+        real backstop here, not a design gap in this RPC.
+
+        **Now also processes the real events it receives, closing another genuine gap**:
+        `pending_events` used to be a real queue nothing ever drained — `WebhookManager`'s
+        own docstring calls it "a stand-in for Execution Core's own not-yet-built debounce
+        consumer." This downloads, normalizes, and submits each new/modified file for
+        real processing immediately, the same real path `SubmitDirectUpload` uses.
+        """
         from .generated import ingestion_pb2 as pb
 
         try:
-            await self._webhook_manager.handle_callback(request.channel_id, self._drive_credentials)
-            return pb.WebhookAck(accepted=True)
+            events = await self._webhook_manager.handle_callback(request.channel_id, self._drive_credentials)
         except UnknownSubscription:
             return pb.WebhookAck(accepted=False)
         except Exception:  # noqa: BLE001 - any Drive API failure still acks False, never raises to Gateway
             return pb.WebhookAck(accepted=False)
+
+        await self._process_drive_events(events)
+        return pb.WebhookAck(accepted=True)
+
+    async def PollDriveFallback(self, request, context=None):  # noqa: N802 - gRPC naming
+        """The real "every 24h by default" safety net (`settings.updates`-adjacent
+        config, `GoogleDriveConfig.fallback_poll_interval_hours`) — real and callable,
+        not yet invoked on a timer by anything (that requires a periodic caller, e.g.
+        Task Scheduler API, which is real, separate wiring not yet done). Lists every
+        file currently in the configured Drive folder and processes any this install
+        hasn't already ingested (`already_written`-equivalent dedup happens naturally at
+        Execution Core's own content-hash checkpoint, so a re-poll of an already-processed
+        file is safe, not a duplicate).
+        """
+        from .generated import ingestion_pb2 as pb
+        from .contracts import SourceKind
+        from .sources.google_drive.drive_source import SourceUnavailable
+
+        drive_source = self._registry._sources.get(SourceKind.GOOGLE_DRIVE)
+        if drive_source is None:
+            return pb.WebhookAck(accepted=False)
+        try:
+            files = await drive_source.list_new_files()
+        except SourceUnavailable:
+            return pb.WebhookAck(accepted=False)
+        except Exception:  # noqa: BLE001 - any Drive API failure acks False, never raises
+            return pb.WebhookAck(accepted=False)
+
+        from .webhook_manager.contracts import ChangeEvent
+        from .webhook_manager.contracts import WebhookProvider
+
+        events = tuple(
+            ChangeEvent(provider=WebhookProvider.GOOGLE_DRIVE, file_id=f["id"], change_type="added")
+            for f in files
+        )
+        await self._process_drive_events(events)
+        return pb.WebhookAck(accepted=True)
+
+    async def _process_drive_events(self, events) -> None:
+        """Shared by the real-time webhook path and the fallback poll — downloads,
+        normalizes, and submits each event's own file for real processing. Single shared
+        Drive folder, single effective user (`"local"`, matching this project's own
+        single-tenant-mode convention, `common/blob_client.py`'s own default) — Drive
+        ingestion has no real per-user mapping today; a per-user Drive connection is real,
+        separate follow-up work."""
+        from .contracts import SourceKind
+
+        drive_source = self._registry._sources.get(SourceKind.GOOGLE_DRIVE)
+        if drive_source is None:
+            return
+        for event in events:
+            if event.change_type == "removed":
+                continue
+            try:
+                source_file = await drive_source.download(
+                    run_id=f"drive-{event.file_id}", user_id="local", file_id=event.file_id,
+                    filename=event.file_id, mime_type="application/octet-stream",
+                )
+                result = await normalize_source_file(
+                    source_file, self._blob_store, self._content_security,
+                    archival_codec=self._archival_codec, archival_quality=self._archival_quality,
+                )
+                self._record_metrics(result)
+                if result.error is None:
+                    await self._submit_for_processing(source_file.run_id, source_file.user_id, result)
+            except Exception:  # noqa: BLE001 - one bad file must never stop the rest of the batch
+                continue
 
     def _record_metrics(self, result: NormalizationResult) -> None:
         if result.error is None:
@@ -293,7 +415,7 @@ def _normalization_response(pb, result: NormalizationResult):
     return response
 
 
-async def serve(address: str = DEFAULT_ADDRESS, *, blob_store: BlobStoreGateway):
+async def serve(address: str = DEFAULT_ADDRESS, *, blob_store: BlobStoreGateway, execution_core_address: str | None = None):
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
     import grpc
 
@@ -301,7 +423,7 @@ async def serve(address: str = DEFAULT_ADDRESS, *, blob_store: BlobStoreGateway)
 
     server = grpc.aio.server()
     ingestion_pb2_grpc.add_IngestionServiceServicer_to_server(
-        IngestionServicer(blob_store), server
+        IngestionServicer(blob_store, execution_core_address=execution_core_address), server
     )
     port = server.add_insecure_port(address)
     host = address.rsplit(":", 1)[0]
@@ -318,10 +440,17 @@ if __name__ == "__main__":  # pragma: no cover
 
     async def _main() -> None:
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        from common.blob_client import GrpcBlobStoreClient
+        from common.blob_client import GrpcBlobStoreClient, resolve_service_address
+        from common.install_paths import resolve_install_root
         from pathlib import Path as _Path
+
+        install_root = resolve_install_root(_Path(__file__))
         client = GrpcBlobStoreClient(PERSISTENCE_ADDRESS, install_root=_Path.cwd().parent.parent)
-        srv = await serve(addr, blob_store=client)
+        execution_core_address = (
+            "127.0.0.1:50068" if install_root is None
+            else resolve_service_address(install_root, "execution_core", "127.0.0.1:50068")
+        )
+        srv = await serve(addr, blob_store=client, execution_core_address=execution_core_address)
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)
         from common.watchdog_client import start_kicking_for_service, stop_kick_loop

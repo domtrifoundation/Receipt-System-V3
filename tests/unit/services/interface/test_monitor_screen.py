@@ -49,7 +49,7 @@ def test_reports_honestly_when_not_connected():
 
 def test_reports_no_active_release_honestly(tmp_path: Path):
     async def scenario():
-        server = await supervisor_serve(install_root=tmp_path, specs={})
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
         try:
             app = _Harness(server.bound_address, "beta")
             async with app.run_test() as pilot:
@@ -66,7 +66,7 @@ def test_shows_real_service_states_from_a_real_active_release(tmp_path: Path):
     REPO_ROOT = Path(__file__).resolve().parents[4]
 
     async def scenario():
-        server = await supervisor_serve(install_root=tmp_path, specs={})
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
         try:
             ChannelArbitrator(tmp_path).set_active("beta", REPO_ROOT)
 
@@ -89,7 +89,7 @@ def test_shows_real_running_instances(tmp_path: Path):
     REPO_ROOT = Path(__file__).resolve().parents[4]
 
     async def scenario():
-        server = await supervisor_serve(install_root=tmp_path, specs={})
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
         try:
             ChannelArbitrator(tmp_path).set_active("beta", REPO_ROOT)
             server.servicer._instances.record("ocr", "x03.01.05", ServiceLaunchResult(name="ocr", ok=True, pid=123, address="127.0.0.1:59991"))
@@ -132,7 +132,7 @@ def test_pressing_m_opens_the_menu():
 
 def test_pressing_r_refreshes_without_error(tmp_path: Path):
     async def scenario():
-        server = await supervisor_serve(install_root=tmp_path, specs={})
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
         try:
             app = _Harness(server.bound_address, "beta")
             async with app.run_test() as pilot:

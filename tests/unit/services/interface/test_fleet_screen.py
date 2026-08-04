@@ -49,7 +49,7 @@ def test_reports_honestly_when_not_connected():
 
 def test_lists_available_versions_from_a_real_supervisor(tmp_path: Path):
     async def scenario():
-        server = await supervisor_serve(install_root=tmp_path, specs={})
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
         try:
             server.servicer._available_versions.set_available("beta", "ocr", ("x03.01.05", "x03.01.06"))
 
@@ -67,7 +67,7 @@ def test_lists_available_versions_from_a_real_supervisor(tmp_path: Path):
 
 def test_editing_available_versions_calls_set_available_versions_for_real(tmp_path: Path):
     async def scenario():
-        server = await supervisor_serve(install_root=tmp_path, specs={})
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
         try:
             server.servicer._available_versions.set_available("beta", "ocr", ("x03.01.05",))
 
@@ -96,7 +96,7 @@ def test_editing_available_versions_calls_set_available_versions_for_real(tmp_pa
 
 def test_single_instance_service_shows_the_single_instance_tag(tmp_path: Path):
     async def scenario():
-        server = await supervisor_serve(install_root=tmp_path, specs={})
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
         try:
             server.servicer._available_versions.set_available("beta", "interface_tui", ("x03.01.05", "x03.01.06"))
 

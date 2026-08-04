@@ -24,27 +24,31 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14\x65xecution_core.proto\x12\x18resibo.execution_core.v1\"6\n\x0fStartRunRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nfile_count\x18\x02 \x01(\x05\"\"\n\x10RunStatusRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\t\"\"\n\x10\x43\x61ncelRunRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\t\"!\n\x0fPauseRunRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\t\"{\n\x03Run\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\r\n\x05state\x18\x03 \x01(\t\x12\x11\n\topened_at\x18\x04 \x01(\t\x12\x1a\n\x12\x63losing_started_at\x18\x05 \x01(\t\x12\x15\n\rreceipt_count\x18\x06 \x01(\x05\"|\n\x0bRunResponse\x12*\n\x03run\x18\x01 \x01(\x0b\x32\x1d.resibo.execution_core.v1.Run\x12\x17\n\x0fstarted_new_run\x18\x02 \x01(\x08\x12\x12\n\nerror_code\x18\x03 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x04 \x01(\t\"\xa9\x01\n\x0bRunProgress\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\r\n\x05state\x18\x02 \x01(\t\x12\x16\n\x0ereceipts_total\x18\x03 \x01(\x05\x12\x1a\n\x12receipts_completed\x18\x04 \x01(\x05\x12\x1d\n\x15\x63urrent_stage_summary\x18\x05 \x01(\t\x12\x12\n\nerror_code\x18\x06 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x07 \x01(\t2\x97\x03\n\x14\x45xecutionCoreService\x12\\\n\x08StartRun\x12).resibo.execution_core.v1.StartRunRequest\x1a%.resibo.execution_core.v1.RunResponse\x12\x63\n\x0cGetRunStatus\x12*.resibo.execution_core.v1.RunStatusRequest\x1a%.resibo.execution_core.v1.RunProgress0\x01\x12^\n\tCancelRun\x12*.resibo.execution_core.v1.CancelRunRequest\x1a%.resibo.execution_core.v1.RunResponse\x12\\\n\x08PauseRun\x12).resibo.execution_core.v1.PauseRunRequest\x1a%.resibo.execution_core.v1.RunResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14\x65xecution_core.proto\x12\x18resibo.execution_core.v1\"\xa3\x01\n\x14SubmitReceiptRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x12\n\nreceipt_id\x18\x03 \x01(\t\x12\x17\n\x0fsource_blob_ref\x18\x04 \x01(\t\x12\x14\n\x0c\x63ontent_hash\x18\x05 \x01(\t\x12\x12\n\nocr_source\x18\x06 \x01(\t\x12\x13\n\x0bocr_engines\x18\x07 \x03(\t\"\x9b\x01\n\x15SubmitReceiptResponse\x12\x12\n\nreceipt_id\x18\x01 \x01(\t\x12\x15\n\rreached_stage\x18\x02 \x01(\t\x12\x0f\n\x07outcome\x18\x03 \x01(\t\x12\x1c\n\x14persisted_receipt_id\x18\x04 \x01(\t\x12\x12\n\nerror_code\x18\x05 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x06 \x01(\t\"6\n\x0fStartRunRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nfile_count\x18\x02 \x01(\x05\"\"\n\x10RunStatusRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\t\"\"\n\x10\x43\x61ncelRunRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\t\"!\n\x0fPauseRunRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\t\"{\n\x03Run\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\r\n\x05state\x18\x03 \x01(\t\x12\x11\n\topened_at\x18\x04 \x01(\t\x12\x1a\n\x12\x63losing_started_at\x18\x05 \x01(\t\x12\x15\n\rreceipt_count\x18\x06 \x01(\x05\"|\n\x0bRunResponse\x12*\n\x03run\x18\x01 \x01(\x0b\x32\x1d.resibo.execution_core.v1.Run\x12\x17\n\x0fstarted_new_run\x18\x02 \x01(\x08\x12\x12\n\nerror_code\x18\x03 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x04 \x01(\t\"\xa9\x01\n\x0bRunProgress\x12\x0e\n\x06run_id\x18\x01 \x01(\t\x12\r\n\x05state\x18\x02 \x01(\t\x12\x16\n\x0ereceipts_total\x18\x03 \x01(\x05\x12\x1a\n\x12receipts_completed\x18\x04 \x01(\x05\x12\x1d\n\x15\x63urrent_stage_summary\x18\x05 \x01(\t\x12\x12\n\nerror_code\x18\x06 \x01(\t\x12\x14\n\x0c\x65rror_detail\x18\x07 \x01(\t2\x89\x04\n\x14\x45xecutionCoreService\x12\\\n\x08StartRun\x12).resibo.execution_core.v1.StartRunRequest\x1a%.resibo.execution_core.v1.RunResponse\x12\x63\n\x0cGetRunStatus\x12*.resibo.execution_core.v1.RunStatusRequest\x1a%.resibo.execution_core.v1.RunProgress0\x01\x12^\n\tCancelRun\x12*.resibo.execution_core.v1.CancelRunRequest\x1a%.resibo.execution_core.v1.RunResponse\x12\\\n\x08PauseRun\x12).resibo.execution_core.v1.PauseRunRequest\x1a%.resibo.execution_core.v1.RunResponse\x12p\n\rSubmitReceipt\x12..resibo.execution_core.v1.SubmitReceiptRequest\x1a/.resibo.execution_core.v1.SubmitReceiptResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'execution_core_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_STARTRUNREQUEST']._serialized_start=50
-  _globals['_STARTRUNREQUEST']._serialized_end=104
-  _globals['_RUNSTATUSREQUEST']._serialized_start=106
-  _globals['_RUNSTATUSREQUEST']._serialized_end=140
-  _globals['_CANCELRUNREQUEST']._serialized_start=142
-  _globals['_CANCELRUNREQUEST']._serialized_end=176
-  _globals['_PAUSERUNREQUEST']._serialized_start=178
-  _globals['_PAUSERUNREQUEST']._serialized_end=211
-  _globals['_RUN']._serialized_start=213
-  _globals['_RUN']._serialized_end=336
-  _globals['_RUNRESPONSE']._serialized_start=338
-  _globals['_RUNRESPONSE']._serialized_end=462
-  _globals['_RUNPROGRESS']._serialized_start=465
-  _globals['_RUNPROGRESS']._serialized_end=634
-  _globals['_EXECUTIONCORESERVICE']._serialized_start=637
-  _globals['_EXECUTIONCORESERVICE']._serialized_end=1044
+  _globals['_SUBMITRECEIPTREQUEST']._serialized_start=51
+  _globals['_SUBMITRECEIPTREQUEST']._serialized_end=214
+  _globals['_SUBMITRECEIPTRESPONSE']._serialized_start=217
+  _globals['_SUBMITRECEIPTRESPONSE']._serialized_end=372
+  _globals['_STARTRUNREQUEST']._serialized_start=374
+  _globals['_STARTRUNREQUEST']._serialized_end=428
+  _globals['_RUNSTATUSREQUEST']._serialized_start=430
+  _globals['_RUNSTATUSREQUEST']._serialized_end=464
+  _globals['_CANCELRUNREQUEST']._serialized_start=466
+  _globals['_CANCELRUNREQUEST']._serialized_end=500
+  _globals['_PAUSERUNREQUEST']._serialized_start=502
+  _globals['_PAUSERUNREQUEST']._serialized_end=535
+  _globals['_RUN']._serialized_start=537
+  _globals['_RUN']._serialized_end=660
+  _globals['_RUNRESPONSE']._serialized_start=662
+  _globals['_RUNRESPONSE']._serialized_end=786
+  _globals['_RUNPROGRESS']._serialized_start=789
+  _globals['_RUNPROGRESS']._serialized_end=958
+  _globals['_EXECUTIONCORESERVICE']._serialized_start=961
+  _globals['_EXECUTIONCORESERVICE']._serialized_end=1482
 # @@protoc_insertion_point(module_scope)

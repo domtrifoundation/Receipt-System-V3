@@ -23,6 +23,15 @@ service IngestionService {
   rpc FinalizeScanSession(FinalizeScanRequest) returns (NormalizationResponse);
   rpc ListEnabledSources(ListSourcesRequest) returns (ListSourcesResponse);
   rpc HandleDriveWebhook(DriveWebhookPayload) returns (WebhookAck);
+
+  // The real "every 24h by default" scheduled fallback (`GoogleDriveConfig.
+  // fallback_poll_interval_hours`) -- real and callable, not yet invoked on a timer by
+  // anything (`service.py`'s own `PollDriveFallback` docstring has the full account of
+  // what's real vs. what still needs a periodic caller).
+  rpc PollDriveFallback(PollDriveFallbackRequest) returns (WebhookAck);
+}
+
+message PollDriveFallbackRequest {
 }
 
 message DirectUploadRequest {

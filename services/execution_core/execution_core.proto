@@ -38,6 +38,41 @@ service ExecutionCoreService {
   // §14 resolved who may call this: a client can pause their own run; owner/staff can pause
   // any run. The role check for the broader case is Auth's, not this API's.
   rpc PauseRun(PauseRunRequest) returns (RunResponse);
+
+  // Real per-receipt processing, added post-§11 to close a genuine, previously-confirmed
+  // gap: StartRun only ever tracked run metadata (debounce coalescing, state) -- nothing
+  // anywhere constructed a real ReceiptWork and called pipeline.process_receipt. This is
+  // the actual trigger a caller (Ingestion, after normalizing an upload) uses to run one
+  // receipt through Preprocessing -> OCR -> Persistence for real
+  // (`receipt_orchestration.py`'s own docstring states plainly which stages are wired and
+  // which are not yet).
+  rpc SubmitReceipt(SubmitReceiptRequest) returns (SubmitReceiptResponse);
+}
+
+message SubmitReceiptRequest {
+  string run_id = 1;
+  string user_id = 2;
+  string receipt_id = 3;
+  string source_blob_ref = 4;
+  string content_hash = 5;
+  // "preprocessed" (default, empty also means this) -- OCR reads the rasterized bitmap,
+  // correct for a photographed/scanned upload. "source" -- OCR reads source_blob_ref
+  // directly, correct for a digital PDF whose own embedded text layer rasterizing first
+  // would destroy (`receipt_orchestration.py`'s own docstring has the full explanation).
+  string ocr_source = 6;
+  // Empty means "every enabled engine" -- OCR's real multi-engine corroboration default.
+  // A caller pins specific engines only when it has a real reason to (a known-digital
+  // PDF wanting text_layer specifically, a test wanting deterministic, fast results).
+  repeated string ocr_engines = 7;
+}
+
+message SubmitReceiptResponse {
+  string receipt_id = 1;
+  string reached_stage = 2;   // ReceiptStage value the receipt actually reached
+  string outcome = 3;         // StageOutcome value -- "completed" | "failed" | "escalated" | ...
+  string persisted_receipt_id = 4;   // set when reached_stage == "written" and outcome == "completed"
+  string error_code = 5;
+  string error_detail = 6;
 }
 
 message StartRunRequest {

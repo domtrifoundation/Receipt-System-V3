@@ -1,9 +1,44 @@
+from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from collections.abc import Mapping as _Mapping
+from collections.abc import Iterable as _Iterable, Mapping as _Mapping
 from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class SubmitReceiptRequest(_message.Message):
+    __slots__ = ("run_id", "user_id", "receipt_id", "source_blob_ref", "content_hash", "ocr_source", "ocr_engines")
+    RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    RECEIPT_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_BLOB_REF_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_HASH_FIELD_NUMBER: _ClassVar[int]
+    OCR_SOURCE_FIELD_NUMBER: _ClassVar[int]
+    OCR_ENGINES_FIELD_NUMBER: _ClassVar[int]
+    run_id: str
+    user_id: str
+    receipt_id: str
+    source_blob_ref: str
+    content_hash: str
+    ocr_source: str
+    ocr_engines: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, run_id: _Optional[str] = ..., user_id: _Optional[str] = ..., receipt_id: _Optional[str] = ..., source_blob_ref: _Optional[str] = ..., content_hash: _Optional[str] = ..., ocr_source: _Optional[str] = ..., ocr_engines: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class SubmitReceiptResponse(_message.Message):
+    __slots__ = ("receipt_id", "reached_stage", "outcome", "persisted_receipt_id", "error_code", "error_detail")
+    RECEIPT_ID_FIELD_NUMBER: _ClassVar[int]
+    REACHED_STAGE_FIELD_NUMBER: _ClassVar[int]
+    OUTCOME_FIELD_NUMBER: _ClassVar[int]
+    PERSISTED_RECEIPT_ID_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_DETAIL_FIELD_NUMBER: _ClassVar[int]
+    receipt_id: str
+    reached_stage: str
+    outcome: str
+    persisted_receipt_id: str
+    error_code: str
+    error_detail: str
+    def __init__(self, receipt_id: _Optional[str] = ..., reached_stage: _Optional[str] = ..., outcome: _Optional[str] = ..., persisted_receipt_id: _Optional[str] = ..., error_code: _Optional[str] = ..., error_detail: _Optional[str] = ...) -> None: ...
 
 class StartRunRequest(_message.Message):
     __slots__ = ("user_id", "file_count")

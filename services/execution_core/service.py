@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import asyncio
 
-from .contracts import ExecutionConfig, Run, RunState, utcnow
+from .contracts import ExecutionConfig, ReceiptStage, Run, RunState, utcnow
 from .metrics import ExecutionMetricsCollector
 from .scheduler import RunCoalescer, RunScheduler
 from .state_machine import ASSIGNABLE_STATES, transition
@@ -111,6 +111,7 @@ class ExecutionCoreServicer:
         coalescer: RunCoalescer | None = None,
         scheduler: RunScheduler | None = None,
         metrics: ExecutionMetricsCollector | None = None,
+        addresses: dict[str, str] | None = None,
     ) -> None:
         self._config = config or ExecutionConfig()
         self._registry = registry or RunRegistry()
@@ -119,6 +120,27 @@ class ExecutionCoreServicer:
             self._config.concurrency.per_user_limit, self._config.concurrency.global_limit
         )
         self._metrics = metrics or ExecutionMetricsCollector()
+
+        #: Real per-service addresses `SubmitReceipt`'s gateways connect to — resolved the
+        #: same way every other cross-service lookup in this session works
+        #: (`common/blob_client.resolve_service_address`), with each service's own
+        #: hardcoded `DEFAULT_ADDRESS` as the dev-checkout fallback.
+        self._addresses = addresses or {
+            "preprocessing": "127.0.0.1:50072", "ocr": "127.0.0.1:50090",
+            "persistence": "127.0.0.1:50076", "review_flagging": "127.0.0.1:50081",
+        }
+
+        from .gateways import InMemoryAttemptCounter, InMemoryCheckpointStore, GrpcReviewFlagger
+        from .pipeline import Pipeline
+
+        self._checkpoint_store = InMemoryCheckpointStore()
+        self._pipeline = Pipeline(
+            store=self._checkpoint_store,
+            counter=InMemoryAttemptCounter(),
+            flagger=GrpcReviewFlagger(self._addresses["review_flagging"]),
+            config=self._config,
+            metrics=self._metrics,
+        )
 
     @property
     def registry(self) -> RunRegistry:
@@ -153,6 +175,52 @@ class ExecutionCoreServicer:
 
     async def PauseRun(self, request, context=None):  # noqa: N802 - gRPC naming
         return self._transition_response(request.run_id, RunState.PAUSED)
+
+    async def SubmitReceipt(self, request, context=None):  # noqa: N802 - gRPC naming
+        """Real per-receipt processing (§11's own newly-added RPC — see `execution_core.
+        proto`'s own comment for why StartRun alone was never enough). Runs under the
+        real `RunScheduler` (`scheduler.acquire`) so concurrent receipts from different
+        users genuinely run in parallel up to the configured per-user/global limits, and
+        one busy user cannot starve everyone else — the identical concurrency model
+        `RunScheduler`'s own docstring describes, now actually reached from a real RPC."""
+        from .generated import execution_core_pb2 as pb
+        from .receipt_orchestration import build_receipt_work
+        from .gateways import GrpcOcrGateway, GrpcPersistenceGateway, GrpcPreprocessingGateway
+
+        run = self._registry.get(request.run_id)
+        if run is None:
+            return pb.SubmitReceiptResponse(
+                receipt_id=request.receipt_id, error_code="run_not_found",
+                error_detail=f"no run {request.run_id!r} -- call StartRun first",
+            )
+
+        work = build_receipt_work(
+            receipt_id=request.receipt_id, run_id=request.run_id, user_id=request.user_id,
+            source_blob_ref=request.source_blob_ref, content_hash=request.content_hash,
+            store=self._checkpoint_store,
+            preprocessing=GrpcPreprocessingGateway(self._addresses["preprocessing"]),
+            ocr=GrpcOcrGateway(self._addresses["ocr"]),
+            persistence=GrpcPersistenceGateway(self._addresses["persistence"]),
+            ocr_source=request.ocr_source or "preprocessed",
+            ocr_engines=tuple(request.ocr_engines),
+        )
+
+        async with self._scheduler.acquire(request.user_id):
+            outcome = await self._pipeline.process_receipt(run, work)
+
+        response = pb.SubmitReceiptResponse(
+            receipt_id=outcome.receipt_id,
+            reached_stage=outcome.reached_stage.value if outcome.reached_stage else "",
+            outcome=outcome.outcome.value,
+        )
+        if outcome.error:
+            response.error_code = outcome.outcome.value
+            response.error_detail = outcome.error
+        elif outcome.written:
+            written_checkpoint = await self._checkpoint_store.get_checkpoint(request.receipt_id, ReceiptStage.WRITTEN)
+            if written_checkpoint is not None:
+                response.persisted_receipt_id = written_checkpoint.stage_output_ref
+        return response
 
     def _transition_response(self, run_id: str, state: RunState):
         from .generated import execution_core_pb2
@@ -204,7 +272,7 @@ class ExecutionCoreServicer:
             await asyncio.sleep(PROGRESS_INTERVAL_SECONDS)
 
 
-async def serve(address: str = DEFAULT_ADDRESS, *, config: ExecutionConfig | None = None):
+async def serve(address: str = DEFAULT_ADDRESS, *, config: ExecutionConfig | None = None, addresses: dict[str, str] | None = None):
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
     import grpc
 
@@ -212,7 +280,7 @@ async def serve(address: str = DEFAULT_ADDRESS, *, config: ExecutionConfig | Non
 
     server = grpc.aio.server()
     execution_core_pb2_grpc.add_ExecutionCoreServiceServicer_to_server(
-        ExecutionCoreServicer(config=config), server
+        ExecutionCoreServicer(config=config, addresses=addresses), server
     )
     port = server.add_insecure_port(address)
     host = address.rsplit(":", 1)[0]
@@ -236,8 +304,21 @@ if __name__ == "__main__":  # pragma: no cover
     import sys
 
     async def _main() -> None:
+        from pathlib import Path
+
+        from common.blob_client import resolve_service_address
+        from common.install_paths import resolve_install_root
+
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        srv = await serve(addr)
+        install_root = resolve_install_root(Path(__file__))
+        fallbacks = {
+            "preprocessing": "127.0.0.1:50072", "ocr": "127.0.0.1:50090",
+            "persistence": "127.0.0.1:50076", "review_flagging": "127.0.0.1:50081",
+        }
+        resolved_addresses = fallbacks if install_root is None else {
+            name: resolve_service_address(install_root, name, fallback) for name, fallback in fallbacks.items()
+        }
+        srv = await serve(addr, addresses=resolved_addresses)
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)
         from common.watchdog_client import start_kicking_for_service, stop_kick_loop

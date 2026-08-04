@@ -6,6 +6,10 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class PollDriveFallbackRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
 class DirectUploadRequest(_message.Message):
     __slots__ = ("run_id", "user_id", "filename", "declared_mime_type", "content")
     RUN_ID_FIELD_NUMBER: _ClassVar[int]

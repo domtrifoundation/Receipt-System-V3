@@ -17,7 +17,7 @@ commits that got there.
 
 ## Current API version
 
-`a01.00.02`
+`a01.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this API
 lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp` in the
@@ -156,7 +156,45 @@ so the next package does not have to re-derive it from whichever neighbour it ha
 - **`RunRegistry` keeps runs in memory.** Every behaviour above is implemented and tested; what
   is missing is the persistence adapter. This joins the same open question `core/billing/` and
   `core/support_ticketing/` each record for their own stores.
-- **Nothing here wires the stage callables to the seven APIs they will call.** That is
-  deliberate and is the boundary working — but OCR, Preprocessing, Inference, Ingestion and
-  Reconciliation are all still empty scaffolding in this repo, so no end-to-end run exists yet
-  to integration-test against.
+- **The stage callables are now wired to real APIs — the note below documents what changed,
+  and what still hasn't.** OCR, Preprocessing, and Persistence are no longer scaffolding
+  (confirmed live, not assumed), and this package's own real gap was that nothing anywhere
+  constructed a `ReceiptWork` from them. Fixed below. Matching/Geo/Inference remain
+  unwired — `pipeline.process_receipt` skips any stage with no registered callable, so a
+  receipt today reaches `WRITTEN` with real OCR text and no vendor match, geocode, or
+  structured extraction. Extending those three is the identical pattern already
+  demonstrated for the three that are wired.
+
+## Real, live-tested integration — the actual missing piece, closed
+
+**`SubmitReceipt`, a new RPC, is what makes a receipt actually get processed.**
+`StartRun` was always real but only ever tracked run metadata (debounce coalescing,
+state) — confirmed live before this fix, nothing anywhere called `pipeline.process_run`
+or constructed a real `ReceiptWork`. `gateways.py` (real gRPC clients for Preprocessing/
+OCR/Persistence, plus an in-memory `CheckpointStore`/`AttemptCounter` — real within one
+process's lifetime, not yet Persistence-backed since `persistence.proto` has no
+checkpoint-storage RPC at all yet, and a real gRPC-backed `ReviewFlagger` against Review/
+Flagging's already-existing `CreateFlag`) and `receipt_orchestration.py` (`build_receipt_
+work()`, wiring `preprocessed`/`ocrd`/`written`) are the two new files. `SubmitReceipt`
+runs under the real `RunScheduler` (`scheduler.acquire(user_id)`), so two different
+users' receipts genuinely process concurrently up to the configured per-user/global
+limits — confirmed live with a real concurrent-submission test, not just trusted from
+`RunScheduler`'s own unit tests in isolation.
+
+**A real, live-found bug, fixed**: OCR's `text_layer` engine reads a PDF's own embedded
+text metadata; running it against `preprocessed`'s own rasterized bitmap output returns
+an empty read every time (confirmed live before the fix). `build_receipt_work()` takes
+`ocr_source`/`ocr_engines` so a caller can choose "read the original blob with a specific
+engine" (a digital PDF) vs. the real production default, "read the rasterized image with
+every enabled engine" (a photographed/scanned upload) — see that function's own
+docstring for the full account, including that choosing the right one per actual source
+kind automatically, rather than a caller having to know, is real follow-up work.
+
+**Ingestion's `SubmitDirectUpload` now actually triggers this** — the real webapp/
+direct-upload path, confirmed live end to end against six genuine running servicers
+(Content Security, Persistence, Preprocessing, OCR, Execution Core, Ingestion itself; see
+`core/ingestion/CLAUDE.md`). The Google Drive webhook path and the scheduled fallback
+poll do not yet call `SubmitReceipt` — `webhook_manager`'s own `pending_events` queue
+already exists as "a stand-in for Execution Core's own not-yet-built debounce consumer"
+per that package's own docstring, and consuming it into real `SubmitReceipt` calls is
+the identical pattern, not yet applied.
