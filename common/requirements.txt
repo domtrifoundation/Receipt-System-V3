@@ -12,7 +12,15 @@
 # it is never installed at all.
 
 # --- gRPC: the process-separation substrate (docs/PRINCIPLES.md §1.7) ---------
-grpcio>=1.60
+# Live-found: every `*_pb2_grpc.py` file in this repo bakes in a hard minimum-version check
+# against whatever `grpcio-tools` version last regenerated it (its own `RuntimeError` if the
+# installed `grpcio` is older) -- that check silently ratchets upward every time someone
+# regenerates protos on a machine with a newer `grpcio-tools`, and an open `>=1.60` floor here
+# does nothing to keep pace with it. Confirmed live: a real fresh install resolved `grpcio`
+# 1.74.0 under this old floor while the checked-in generated code demanded >=1.83.0, so every
+# single one of the ~30 services using generated gRPC stubs failed at startup with a raw
+# RuntimeError. The floor below must be bumped in the same change that regenerates any proto.
+grpcio>=1.83.0
 
 # --- protobuf: required at RUNTIME by the generated `*_pb2.py` stubs ----------
 # Declared explicitly rather than inherited. Verified rather than assumed: `grpcio` does NOT
