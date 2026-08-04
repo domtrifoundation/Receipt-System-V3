@@ -130,9 +130,8 @@ if __name__ == "__main__":  # pragma: no cover
 
     async def _main():
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        raise SystemExit(
-            "No default config/blob_store is wired up yet — construct InferenceServicer "
-            "with a real config from whatever process assembles this service."
-        )
+        srv = await serve(addr)
+        print(f"listening on {addr}", file=sys.stderr)
+        await srv.wait_for_termination()
 
     asyncio.run(_main())

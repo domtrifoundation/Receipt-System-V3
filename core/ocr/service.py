@@ -14,7 +14,7 @@ from .contracts import BlobRef, BlobStoreGateway, EngineName, OcrRequest
 from .engine_registry import OcrConfig, OcrEngineRegistry
 from .metrics import OcrMetricsCollector
 
-DEFAULT_ADDRESS = "127.0.0.1:50071"
+DEFAULT_ADDRESS = "127.0.0.1:50090"
 PERSISTENCE_ADDRESS = "127.0.0.1:50076"
 
 

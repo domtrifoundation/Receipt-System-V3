@@ -16,3 +16,8 @@ pymupdf>=1.24
 # this package's own tests, not mocked.
 opencv-python>=4.10
 numpy>=1.26
+
+# raster.py imports pillow_heif directly for HEIF/HEIC decode support — genuinely missing
+# from this file until a real live boot test caught the ModuleNotFoundError; ingestion's
+# own requirements.txt already had it, this one never did.
+pillow-heif>=0.18
