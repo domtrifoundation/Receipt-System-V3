@@ -138,6 +138,7 @@ class IngestionServicer:
         google_drive: GoogleDriveConfig | None = None,
         source_registry_config: SourceRegistryConfig | None = None,
         execution_core_address: str | None = None,
+        log_writer=None,
     ) -> None:
         self._blob_store = blob_store
         #: Real trigger wiring, added post-launch: `None` degrades to "normalize only,
@@ -146,6 +147,18 @@ class IngestionServicer:
         #: `"127.0.0.1:50068"` (Execution Core's own `DEFAULT_ADDRESS`) is the real
         #: default for an actual running install.
         self._execution_core_address = execution_core_address
+        #: Real, previously-missing observability: every one of this file's own
+        #: best-effort `except Exception` catches used to genuinely vanish -- confirmed
+        #: live, `core/logs/writer.py`'s `LogWriter` (the real write path every API is
+        #: meant to log through, per `v3-deepdive-18-logs-api.md`'s own "every API in
+        #: this batch writes through this one") had zero callers anywhere outside
+        #: `core/logs/` itself. One shared instance per process, matching that module's
+        #: own "one instance per process" convention -- never one per call. Injectable so
+        #: a test never writes real files to this machine's own default log root
+        #: (`core/logs/paths.py`'s own `~/.resibo/logs` fallback).
+        from core.logs.writer import LogWriter
+
+        self._log_writer = log_writer if log_writer is not None else LogWriter()
         self._content_security = content_security or ContentSecurityClient()
         self._archival_codec = archival_codec
         self._archival_quality = archival_quality
@@ -241,8 +254,13 @@ class IngestionServicer:
                         receipt_id=f"{image.image_ref.logical_id}:{image.page_index}",
                         source_blob_ref=image.image_ref.logical_id, content_hash=image.image_ref.logical_id,
                     ))
-        except Exception:  # noqa: BLE001 - best-effort, see this method's own caller's docstring
-            pass
+        except Exception as exc:  # noqa: BLE001 - best-effort, see this method's own caller's docstring
+            from core.logs.contracts import LogLevel
+
+            await self._log_writer.log_exception(
+                "ingestion", f"failed to submit run {run_id!r} for processing", exc,
+                run_id=run_id, user_id=user_id, level=LogLevel.ERROR,
+            )
 
     async def StartScanSession(self, request, context=None):  # noqa: N802 - gRPC naming
         from .generated import ingestion_pb2 as pb
@@ -317,7 +335,12 @@ class IngestionServicer:
             events = await self._webhook_manager.handle_callback(request.channel_id, self._drive_credentials)
         except UnknownSubscription:
             return pb.WebhookAck(accepted=False)
-        except Exception:  # noqa: BLE001 - any Drive API failure still acks False, never raises to Gateway
+        except Exception as exc:  # noqa: BLE001 - any Drive API failure still acks False, never raises to Gateway
+            from core.logs.contracts import LogLevel
+
+            await self._log_writer.log_exception(
+                "ingestion", f"Drive webhook callback failed for channel {request.channel_id!r}", exc, level=LogLevel.ERROR,
+            )
             return pb.WebhookAck(accepted=False)
 
         await self._process_drive_events(events)
@@ -344,7 +367,10 @@ class IngestionServicer:
             files = await drive_source.list_new_files()
         except SourceUnavailable:
             return pb.WebhookAck(accepted=False)
-        except Exception:  # noqa: BLE001 - any Drive API failure acks False, never raises
+        except Exception as exc:  # noqa: BLE001 - any Drive API failure acks False, never raises
+            from core.logs.contracts import LogLevel
+
+            await self._log_writer.log_exception("ingestion", "Drive fallback poll failed", exc, level=LogLevel.ERROR)
             return pb.WebhookAck(accepted=False)
 
         from .webhook_manager.contracts import ChangeEvent
@@ -384,7 +410,12 @@ class IngestionServicer:
                 self._record_metrics(result)
                 if result.error is None:
                     await self._submit_for_processing(source_file.run_id, source_file.user_id, result)
-            except Exception:  # noqa: BLE001 - one bad file must never stop the rest of the batch
+            except Exception as exc:  # noqa: BLE001 - one bad file must never stop the rest of the batch
+                from core.logs.contracts import LogLevel
+
+                await self._log_writer.log_exception(
+                    "ingestion", f"Drive file {event.file_id!r} failed to process", exc, level=LogLevel.ERROR,
+                )
                 continue
 
     def _record_metrics(self, result: NormalizationResult) -> None:

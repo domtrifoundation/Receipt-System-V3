@@ -1,0 +1,24 @@
+name: No Silent Except Check
+
+# A real, live-confirmed gap this check exists to prevent from recurring: core/logs/
+# writer.py's LogWriter (the real write path every API is meant to log through) had zero
+# callers anywhere outside core/logs/ itself -- every best-effort `except Exception: pass`
+# in the rest of the codebase genuinely wrote to nothing. This check fails a PR that adds
+# a new broad except (bare `except:`, `except Exception:`, `except BaseException:`) which
+# neither re-raises nor calls something with "log" in its name. Pre-existing debt is
+# grandfathered in .github/silent_except_baseline.json (real, generated, shrinks over
+# time as call sites are fixed) -- see check_no_silent_except.py's own docstring.
+
+on:
+  pull_request:
+
+jobs:
+  check-no-silent-except:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Scan for new unlogged broad except blocks
+        run: python .github/scripts/check_no_silent_except.py

@@ -34,6 +34,16 @@ def blob_store() -> FakeBlobStore:
     return FakeBlobStore()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_log_root(tmp_path, monkeypatch):
+    """`IngestionServicer` now holds a real `LogWriter` for its own best-effort failure
+    paths (a genuine, previously-missing observability fix — see `service.py`'s own
+    docstring). Without this, every test in this package would write real files to this
+    machine's own default log root (`core/logs/paths.py`'s `~/.resibo/logs` fallback)
+    every time the suite runs."""
+    monkeypatch.setenv("RESIBO_LOG_ROOT", str(tmp_path / "logs"))
+
+
 def make_synthetic_pdf(pages: int = 1, text: str = "TEST RECEIPT") -> bytes:
     import fitz
 

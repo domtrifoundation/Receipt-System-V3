@@ -18,7 +18,7 @@ The `.00.00` tail matches the same deliberate-jump discipline `x03.00.00` itself
 
 ## Current API version
 
-`a02.00.01`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -103,3 +103,31 @@ still one file per service per day, only two tracks of it.
   relative-import fix in `logs_pb2_grpc.py` (`from . import logs_pb2`); never hand-edit
   generated files. `service.py` imports them lazily, so the package stays importable — and its
   tests still meaningful — on an interpreter with no `grpcio` wheel yet (3.15 today).
+
+**A real, foundational, previously-undiscovered gap, confirmed by grep rather than
+assumed: `LogWriter` had zero callers anywhere outside this package.** `logs.proto` has
+no `Write`/`Ingest` RPC at all — only `Query` — so the real, intended architecture (this
+document's own §1: "every API in this batch writes through this one for operational
+trace") is that each service imports `LogWriter` directly and appends to its own file on
+the shared log root, never a gRPC hop into this API's own process for every write.
+Nothing did. Every `except Exception: pass`-shaped best-effort catch in every other Core
+API genuinely wrote to nothing.
+
+**`core/ingestion/service.py` is the first package actually fixed** (its own `CLAUDE.md`
+has the full account) — one `LogWriter` instance per process, injectable so tests never
+write real files to this machine's own default log root, wired into every one of that
+file's own broad `except` blocks, with a real end-to-end proof (`tests/unit/core/
+ingestion/test_real_logging.py`: a forced failure is read back afterward through a real
+`LogReader`, full traceback intact). **Every other Core API's own equivalent catches are
+not yet fixed** — the identical mechanical pattern, real, separate, much larger
+follow-up work.
+
+**`.github/scripts/check_no_silent_except.py` is the new, permanent guard against this
+recurring**, required on every PR (`docs/MAINTENANCE.md` §7.1). It fails on any *new*
+broad `except` (bare, `Exception`, or `BaseException`) that neither re-raises nor calls
+something with `log` in its name — narrow, named exception types converted to clean
+error-as-data returns (`docs/PRINCIPLES.md` §4.1) are correctly never flagged, since
+logging every one of those would be noise, not signal. The 102 pre-existing violations
+found across the rest of the codebase the day this check was added are grandfathered in
+`.github/silent_except_baseline.json`, real and visible, not hidden — the baseline only
+ever shrinks as those sites get fixed, never grows to grandfather something new.

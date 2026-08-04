@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.04`
+`a03.00.05`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -153,6 +153,39 @@ Live-tested end to end against real Content Security/Persistence/Preprocessing/O
 Execution Core servicers with a fake `GoogleDriveSource` standing in only for the one
 seam real Drive credentials don't exist for in this environment (`tests/unit/core/
 ingestion/test_drive_trigger.py`).
+
+**A genuine, foundational, previously-undiscovered gap found and partly fixed: this
+package's own `except Exception` best-effort catches were writing to nothing.** Direct
+question, direct answer: "nothing should be silent if the Logs API is doing its job,
+right?" — confirmed, Logs API was not doing its job, for a reason bigger than this one
+package. `core/logs/writer.py`'s `LogWriter` (the real write path — unconditional full-
+traceback capture, verbosity gating, non-blocking appends, all real and independently
+tested) had **zero callers anywhere outside `core/logs/` itself**, confirmed by grep
+across the entire repository, not assumed. `logs.proto` has no `Write`/`Ingest` RPC at
+all — only `Query` — so the real, intended architecture (per `v3-deepdive-18-logs-api.md`'s
+own "every API in this batch writes through this one for operational trace") is that
+each service imports `LogWriter` directly and appends to its own file on the shared log
+root, never a gRPC hop into Logs API's own process for every write. Every one of this
+file's own best-effort `except Exception: pass` blocks — including the ones added in the
+same pass that built them — genuinely vanished into nothing until this fix.
+
+**Fixed here, for real, with a real end-to-end proof**: `IngestionServicer` now holds one
+`LogWriter` instance (`self._log_writer`, matching that module's own "one instance per
+process" convention), injectable via a new `log_writer` constructor parameter so tests
+never write real files to this machine's own default log root
+(`core/logs/paths.py`'s `~/.resibo/logs` fallback — confirmed live this was a real risk
+before `tests/unit/core/ingestion/conftest.py` gained an autouse fixture pointing
+`RESIBO_LOG_ROOT` at each test's own `tmp_path`). Every one of this file's four silent
+catches now calls `log_writer.log_exception(...)`. `tests/unit/core/ingestion/
+test_real_logging.py` is the real proof, not just the wiring: a forced failure inside
+`_submit_for_processing`/`_process_drive_events` is read back afterward through a real
+`LogReader`, with its full traceback intact — the same path Logs API's own `Query` RPC
+serves from.
+
+**Scope, stated honestly**: this fixes exactly the silent catches in this one file. The
+identical gap exists across every other Core API in this repository that has its own
+best-effort `except Exception` — wiring `LogWriter` into all of them is the same
+mechanical pattern, real, separate, much larger follow-up work, not done here.
 
 ## Implementation status
 
