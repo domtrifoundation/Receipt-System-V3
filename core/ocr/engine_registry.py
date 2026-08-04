@@ -66,10 +66,25 @@ __all__ = ["OcrConfig", "OcrEngineRegistry"]
 
 #: §6/§9's own reasoned starting set — text-layer extraction and Tesseract are always
 #: cheap/free/offline; RapidOCR is light enough to include by default too. Everything
-#: heavier, paid, or platform-limited (PaddleOCR, Windows OCR, Apple Vision, the cloud
-#: tier) is opt-in, matching the deep-dive's own "off by default" framing for those.
+#: heavier, paid, or platform-limited (PaddleOCR, Apple Vision, the cloud tier) is
+#: opt-in, matching the deep-dive's own "off by default" framing for those.
+#:
+#: **Windows OCR is included here too, confirmed necessary by a real, live install —
+#: not a reasoned guess.** `rapidocr-onnxruntime` has no build for Python 3.13+ at all
+#: (this package's own `requirements.txt` note), and Tesseract's own OS binary being
+#: *installed* is not the same as it being on `PATH` for whatever process launched this
+#: service — a real, confirmed gap on a real dev machine that had `tesseract.exe`
+#: present but not reachable via `pytesseract`'s default lookup. With both of those
+#: silently degrading to unavailable, `TEXT_LAYER` alone was the only *actually enabled
+#: and available* engine on a completely real Windows 3.13 install — and `TEXT_LAYER` is
+#: structurally useless against the scanned/photographed receipts every real-world
+#: upload to this product looks like (confirmed against 40 real receipt samples: 0% had
+#: a PDF text layer at all). Windows OCR is real, free, offline, and was the one engine
+#: `ListEngines`' own `available_engines` reported working on that same install —
+#: platform-gated already (`WindowsOcrEngine` reports unavailable on non-Windows), so
+#: including it here changes nothing for a self-hosted Linux/macOS install.
 DEFAULT_ENGINES_ENABLED: frozenset[EngineName] = frozenset(
-    {EngineName.TEXT_LAYER, EngineName.TESSERACT, EngineName.RAPIDOCR}
+    {EngineName.TEXT_LAYER, EngineName.TESSERACT, EngineName.RAPIDOCR, EngineName.WINDOWS_OCR}
 )
 
 #: Exception type -> wire error code. Checked in subclass-first order below since
