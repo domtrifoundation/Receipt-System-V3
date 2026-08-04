@@ -179,7 +179,8 @@ if __name__ == "__main__":  # pragma: no cover
 
     addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
     srv = serve(addr)
-    print(f"GeoAddressService listening on {addr}", file=sys.stderr)
+    print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
+    print(f"GeoAddressService listening on {srv.bound_address}", file=sys.stderr)
     print(f"running under: {sys.executable} ({sys.version.split()[0]})", file=sys.stderr)
     srv.wait_for_termination()
 

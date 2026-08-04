@@ -113,6 +113,12 @@ class ServiceLaunchResult:
     started_at: datetime = field(default_factory=utcnow)
     became_healthy_at: datetime | None = None
     error_detail: str = ""
+    address: str = ""
+    """The service's own real, dynamically-bound address (`host:port`) — read from its
+    own stdout (`BOUND_ADDRESS=...`), never the fixed `ServiceSpec.address` hint. Empty
+    when the service never got far enough to report one. This is what makes multiple
+    A/B/version instances of the same service coexist: each gets a real, OS-assigned
+    ephemeral port instead of a hand-picked constant that can collide."""
 
 
 @dataclass(frozen=True)

@@ -187,7 +187,9 @@ async def serve(address: str = DEFAULT_ADDRESS, *, launcher_path: Path = Path("s
     setup_pb2_grpc.add_SetupServiceServicer_to_server(
         SetupServicer(launcher_path=launcher_path), server
     )
-    server.add_insecure_port(address)
+    port = server.add_insecure_port(address)
+    host = address.rsplit(":", 1)[0]
+    server.bound_address = f"{host}:{port}"  # type: ignore[attr-defined]
     await server.start()
     return server
 
@@ -199,6 +201,8 @@ if __name__ == "__main__":  # pragma: no cover
     async def _main():
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
         server = await serve(addr)
+        print(f"BOUND_ADDRESS={server.bound_address}", flush=True)
+        print(f"listening on {server.bound_address}", file=sys.stderr)
         await server.wait_for_termination()
 
     asyncio.run(_main())

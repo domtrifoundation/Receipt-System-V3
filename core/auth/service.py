@@ -470,7 +470,8 @@ if __name__ == "__main__":  # pragma: no cover
             challenges=ChallengeStore(db),
         )
         srv = await serve(servicer, addr)
-        print(f"listening on {addr}", file=sys.stderr)
+        print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
+        print(f"listening on {srv.bound_address}", file=sys.stderr)
         await srv.wait_for_termination()
 
     asyncio.run(_main())

@@ -60,7 +60,7 @@ def test_launch_one_reports_failure_for_a_nonexistent_module():
     result = run(launch_one(spec, REPO_ROOT, timeout_seconds=5.0))
 
     assert result.ok is False
-    assert "never became reachable" in result.error_detail
+    assert "never reported a BOUND_ADDRESS" in result.error_detail
 
 
 def test_boot_many_stops_at_the_first_failure(geo_address_spec, killer):

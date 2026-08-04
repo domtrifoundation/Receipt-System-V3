@@ -108,23 +108,51 @@ async def wait_until_reachable(address: str, *, timeout_seconds: float = DEFAULT
 
 
 def _spawn(spec: ServiceSpec, clone_dir: Path) -> subprocess.Popen:
-    """**`spec.address` is passed as `sys.argv[1]`** — every servicer's own `__main__`
-    block this session's own work and the pre-existing ones both already accept an
-    optional address override this way (`core/geo_address/service.py`'s own
-    `addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS`). A real, live-found
-    gap: launching with no argument silently binds a service to its own hardcoded
-    `DEFAULT_ADDRESS` instead of the address Boot Sequence is about to health-check,
-    so the health gate below would wait out its own timeout against a port nothing is
-    listening on — confirmed live before this fix."""
+    """**Launches on an OS-assigned ephemeral port (`:0`), never `spec.address`'s own
+    fixed hint.** A real, previously-live-found gap: every service's own hardcoded
+    `DEFAULT_ADDRESS` constant is a per-service pick made independently across ~30 files
+    with no shared registry — confirmed live to collide (four services once shared
+    `50062`) and, separately, to occasionally bind a port an unrelated already-running
+    process on the host already holds (confirmed live via `netstat`, a genuine external
+    collision, not a code bug). Binding `:0` sidesteps both classes of collision
+    structurally rather than by picking better-guessed constants, and is what makes
+    multiple A/B/version instances of the same service coexist — each gets its own real
+    port, never a hand-picked one. `spec.address`'s own host is preserved; only the port
+    is forced to `0`. `stdout=subprocess.PIPE` (not `DEVNULL`) is what lets
+    `_read_bound_address()` learn the real port the process actually got.
+    """
     python_bin = _venv_python(clone_dir, spec.import_path)
     interpreter = str(python_bin) if python_bin.is_file() else sys.executable
     env = dict(os.environ)
     env["PYTHONPATH"] = str(clone_dir)
+    host = spec.address.rsplit(":", 1)[0]
     return subprocess.Popen(
-        [interpreter, "-m", spec.serve_module, spec.address],
+        [interpreter, "-m", spec.serve_module, f"{host}:0"],
         cwd=str(clone_dir), env=env,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
     )
+
+
+def _read_bound_address(process: subprocess.Popen, timeout_seconds: float) -> str | None:
+    """Blocks (in a thread, via `asyncio.to_thread` at the call site) reading the
+    process's own stdout for its `BOUND_ADDRESS=host:port` line — every service's
+    `__main__` prints this immediately after binding, before entering
+    `wait_for_termination()`. Returns `None` on timeout, EOF, or a process that exited
+    before ever printing one (a real startup crash, not this function's concern to
+    diagnose further — the caller's own health-gate failure message covers that)."""
+    import time
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return None
+        line = process.stdout.readline() if process.stdout else ""
+        if not line:
+            continue
+        line = line.strip()
+        if line.startswith("BOUND_ADDRESS="):
+            return line.removeprefix("BOUND_ADDRESS=")
+    return None
 
 
 async def launch_one(
@@ -139,13 +167,24 @@ async def launch_one(
     except OSError as exc:
         return ServiceLaunchResult(name=spec.name, ok=False, started_at=started, error_detail=str(exc))
 
-    reachable = await wait_until_reachable(spec.address, timeout_seconds=timeout_seconds)
-    if not reachable:
+    real_address = await asyncio.to_thread(_read_bound_address, process, timeout_seconds)
+    if real_address is None:
         return ServiceLaunchResult(
             name=spec.name, ok=False, pid=process.pid, started_at=started,
-            error_detail=f"{spec.name!r} never became reachable at {spec.address!r} within {timeout_seconds}s",
+            error_detail=f"{spec.name!r} never reported a BOUND_ADDRESS within {timeout_seconds}s "
+                         f"(process {'exited' if process.poll() is not None else 'still running'})",
         )
-    return ServiceLaunchResult(name=spec.name, ok=True, pid=process.pid, started_at=started, became_healthy_at=utcnow())
+
+    reachable = await wait_until_reachable(real_address, timeout_seconds=timeout_seconds)
+    if not reachable:
+        return ServiceLaunchResult(
+            name=spec.name, ok=False, pid=process.pid, started_at=started, address=real_address,
+            error_detail=f"{spec.name!r} never became reachable at {real_address!r} within {timeout_seconds}s",
+        )
+    return ServiceLaunchResult(
+        name=spec.name, ok=True, pid=process.pid, started_at=started,
+        became_healthy_at=utcnow(), address=real_address,
+    )
 
 
 async def boot_many(

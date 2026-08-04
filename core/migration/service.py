@@ -91,7 +91,9 @@ async def serve(address: str = DEFAULT_ADDRESS, *, registry: MigrationRegistry |
 
     server = grpc.aio.server()
     migration_pb2_grpc.add_MigrationServiceServicer_to_server(MigrationServicer(registry), server)
-    server.add_insecure_port(address)
+    port = server.add_insecure_port(address)
+    host = address.rsplit(":", 1)[0]
+    server.bound_address = f"{host}:{port}"  # type: ignore[attr-defined]
     await server.start()
     return server
 
@@ -103,7 +105,8 @@ if __name__ == "__main__":  # pragma: no cover
     async def _main() -> None:
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
         srv = await serve(addr)
-        print(f"listening on {addr}", file=sys.stderr)
+        print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
+        print(f"listening on {srv.bound_address}", file=sys.stderr)
         await srv.wait_for_termination()
 
     asyncio.run(_main())
