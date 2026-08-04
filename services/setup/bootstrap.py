@@ -182,9 +182,10 @@ async def finalize_clone(
     # against a clone that isn't eligible for Boot Sequence would just point the top-level
     # launcher at something broken.
     if provision_report.fully_provisioned:
-        install_supervisor(clone_dir, install_root)
-        provision_supervisor_venv(clone_dir, install_root, python_bin=python_bin)
-        ChannelArbitrator(install_root).set_active(DEFAULT_SUPERVISOR_CHANNEL, clone_dir)
+        installed = install_supervisor(clone_dir, install_root)
+        if installed is not None:
+            provision_supervisor_venv(clone_dir, install_root, python_bin=python_bin)
+            ChannelArbitrator(install_root).set_active(DEFAULT_SUPERVISOR_CHANNEL, clone_dir)
 
     return BootstrapReport(
         strip=strip_report,

@@ -22,7 +22,16 @@ __all__ = ["SUPERVISOR_VENV_DIRNAME", "install_supervisor", "supervisor_python"]
 SUPERVISOR_VENV_DIRNAME = ".venv"
 
 
-def _copy_package(source: Path, target: Path) -> None:
+def _copy_package(source: Path, target: Path) -> bool:
+    """Returns `False`, doing nothing, if `source` doesn't exist — a real, expected case
+    for a minimal test-fixture clone (e.g. Update API's own `release_manager.py` tests,
+    which clone a small local git remote with no real `supervisor/`/`common/` tree), not
+    just a full real repo clone. Degrades rather than raising, matching this package's
+    own `docs/PRINCIPLES.md` §4.4 posture — Supervisor's own top-level install is a real
+    step but not one that should take down an otherwise-successful finalize over a
+    fixture that was never meant to have it."""
+    if not source.is_dir():
+        return False
     for item in source.iterdir():
         if item.name in ("__pycache__",):
             continue
@@ -32,16 +41,23 @@ def _copy_package(source: Path, target: Path) -> None:
         else:
             target.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, dest)
+    return True
 
 
-def install_supervisor(clone_dir: Path, install_root: Path) -> Path:
+def install_supervisor(clone_dir: Path, install_root: Path) -> Path | None:
     """Copies `supervisor/` from `clone_dir` to `<install_root>/supervisor/`, alongside
     the arbitration/pin JSON files that already live there. Also copies `common/` —
     Supervisor's own code imports it (`FrozenDict`, error codes) and it must be reachable
     from the top-level install, never from inside whichever clone happened to be active
-    when Supervisor was last installed."""
+    when Supervisor was last installed.
+
+    Returns `None` (having copied nothing) if `clone_dir` has no real `supervisor/`
+    directory at all — see `_copy_package`'s own docstring for why that's a real,
+    expected case, not an error.
+    """
     target = install_root / "supervisor"
-    _copy_package(clone_dir / "supervisor", target)
+    if not _copy_package(clone_dir / "supervisor", target):
+        return None
     _copy_package(clone_dir / "common", install_root / "common")
     return target
 
