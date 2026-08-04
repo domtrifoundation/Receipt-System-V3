@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.04`
+`a02.00.05`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -87,12 +87,38 @@ silently swallowed it as an unrecognized style tag) — caught only by asserting
 parenthesized tags (`"(single-instance)"`) instead; any future label text containing
 `[`/`]` needs the same care.
 
-**Four of §3.2's eight enumerated custom screens remain named in `root.py` but not yet
-built**: `run_monitor` (needs Execution Core's streaming run-status RPC), `staff_audit_queue`
-(needs Review/Flagging), `vendor_branch_editor` (needs temporal_learning's Corporation/
-Branch/Franchiser model), `groups` (needs Groups API, §3.2.1's own two-level relational
-structure — none of these three owning APIs' TUI-facing RPCs exist yet either). Selecting
-any of them in the running TUI reports `"<label> isn't built yet"` rather than crashing or
+**`find_setting` is now a real interactive screen**
+(`services/interface/tui/custom_screens/find_setting.py`) — live fuzzy search as the
+operator types, reusing `core/agent_control/backends/local.py`'s already-tested
+`LocalCoreBackend.find_setting()` matcher **in-process, deliberately not through Agent
+Control's `ExecuteAgentAction` RPC**. That RPC is agent-token-gated — real machinery for
+an external AI agent (`core/agent_control/CLAUDE.md`'s own "never more capable than the
+human who authorized it"), not the right shape for the human operator already sitting at
+this TUI. The matcher itself fuzzy-matches Interface's own `SETTINGS_MENU` against
+itself — presentation logic over this package's own data, not a call into another API's
+business logic, the same class of narrow exception the wizard screen's own in-process
+`WizardEngine.run()` call already documents for a different reason. Selecting a match
+forwards it through the same `TargetResolver` seam every other screen uses, so it opens
+exactly as if reached by browsing. Live-tested (`tests/unit/services/interface/
+test_find_setting_screen.py`) — including a real, honest finding: `rapidfuzz.partial_ratio`
+almost never returns an exact zero, so a gibberish query still surfaces real low-score
+results rather than an empty list; the screen's "no matches" message is real reachable
+code (fires when rapidfuzz is absent and substring-fallback scoring genuinely finds
+nothing), just not something a rapidfuzz-equipped install's fuzzy scoring typically hits.
+
+**Three of §3.2's eight enumerated custom screens remain named in `root.py` but not yet
+built**: `run_monitor`, `staff_audit_queue`, `vendor_branch_editor`, `groups` minus
+`find_setting` (now built) — checked this pass, not assumed: Execution Core
+(`services/execution_core/execution_core.proto`), Review/Flagging
+(`core/review_flagging/review_flagging.proto`), and Groups
+(`core/groups/groups.proto`) all now have real, reachable gRPC surfaces (a change since
+the previous pass's note that none did), so these are genuinely buildable, just not yet
+built. **A real, separate gap found while checking**: neither `GroupsService` nor
+`ExecutionCoreService` exposes a "list all groups" / "list active runs" RPC — a screen for
+either can act against a known `group_id`/`run_id` but cannot yet enumerate them from a
+cold start. `vendor_branch_editor` remains genuinely blocked — `core/temporal_learning/`
+is still 0-byte scaffolding, so there is no owning API to call at all. Selecting any of
+the four in the running TUI reports `"<label> isn't built yet"` rather than crashing or
 rendering something fabricated — the same `docs/PRINCIPLES.md` "never plausible-looking
 data" discipline `core/agent_control/backends/local.py`'s `CoreUnavailable` already applies.
 **`find_setting`'s own root-menu entry is similarly a placeholder** — the real fuzzy-match

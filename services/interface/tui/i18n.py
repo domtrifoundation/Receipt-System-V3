@@ -54,6 +54,9 @@ _EN = {
     "restart.stage.waiting_healthy": "Waiting for health check...",
     "restart.stage.complete": "Restart complete.",
     "restart.stage.failed": "Restart failed: {detail}",
+    "find_setting.title": "Find a Setting",
+    "find_setting.placeholder": "Type to search settings...",
+    "find_setting.no_matches": "No settings match {query!r}.",
 }
 
 _TL = {
@@ -93,6 +96,9 @@ _TL = {
     "restart.stage.waiting_healthy": "Hinihintay ang health check...",
     "restart.stage.complete": "Tapos na ang restart.",
     "restart.stage.failed": "Nabigo ang restart: {detail}",
+    "find_setting.title": "Maghanap ng Setting",
+    "find_setting.placeholder": "Mag-type para maghanap ng setting...",
+    "find_setting.no_matches": "Walang tumugmang setting para sa {query!r}.",
 }
 
 #: One `FrozenDict` per shipped locale (`docs/PRINCIPLES.md` §2.1.1 — module-level

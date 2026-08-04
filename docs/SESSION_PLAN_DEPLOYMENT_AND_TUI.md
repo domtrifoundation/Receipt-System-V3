@@ -80,15 +80,22 @@ pass), `custom_screens/credits.py` (real dependency/license table sourced from e
   breakdown, including a real Rich-markup square-bracket rendering gotcha found while
   testing the screen.
 
+- [x] `find_setting` interactive screen — live fuzzy search reusing
+  `LocalCoreBackend.find_setting()` in-process (deliberately not through Agent Control's
+  agent-token-gated `ExecuteAgentAction`, the wrong audience for a human TUI operator);
+  selecting a match forwards through the same `TargetResolver` every other screen uses.
+  Live-tested; see `services/interface/CLAUDE.md` for the real rapidfuzz-scoring finding.
+
 **Explicitly NOT done, tracked honestly in `services/interface/CLAUDE.md`** rather than
 silently left half-finished:
-- [ ] `run_monitor`, `staff_audit_queue`, `vendor_branch_editor`, `groups` — four of the
-  eight exception-list screens. Each needs real RPC wiring to an owning API (Execution
-  Core, Review/Flagging, temporal_learning, Groups respectively) that doesn't expose a
-  TUI-facing surface yet. Named in `root.py`, report "not built yet" honestly when
-  selected rather than crashing or faking a result.
-- [ ] `find_setting` interactive screen — the real fuzzy-matcher already exists and is
-  tested (`core/agent_control/backends/local.py`), just not yet presented as its own screen.
+- [ ] `run_monitor`, `staff_audit_queue`, `groups` — three of the eight exception-list
+  screens. Checked this pass: Execution Core, Review/Flagging, and Groups all now expose
+  real gRPC surfaces (`execution_core.proto`, `review_flagging.proto`, `groups.proto`), so
+  these are genuinely buildable — just not yet built. Neither Execution Core nor Groups
+  exposes a "list active runs"/"list all groups" RPC yet, a real enumeration gap found
+  while checking, not assumed.
+- [ ] `vendor_branch_editor` — still genuinely blocked; `core/temporal_learning/` remains
+  0-byte scaffolding, so there is no owning API to call.
 - [ ] `ocr_diff_viewer` — not yet named in `root.py` at all (reached contextually from a
   run, not the root menu); undesigned as of this pass.
 - [x] Confirm the first-time interactive setup wizard's TUI-side integration — confirmed
