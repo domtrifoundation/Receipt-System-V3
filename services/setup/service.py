@@ -203,6 +203,11 @@ if __name__ == "__main__":  # pragma: no cover
         server = await serve(addr)
         print(f"BOUND_ADDRESS={server.bound_address}", flush=True)
         print(f"listening on {server.bound_address}", file=sys.stderr)
-        await server.wait_for_termination()
+        from common.watchdog_client import start_kicking_for_service, stop_kick_loop
+        kick_task = start_kicking_for_service('setup')
+        try:
+            await server.wait_for_termination()
+        finally:
+            await stop_kick_loop(kick_task)
 
     asyncio.run(_main())

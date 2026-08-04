@@ -187,9 +187,12 @@ if __name__ == "__main__":  # pragma: no cover
     print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
     print(f"MatchingService listening on {srv.bound_address}", file=sys.stderr)
     print(f"running under: {sys.executable} ({sys.version.split()[0]})", file=sys.stderr)
-    srv.wait_for_termination()
-
-
+    from common.watchdog_client import ThreadedKicker
+    kicker = ThreadedKicker('matching')
+    try:
+        srv.wait_for_termination()
+    finally:
+        kicker.stop()
 __all__ = [
     "DEFAULT_ADDRESS",
     "MatchingServicer",

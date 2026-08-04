@@ -240,6 +240,11 @@ if __name__ == "__main__":  # pragma: no cover
         await srv.start()
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)
-        await srv.wait_for_termination()
+        from common.watchdog_client import start_kicking_for_service, stop_kick_loop
+        kick_task = start_kicking_for_service('search_query')
+        try:
+            await srv.wait_for_termination()
+        finally:
+            await stop_kick_loop(kick_task)
 
     asyncio.run(_main())

@@ -307,6 +307,11 @@ if __name__ == "__main__":  # pragma: no cover
         # The resolved interpreter, not just a launch message — this is what makes
         # `PYTHON_BIN=... ./start.sh` independently verifiable from outside the process.
         print(f"running under: {sys.executable} ({sys.version.split()[0]})", file=sys.stderr)
-        await srv.wait_for_termination()
+        from common.watchdog_client import start_kicking_for_service, stop_kick_loop
+        kick_task = start_kicking_for_service('audit')
+        try:
+            await srv.wait_for_termination()
+        finally:
+            await stop_kick_loop(kick_task)
 
     asyncio.run(_main())
