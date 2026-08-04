@@ -74,6 +74,26 @@ class SupervisorServiceStub:
                 request_serializer=supervisor__pb2.BootProgressRequest.SerializeToString,
                 response_deserializer=supervisor__pb2.BootProgressUpdate.FromString,
                 _registered_method=True)
+        self.SetAvailableVersions = channel.unary_unary(
+                '/resibo.supervisor.v1.SupervisorService/SetAvailableVersions',
+                request_serializer=supervisor__pb2.SetAvailableVersionsRequest.SerializeToString,
+                response_deserializer=supervisor__pb2.AvailableVersionsResponse.FromString,
+                _registered_method=True)
+        self.ListAvailableVersions = channel.unary_unary(
+                '/resibo.supervisor.v1.SupervisorService/ListAvailableVersions',
+                request_serializer=supervisor__pb2.ChannelRequest.SerializeToString,
+                response_deserializer=supervisor__pb2.AvailableVersionsListResponse.FromString,
+                _registered_method=True)
+        self.StartVersion = channel.unary_unary(
+                '/resibo.supervisor.v1.SupervisorService/StartVersion',
+                request_serializer=supervisor__pb2.StartVersionRequest.SerializeToString,
+                response_deserializer=supervisor__pb2.StartVersionResponse.FromString,
+                _registered_method=True)
+        self.ListRunningInstances = channel.unary_unary(
+                '/resibo.supervisor.v1.SupervisorService/ListRunningInstances',
+                request_serializer=supervisor__pb2.ChannelRequest.SerializeToString,
+                response_deserializer=supervisor__pb2.RunningInstancesResponse.FromString,
+                _registered_method=True)
 
 
 class SupervisorServiceServicer:
@@ -132,6 +152,37 @@ class SupervisorServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SetAvailableVersions(self, request, context):
+        """Multi-version-per-service architecture: most services can run several concurrent
+        version instances at once, started dynamically based on real webapp demand; the
+        owner sets which versions are *available* to be started at all (SetAvailableVersions
+        -- the ceiling the webapp's own end-user version choice is bounded by), and
+        StartVersion is the on-demand launch itself. interface_tui/inference are refused by
+        StartVersion (single-instance -- use RestartServiceOnVersion instead); SetAvailable
+        Versions structurally truncates either to its own last requested version.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListAvailableVersions(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StartVersion(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListRunningInstances(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SupervisorServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -174,6 +225,26 @@ def add_SupervisorServiceServicer_to_server(servicer, server):
                     servicer.StreamBootProgress,
                     request_deserializer=supervisor__pb2.BootProgressRequest.FromString,
                     response_serializer=supervisor__pb2.BootProgressUpdate.SerializeToString,
+            ),
+            'SetAvailableVersions': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetAvailableVersions,
+                    request_deserializer=supervisor__pb2.SetAvailableVersionsRequest.FromString,
+                    response_serializer=supervisor__pb2.AvailableVersionsResponse.SerializeToString,
+            ),
+            'ListAvailableVersions': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListAvailableVersions,
+                    request_deserializer=supervisor__pb2.ChannelRequest.FromString,
+                    response_serializer=supervisor__pb2.AvailableVersionsListResponse.SerializeToString,
+            ),
+            'StartVersion': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartVersion,
+                    request_deserializer=supervisor__pb2.StartVersionRequest.FromString,
+                    response_serializer=supervisor__pb2.StartVersionResponse.SerializeToString,
+            ),
+            'ListRunningInstances': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListRunningInstances,
+                    request_deserializer=supervisor__pb2.ChannelRequest.FromString,
+                    response_serializer=supervisor__pb2.RunningInstancesResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -392,6 +463,114 @@ class SupervisorService:
             '/resibo.supervisor.v1.SupervisorService/StreamBootProgress',
             supervisor__pb2.BootProgressRequest.SerializeToString,
             supervisor__pb2.BootProgressUpdate.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetAvailableVersions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.supervisor.v1.SupervisorService/SetAvailableVersions',
+            supervisor__pb2.SetAvailableVersionsRequest.SerializeToString,
+            supervisor__pb2.AvailableVersionsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListAvailableVersions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.supervisor.v1.SupervisorService/ListAvailableVersions',
+            supervisor__pb2.ChannelRequest.SerializeToString,
+            supervisor__pb2.AvailableVersionsListResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StartVersion(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.supervisor.v1.SupervisorService/StartVersion',
+            supervisor__pb2.StartVersionRequest.SerializeToString,
+            supervisor__pb2.StartVersionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListRunningInstances(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.supervisor.v1.SupervisorService/ListRunningInstances',
+            supervisor__pb2.ChannelRequest.SerializeToString,
+            supervisor__pb2.RunningInstancesResponse.FromString,
             options,
             channel_credentials,
             insecure,

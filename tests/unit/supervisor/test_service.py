@@ -142,3 +142,82 @@ def test_restart_service_on_version_rpc_reports_unregistered_service(tmp_path, g
 
     assert results[-1].stage == "failed"
     assert "no spec registered" in results[-1].error_detail
+
+
+def test_set_available_versions_rpc_round_trips(tmp_path, geo_address_spec):
+    servicer = _servicer(tmp_path, geo_address_spec)
+
+    response = run(servicer.SetAvailableVersions(pb.SetAvailableVersionsRequest(
+        channel="beta", service_name="ocr", versions=["x03.01.05", "x03.01.06"], requested_by="owner-1",
+    )))
+
+    assert list(response.versions) == ["x03.01.05", "x03.01.06"]
+
+    listed = run(servicer.ListAvailableVersions(pb.ChannelRequest(channel="beta")))
+    assert [e.service_name for e in listed.entries] == ["ocr"]
+    assert list(listed.entries[0].versions) == ["x03.01.05", "x03.01.06"]
+
+
+def test_set_available_versions_rpc_truncates_single_instance_services(tmp_path, geo_address_spec):
+    servicer = _servicer(tmp_path, geo_address_spec)
+
+    response = run(servicer.SetAvailableVersions(pb.SetAvailableVersionsRequest(
+        channel="beta", service_name="interface_tui", versions=["x03.01.05", "x03.01.06"], requested_by="owner-1",
+    )))
+
+    assert list(response.versions) == ["x03.01.06"]
+
+
+def test_start_version_rpc_launches_a_real_service_from_a_release_clone(tmp_path, geo_address_spec, killer):
+    """`StartVersion` resolves the spec from `self._specs` directly (no active release
+    needed when a spec is already registered), then launches from a fake release clone
+    laid out to look like the real thing."""
+    servicer = _servicer(tmp_path, geo_address_spec)
+    releases_dir = tmp_path / "releases"
+    (releases_dir / "x03.01.05_abc123").mkdir(parents=True)
+
+    response = run(servicer.StartVersion(pb.StartVersionRequest(service_name="geo_address", version="x03.01.05")))
+
+    assert response.service_name == "geo_address"
+    assert response.version == "x03.01.05"
+    # A fake clone with no real venv still exercises the whole real path down to
+    # `launch_one()` — it fails at the subprocess-spawn stage, not confirming_target,
+    # proving StartVersion actually reached real launch logic rather than short-circuiting.
+    assert response.ok is False
+
+
+def test_start_version_rpc_refuses_single_instance_services(tmp_path, geo_address_spec):
+    from dataclasses import replace
+
+    servicer = SupervisorServicer(tmp_path, {
+        "geo_address": geo_address_spec,
+        "interface_tui": replace(geo_address_spec, name="interface_tui"),
+    })
+
+    response = run(servicer.StartVersion(pb.StartVersionRequest(service_name="interface_tui", version="x03.01.05")))
+
+    assert response.ok is False
+    assert "single-instance" in response.error_detail
+
+
+def test_start_version_rpc_reports_no_spec_when_service_is_unknown(tmp_path, geo_address_spec):
+    servicer = _servicer(tmp_path, geo_address_spec)
+
+    response = run(servicer.StartVersion(pb.StartVersionRequest(service_name="not_registered", version="x03.01.05")))
+
+    assert response.ok is False
+    assert "no spec found" in response.error_detail
+
+
+def test_list_running_instances_rpc_reflects_the_real_registry(tmp_path, geo_address_spec):
+    from supervisor.contracts import ServiceLaunchResult
+
+    servicer = _servicer(tmp_path, geo_address_spec)
+    servicer._instances.record("ocr", "x03.01.05", ServiceLaunchResult(name="ocr", ok=True, pid=555, address="127.0.0.1:59991"))
+
+    response = run(servicer.ListRunningInstances(pb.ChannelRequest(channel="beta")))
+
+    assert len(response.instances) == 1
+    assert response.instances[0].service_name == "ocr"
+    assert response.instances[0].version == "x03.01.05"
+    assert response.instances[0].pid == 555

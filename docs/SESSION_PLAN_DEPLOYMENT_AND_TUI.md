@@ -66,13 +66,27 @@ pass), `custom_screens/credits.py` (real dependency/license table sourced from e
 `requirements.txt` in the repo), `app.py` (`InterfaceApp`: boot -> root menu, plus the
 `interface.open_screen.*` convention that lets menu-data name a custom screen).
 
+- [x] `fleet_updates` — built to the owning conversation's own verbatim multi-version
+  spec: most services get a version-list editor calling Supervisor's new
+  `SetAvailableVersions` (the ceiling the webapp's own end-user version choice is bounded
+  by; concurrent instances start on real webapp demand via the also-new `StartVersion`/
+  `ensure_version_running`, never pre-started from this screen); `interface_tui`/
+  `inference` show a single target-version field triggering a real, fullscreen
+  `RestartScreen` streaming `RestartServiceOnVersion` instead, since only one instance of
+  either can ever run. Backed by two new Supervisor modules (`available_versions.py`,
+  `instance_registry.py`, `dynamic_start.py`) and four new proto RPCs, all live-tested
+  against a genuine running `SupervisorServicer` — no mocked gRPC stub anywhere in this
+  chain. See `supervisor/CLAUDE.md` and `services/interface/CLAUDE.md` for the full
+  breakdown, including a real Rich-markup square-bracket rendering gotcha found while
+  testing the screen.
+
 **Explicitly NOT done, tracked honestly in `services/interface/CLAUDE.md`** rather than
 silently left half-finished:
-- [ ] `fleet_updates`, `run_monitor`, `staff_audit_queue`, `vendor_branch_editor`, `groups`
-  — five of the eight exception-list screens. Each needs real RPC wiring to an owning API
-  (Supervisor, Execution Core, Review/Flagging, temporal_learning, Groups respectively)
-  that doesn't expose a TUI-facing surface yet. Named in `root.py`, report "not built yet"
-  honestly when selected rather than crashing or faking a result.
+- [ ] `run_monitor`, `staff_audit_queue`, `vendor_branch_editor`, `groups` — four of the
+  eight exception-list screens. Each needs real RPC wiring to an owning API (Execution
+  Core, Review/Flagging, temporal_learning, Groups respectively) that doesn't expose a
+  TUI-facing surface yet. Named in `root.py`, report "not built yet" honestly when
+  selected rather than crashing or faking a result.
 - [ ] `find_setting` interactive screen — the real fuzzy-matcher already exists and is
   tested (`core/agent_control/backends/local.py`), just not yet presented as its own screen.
 - [ ] `ocr_diff_viewer` — not yet named in `root.py` at all (reached contextually from a

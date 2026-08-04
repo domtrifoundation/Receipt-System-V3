@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.03`
+`a02.00.04`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -63,16 +63,38 @@ file's own docstring), and `app.py` (the `InterfaceApp` wiring boot -> root menu
 `interface.open_screen.*`/`interface.open_submenu.*` target convention that lets custom
 screens live behind ordinary menu-data entries without `MenuScreen` importing any of them).
 
-**Five of §3.2's eight enumerated custom screens are named in `root.py` but not yet
-built**: `fleet_updates` (§3.3's Fleet & Updates, needs Supervisor's `GetActiveRelease`/
-`PinServiceVersion`/`ListServiceVersionPins`/`RestartServiceOnVersion` wired in), `run_monitor`
-(needs Execution Core's streaming run-status RPC), `staff_audit_queue` (needs Review/
-Flagging), `vendor_branch_editor` (needs temporal_learning's Corporation/Branch/Franchiser
-model), `groups` (needs Groups API, §3.2.1's own two-level relational structure — none of
-these four owning APIs' TUI-facing RPCs exist yet either). Selecting any of them in the
-running TUI reports `"<label> isn't built yet"` rather than crashing or rendering
-something fabricated — the same `docs/PRINCIPLES.md` "never plausible-looking data"
-discipline `core/agent_control/backends/local.py`'s `CoreUnavailable` already applies.
+**`fleet_updates` is now real, built to the owning conversation's own verbatim
+multi-version spec** (`services/interface/tui/custom_screens/fleet_screen.py`,
+`restart_screen.py`) — a genuine top-level root-menu screen, sibling to Settings, never
+nested under it (`root.py`'s `ROOT_MENU` is already flat). Two distinct controls behind
+one screen, matching the spec exactly: most services get a comma-separated version-list
+editor calling Supervisor's new `SetAvailableVersions` RPC — the real ceiling the
+webapp's own end-user version choice is bounded by, never a manual per-version launch
+from here (`StartVersion`/`ensure_version_running` fire on real webapp demand, not from
+this screen); `interface_tui`/`inference` show a single target-version field and trigger
+a real, fullscreen `RestartScreen` streaming Supervisor's own `RestartServiceOnVersion`
+instead, since only one instance of either can ever run
+(`supervisor.available_versions.SINGLE_INSTANCE_SERVICES` is the structural enforcement,
+this screen just reflects it). Live-tested against a genuine running `SupervisorServicer`
+— real `SetAvailableVersions` round-trip, real single-instance tag rendering, real
+"not connected" honesty when no `--supervisor` address is known
+(`tests/unit/services/interface/test_fleet_screen.py`).
+
+**Real gotcha: Textual's `Static` widget treats square brackets as Rich markup, not
+literal text.** An initial `"[single-instance]"` tag string rendered as nothing (Rich
+silently swallowed it as an unrecognized style tag) — caught only by asserting on the
+*rendered* text in a live `Pilot` test, not by any static check. Fixed by using
+parenthesized tags (`"(single-instance)"`) instead; any future label text containing
+`[`/`]` needs the same care.
+
+**Four of §3.2's eight enumerated custom screens remain named in `root.py` but not yet
+built**: `run_monitor` (needs Execution Core's streaming run-status RPC), `staff_audit_queue`
+(needs Review/Flagging), `vendor_branch_editor` (needs temporal_learning's Corporation/
+Branch/Franchiser model), `groups` (needs Groups API, §3.2.1's own two-level relational
+structure — none of these three owning APIs' TUI-facing RPCs exist yet either). Selecting
+any of them in the running TUI reports `"<label> isn't built yet"` rather than crashing or
+rendering something fabricated — the same `docs/PRINCIPLES.md` "never plausible-looking
+data" discipline `core/agent_control/backends/local.py`'s `CoreUnavailable` already applies.
 **`find_setting`'s own root-menu entry is similarly a placeholder** — the real fuzzy-match
 mechanism already exists and is tested (`core/agent_control/backends/local.py`), but this
 pass did not build a screen presenting it interactively; it currently reports the same

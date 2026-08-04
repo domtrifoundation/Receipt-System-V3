@@ -25,6 +25,7 @@ from textual.app import App
 from services.interface.tui.banners import header_line
 from services.interface.tui.custom_screens.boot_sequence import BootSequenceScreen
 from services.interface.tui.custom_screens.credits import CreditsScreen
+from services.interface.tui.custom_screens.fleet_screen import FleetScreen
 from services.interface.tui.i18n import DEFAULT_LOCALE, t
 from services.interface.tui.menu_data import ALL_MENU_ITEMS, submenu_items
 from services.interface.tui.menu_screen import MenuScreen, TargetResolver, unwired_target_resolver
@@ -72,6 +73,9 @@ class InterfaceApp(App):
             if item.target.startswith("interface.open_submenu."):
                 path = item.target.removeprefix("interface.open_submenu.")
                 self.push_screen(MenuScreen(item.label, submenu_items(path), resolver=self._resolver, locale=self._locale))
+                return ""
+            if item.target == "interface.open_screen.fleet_updates":
+                self.push_screen(FleetScreen(self._supervisor_address, self._channel, locale=self._locale))
                 return ""
             if item.target in _BUILT_CUSTOM_SCREENS:
                 self.push_screen(_BUILT_CUSTOM_SCREENS[item.target](self._locale))

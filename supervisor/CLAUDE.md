@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.02`
+`a01.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -66,3 +66,42 @@ Structurally neither Layer 1 nor Layer 2 (`docs/PROCESS_TOPOLOGY.md` §1): it li
 **`ForceWake`/`PinServiceVersion` are Audit-logged (§11's own resolved "yes" for both) using the exact same gap-shape `core/review_flagging/gateways.py` already documents** — Audit's own closed operation vocabulary does not register Supervisor's own operations yet, so a real call today returns `recorded=False, error_code="UNKNOWN_ACTION"`, surfaced honestly (best-effort, never fails the operation it describes) rather than silently dropped.
 
 **`boot_sequence.py`'s `boot_many()` gained an optional `on_result` callback**, added while building the TUI's own Boot Sequence screen (`services/interface/tui/custom_screens/boot_sequence.py`) — that screen needed real per-service progress as it happens, and `boot_many()` previously only returned once at the very end. Backward-compatible by construction (`on_result: BootProgressCallback | None = None`); a new test (`test_boot_many_calls_on_result_once_per_service_as_it_completes`) confirms it fires once per service with that service's own real result, and the full pre-existing suite stayed green with no changes needed at any other call site.
+
+**The multi-version-per-service architecture is now real, built to the owning
+conversation's own verbatim spec, not the earlier single-version-per-channel model
+alone.** Most services can run several concurrent version instances at once, started
+dynamically on real webapp demand rather than every available version being pre-booted;
+`interface_tui`/`inference` remain the sole single-instance exceptions, restarted in
+place via the pre-existing `single_instance.py` mechanism. Four new pieces, each with
+real, passing tests (`tests/unit/supervisor/test_available_versions.py`,
+`test_instance_registry.py`, `test_dynamic_start.py`, plus new cases in
+`test_service.py`):
+
+- **`available_versions.py`'s `AvailableVersionsStore`** — a genuinely distinct concept
+  from `version_pins.py`'s own `VersionPinStore`: a pin *forces* one version, overriding
+  the channel's normal release; this store tracks the *set* of versions a service is
+  allowed to run concurrently at all. `SINGLE_INSTANCE_SERVICES = frozenset({"interface_tui",
+  "inference"})` is enforced structurally in `set_available()` itself (truncates to the
+  last-requested version), not left to caller discipline.
+- **`instance_registry.py`'s `InstanceRegistry`** — real, in-memory, this-process-lifetime
+  tracking of every running `(service_name, version)` instance, the same scope
+  `sleep_wake/state.py`'s own live tracker already uses (never persisted; a restarted
+  Supervisor re-derives it by nothing being "running" until it launches something again).
+- **`dynamic_start.py`'s `ensure_version_running()`** — the real on-demand launch:
+  returns an already-tracked healthy instance without relaunching, otherwise resolves the
+  requested version's own release clone via `single_instance.find_release_dir_for_version()`
+  (the identical function §5.4's restart already uses, reused rather than reimplemented)
+  and launches for real via `boot_sequence.launch_one()`. Refuses `SINGLE_INSTANCE_SERVICES`
+  outright — those two must go through `restart_service_on_version()` instead.
+- **Four new `supervisor.proto` RPCs** (`SetAvailableVersions`, `ListAvailableVersions`,
+  `StartVersion`, `ListRunningInstances`), wired into `SupervisorServicer`.
+  `StartVersion`'s own `_resolve_spec()` falls back to building the fleet fresh from the
+  active release and matching by name when `self._specs` (often empty — most callers
+  don't pre-build a registry) has nothing registered; a spec resolved against whichever
+  release is currently active is valid for launching *any* version of that same service,
+  since `import_path`/`serve_module` don't change release to release.
+
+**The real "Fleet & Updates" TUI screen is built** (`services/interface/tui/
+custom_screens/fleet_screen.py`, `restart_screen.py`) — see `services/interface/
+CLAUDE.md` for the screen-level details and the Rich-markup square-bracket gotcha found
+while testing it.

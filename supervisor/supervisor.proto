@@ -28,6 +28,17 @@ service SupervisorService {
   // (v3-deepdive-14-interface-api.md's own "the TUI is a genuinely detachable client",
   // never the process doing the starting).
   rpc StreamBootProgress(BootProgressRequest) returns (stream BootProgressUpdate);
+  // Multi-version-per-service architecture: most services can run several concurrent
+  // version instances at once, started dynamically based on real webapp demand; the
+  // owner sets which versions are *available* to be started at all (SetAvailableVersions
+  // -- the ceiling the webapp's own end-user version choice is bounded by), and
+  // StartVersion is the on-demand launch itself. interface_tui/inference are refused by
+  // StartVersion (single-instance -- use RestartServiceOnVersion instead); SetAvailable
+  // Versions structurally truncates either to its own last requested version.
+  rpc SetAvailableVersions(SetAvailableVersionsRequest) returns (AvailableVersionsResponse);
+  rpc ListAvailableVersions(ChannelRequest) returns (AvailableVersionsListResponse);
+  rpc StartVersion(StartVersionRequest) returns (StartVersionResponse);
+  rpc ListRunningInstances(ChannelRequest) returns (RunningInstancesResponse);
 }
 
 message ChannelRequest {
@@ -120,4 +131,48 @@ message BootProgressUpdate {
   bool boot_complete = 6;      // true on the final update -- every service has a result
   bool boot_ok = 7;            // only meaningful when boot_complete is true
   repeated string failed_services = 8;   // only meaningful when boot_complete is true
+}
+
+message SetAvailableVersionsRequest {
+  string channel = 1;
+  string service_name = 2;
+  repeated string versions = 3;   // the real, complete set -- not a delta
+  string requested_by = 4;        // owner/staff user_id -- Audit-logged, same posture as PinServiceVersion
+}
+
+message AvailableVersionsResponse {
+  string channel = 1;
+  string service_name = 2;
+  repeated string versions = 3;   // what was actually stored -- may be shorter than
+                                   // requested for interface_tui/inference (single-instance)
+}
+
+message AvailableVersionsListResponse {
+  repeated AvailableVersionsResponse entries = 1;
+}
+
+message StartVersionRequest {
+  string service_name = 1;
+  string version = 2;
+}
+
+message StartVersionResponse {
+  string service_name = 1;
+  string version = 2;
+  bool ok = 3;
+  int32 pid = 4;
+  string address = 5;             // the real, dynamically-bound address once known
+  string error_detail = 6;
+}
+
+message RunningInstance {
+  string service_name = 1;
+  string version = 2;
+  bool ok = 3;
+  int32 pid = 4;
+  string address = 5;
+}
+
+message RunningInstancesResponse {
+  repeated RunningInstance instances = 1;
 }

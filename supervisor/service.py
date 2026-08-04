@@ -22,7 +22,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from .arbitration import ChannelArbitrator
+from .available_versions import AvailableVersionsStore
 from .contracts import ServiceSpec
+from .instance_registry import InstanceRegistry
 from .rollback import rollback_channel
 from .single_instance import restart_service_on_version
 from .sleep_wake.classification import policy_for
@@ -69,12 +71,19 @@ class SupervisorServicer:
         arbitrator: ChannelArbitrator | None = None,
         pins: VersionPinStore | None = None,
         sleep_state: SleepStateStore | None = None,
+        available_versions: AvailableVersionsStore | None = None,
+        instances: InstanceRegistry | None = None,
     ) -> None:
         self._install_root = Path(install_root)
         self._specs = specs
         self._arbitrator = arbitrator if arbitrator is not None else ChannelArbitrator(install_root)
         self._pins = pins if pins is not None else VersionPinStore(install_root)
         self._sleep_state = sleep_state if sleep_state is not None else SleepStateStore()
+        self._available_versions = available_versions if available_versions is not None else AvailableVersionsStore(install_root)
+        #: Every `(service_name, version)` instance this Supervisor process has itself
+        #: launched via `StartVersion` — real, in-memory, this-process-lifetime state,
+        #: same posture as `spawned_pids` below (`instance_registry.py`'s own docstring).
+        self._instances = instances if instances is not None else InstanceRegistry()
         #: Every PID Supervisor has spawned via a boot — real cleanup on process exit
         #: needs this list; see `__main__.py`'s own docstring for why that ownership
         #: belongs here now, not the TUI's.
@@ -254,6 +263,87 @@ class SupervisorServicer:
                 service_name=progress.service_name, target_version=progress.target_version,
                 stage=progress.stage, error_detail=progress.error_detail,
             )
+
+
+    async def SetAvailableVersions(self, request, context=None):  # noqa: N802 - gRPC naming
+        """The owner-set ceiling the webapp's own end-user version choice is bounded by
+        (verbatim from the owning spec). Structurally truncated to one version for
+        `interface_tui`/`inference` by `AvailableVersionsStore` itself, not by this
+        handler — see that module's own docstring. Audit-logged, same posture as
+        `PinServiceVersion`."""
+        from .generated import supervisor_pb2 as pb
+
+        versions = self._available_versions.set_available(request.channel, request.service_name, tuple(request.versions))
+        await _record_audit("supervisor_set_available_versions", request.requested_by)
+        return pb.AvailableVersionsResponse(channel=request.channel, service_name=request.service_name, versions=list(versions))
+
+    async def ListAvailableVersions(self, request, context=None):  # noqa: N802 - gRPC naming
+        from .generated import supervisor_pb2 as pb
+
+        entries = self._available_versions.list_all(request.channel)
+        response = pb.AvailableVersionsListResponse()
+        for service_name, versions in entries.items():
+            response.entries.append(pb.AvailableVersionsResponse(
+                channel=request.channel, service_name=service_name, versions=list(versions),
+            ))
+        return response
+
+    def _resolve_spec(self, service_name: str) -> ServiceSpec | None:
+        """`self._specs` is often empty (most callers construct `SupervisorServicer`
+        without a pre-built registry — the real fleet is discovered fresh from whichever
+        release is active, same as `StreamBootProgress` does). Falls back to building the
+        fleet from the currently active release and matching by name; `import_path`/
+        `serve_module` are stable across a service's own versions by construction (the
+        module path doesn't change release to release), so a spec resolved against the
+        *active* release is valid for launching any other version of that same service."""
+        spec = self._specs.get(service_name)
+        if spec is not None:
+            return spec
+        active = next(iter(self._arbitrator.all_active()), None)
+        if active is None:
+            return None
+        from .fleet import build_fleet_specs
+
+        for candidate in build_fleet_specs(active.release_dir):
+            if candidate.name == service_name:
+                return candidate
+        return None
+
+    async def StartVersion(self, request, context=None):  # noqa: N802 - gRPC naming
+        """On-demand multi-version launch — real webapp demand starts a specific version
+        rather than every available version being pre-booted. Refuses `interface_tui`/
+        `inference` (`dynamic_start.ensure_version_running`'s own single-instance check);
+        those two are restarted in place via `RestartServiceOnVersion` instead."""
+        from .generated import supervisor_pb2 as pb
+
+        spec = self._resolve_spec(request.service_name)
+        if spec is None:
+            return pb.StartVersionResponse(
+                service_name=request.service_name, version=request.version, ok=False,
+                error_detail=f"no spec found for {request.service_name!r} — is any release active?",
+            )
+
+        from .dynamic_start import ensure_version_running
+
+        releases_dir = self._install_root / "releases"
+        result = await ensure_version_running(self._instances, spec, request.version, releases_dir)
+        if result.pid is not None:
+            self.spawned_pids.append(result.pid)
+        return pb.StartVersionResponse(
+            service_name=request.service_name, version=request.version, ok=result.ok,
+            pid=result.pid or 0, address=result.address, error_detail=result.error_detail,
+        )
+
+    async def ListRunningInstances(self, request, context=None):  # noqa: N802 - gRPC naming
+        from .generated import supervisor_pb2 as pb
+
+        response = pb.RunningInstancesResponse()
+        for service_name, version, result in self._instances.all():
+            response.instances.append(pb.RunningInstance(
+                service_name=service_name, version=version, ok=result.ok,
+                pid=result.pid or 0, address=result.address,
+            ))
+        return response
 
 
 async def serve(address: str = DEFAULT_ADDRESS, *, install_root: Path | str, specs: dict[str, ServiceSpec]):
