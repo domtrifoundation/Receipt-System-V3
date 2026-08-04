@@ -39,11 +39,24 @@ EXIT_INFECTED = 1
 class ClamAVProvider:
     """The local, subprocess-based default (§5.1)."""
 
-    def __init__(self, *, binary: str | None = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self, *, binary: str | None = None, database_dir: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
         #: An explicit path/name overrides the default search order — a self-hosted install
         #: with `clamscan` somewhere non-standard names it directly rather than this provider
         #: guessing at every possible install location.
         self._binary_override = binary
+        #: `clamscan`'s own default database location sits next to the binary itself
+        #: (`<install_dir>/database` on Windows) — a real, live-found problem on a
+        #: standard Windows install, since that directory is TrustedInstaller/
+        #: Administrators-owned and a normal user account (the account this service
+        #: actually runs as) cannot write `freshclam`'s downloaded definitions there at
+        #: all. `--database=<dir>` lets an operator point this at a location the
+        #: service's own account can actually write to (matching where `freshclam`
+        #: itself was configured to download to), without needing to run either tool
+        #: elevated just to keep virus definitions current.
+        self._database_dir = database_dir
         self._timeout = timeout
 
     @property
@@ -73,14 +86,17 @@ class ClamAVProvider:
                 self.name, ScanOutcome.UNAVAILABLE, detail="clamscan binary not found"
             )
 
+        args = [binary, "--no-summary"]
+        if self._database_dir:
+            args.append(f"--database={self._database_dir}")
+
         with tempfile.NamedTemporaryFile(suffix=".scan") as handle:
             handle.write(content)
             handle.flush()
+            args.append(handle.name)
             try:
                 process = await asyncio.create_subprocess_exec(
-                    binary,
-                    "--no-summary",
-                    handle.name,
+                    *args,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )

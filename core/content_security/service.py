@@ -174,6 +174,7 @@ def serve(address: str = DEFAULT_ADDRESS, *, registry: ProviderRegistry | None =
 
 
 if __name__ == "__main__":  # pragma: no cover
+    import os
     import sys
 
     from .providers.clamav_provider import ClamAVProvider
@@ -186,8 +187,17 @@ if __name__ == "__main__":  # pragma: no cover
     #: §4.4) when `clamscan` isn't on PATH, so registering it unconditionally is safe on a
     #: self-hosted box that doesn't have ClamAV installed — it just changes nothing for that
     #: box, while finally letting the intended default actually take effect where it exists.
+    #:
+    #: `RESIBO_CLAMAV_DATABASE_DIR` overrides `clamscan`'s own baked-in database path —
+    #: real, live-found reason: that default sits next to the binary itself
+    #: (`Program Files\ClamAV\database` on Windows), which is TrustedInstaller/
+    #: Administrators-owned and unwritable by the ordinary account this service actually
+    #: runs as, so `freshclam` has nowhere it can put current definitions without an
+    #: operator explicitly redirecting both tools at a directory the service account owns.
     default_registry = ProviderRegistry()
-    default_registry.register(ClamAVProvider())
+    default_registry.register(
+        ClamAVProvider(database_dir=os.environ.get("RESIBO_CLAMAV_DATABASE_DIR"))
+    )
 
     addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
     srv = serve(addr, registry=default_registry)
