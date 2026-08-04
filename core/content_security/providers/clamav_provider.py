@@ -22,6 +22,7 @@ must never collapse into the same signal.
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import tempfile
 
@@ -90,9 +91,19 @@ class ClamAVProvider:
         if self._database_dir:
             args.append(f"--database={self._database_dir}")
 
-        with tempfile.NamedTemporaryFile(suffix=".scan") as handle:
+        # `delete=False` + closing before `clamscan` ever runs, live-found necessary on
+        # Windows: `NamedTemporaryFile` used as a context manager keeps its own handle
+        # open for the file's entire lifetime, and an open-without-share-read handle on
+        # Windows makes a second process's own attempt to open the same path fail with a
+        # bare `PermissionError` (WinError 32) — confirmed live, every single scan on a
+        # real Windows install failed this way before this fix, unconditionally. POSIX
+        # never had this problem (multiple processes can always open the same path), so
+        # nothing here needed to change on Linux/macOS; the explicit `os.unlink` in
+        # `finally` is what replaces the context manager's own automatic cleanup.
+        handle = tempfile.NamedTemporaryFile(suffix=".scan", delete=False)
+        try:
             handle.write(content)
-            handle.flush()
+            handle.close()
             args.append(handle.name)
             try:
                 process = await asyncio.create_subprocess_exec(
@@ -118,7 +129,9 @@ class ClamAVProvider:
                     detail=f"clamscan timed out after {self._timeout}s",
                 )
 
-        return self._to_result(process.returncode, stdout, stderr)
+            return self._to_result(process.returncode, stdout, stderr)
+        finally:
+            os.unlink(handle.name)
 
     def _to_result(self, returncode: int | None, stdout: bytes, stderr: bytes) -> ProviderScanResult:
         if returncode == EXIT_CLEAN:
