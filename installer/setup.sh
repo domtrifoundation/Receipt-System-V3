@@ -11,6 +11,9 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-INSTALL_ROOT="${1:-$(pwd)/resibo}"
+# The directory this script itself runs from IS the install root -- never a nested
+# subfolder (docs/PRINCIPLES.md §1.6: setup files get cleaned OUT of the top level once
+# finalize() runs, which only works if this script's own directory is that same directory).
+INSTALL_ROOT="${1:-$(pwd)}"
 
 do_bootstrap "false" "$INSTALL_ROOT"

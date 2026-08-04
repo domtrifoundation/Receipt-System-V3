@@ -8,7 +8,8 @@ setlocal
 cd /d "%~dp0"
 
 set "INSTALL_ROOT=%~1"
-if "%INSTALL_ROOT%"=="" set "INSTALL_ROOT=%CD%\resibo"
+REM Same fix as setup.bat's own: this script's own directory IS the install root.
+if "%INSTALL_ROOT%"=="" set "INSTALL_ROOT=%CD%"
 
 call "%~dp0common.bat" :do_bootstrap true "%INSTALL_ROOT%"
 exit /b %errorlevel%

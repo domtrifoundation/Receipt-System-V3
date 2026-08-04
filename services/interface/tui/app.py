@@ -107,3 +107,14 @@ class InterfaceApp(App):
 
 
 __all__ = ["InterfaceApp"]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    # The real, previously-missing thing start.bat/start.sh hands off to. Supervisor's
+    # own __main__ (headless — no textual dependency in its own grpc-only venv) launches
+    # this as a subprocess, using the active clone's own services.interface venv, once
+    # the real fleet boot has already succeeded — matching the deep-dive's own "only once
+    # every service is confirmed healthy does Interface API's loading screen hand off to
+    # the running TUI." boot_specs stays None here on purpose: the fleet is already up by
+    # the time this runs, so the app goes straight to the root menu, never re-booting it.
+    InterfaceApp().run()

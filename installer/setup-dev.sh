@@ -11,6 +11,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-INSTALL_ROOT="${1:-$(pwd)/resibo}"
+# Same fix as setup.sh's own: this script's own directory IS the install root.
+INSTALL_ROOT="${1:-$(pwd)}"
 
 do_bootstrap "true" "$INSTALL_ROOT"

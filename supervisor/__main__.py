@@ -51,6 +51,35 @@ def _terminate_children(pids: list[int]) -> None:
             pass
 
 
+def _launch_tui(clone_dir: Path) -> int:
+    """The real, previously-missing handoff: `v3-deepdive-14-interface-api.md`'s own
+    "only once every service is confirmed healthy does Interface API's loading screen
+    hand off to the running TUI." Runs `services.interface.tui.app` from the active
+    clone's own `services.interface` venv (it needs `textual`, which Supervisor's own
+    grpc-only venv deliberately does not have — the same reasoning
+    `services/setup/bootstrap.py`'s own `wizard_command()` already established for the
+    first-run wizard). Foreground, inherited stdio — this is the actual program the
+    operator is meant to be looking at, not a background service.
+    """
+    import subprocess
+
+    from services.setup.venv_provisioning import VENVS_DIRNAME, venv_python
+
+    interpreter = venv_python(clone_dir / VENVS_DIRNAME / "services.interface")
+    if not interpreter.exists():
+        print(f"services.interface's own venv is missing at {interpreter} — cannot start the TUI.", file=sys.stderr)
+        return 1
+
+    import os
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(clone_dir)
+    result = subprocess.run(
+        [str(interpreter), "-m", "services.interface.tui.app"], cwd=str(clone_dir), env=env,
+    )
+    return result.returncode
+
+
 async def _main() -> int:
     install_root = Path(__file__).resolve().parent.parent
     arbitrator = ChannelArbitrator(install_root)
@@ -84,10 +113,15 @@ async def _main() -> int:
             addresses[result.name] = result.address
             _write_service_addresses(install_root, addresses)
 
-    loop = asyncio.get_running_loop()
-    shutdown_requested = asyncio.Event()
+    # A graceful SIGTERM (`kill`/`taskkill` without `/F`) while blocked on the TUI
+    # subprocess still needs to reach the `finally` cleanup below — cancelling this
+    # coroutine's own task is what gets there, since a default SIGTERM handler would
+    # otherwise terminate the process immediately and skip it entirely. No POSIX
+    # equivalent exists on Windows (`add_signal_handler` raises `NotImplementedError`
+    # there); Windows falls back to `Ctrl+C`'s own `KeyboardInterrupt`, caught the same way.
     if sys.platform != "win32":
-        loop.add_signal_handler(signal.SIGTERM, shutdown_requested.set)
+        main_task = asyncio.current_task()
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, main_task.cancel)
 
     try:
         report = await boot_many(specs, clone_dir, channel=DEFAULT_CHANNEL, on_result=on_result)
@@ -95,19 +129,13 @@ async def _main() -> int:
             print(f"Boot incomplete. Failed: {report.failed_services}", file=sys.stderr)
             return 1
 
-        print("All services up. Press Ctrl+C to stop.")
-        try:
-            if sys.platform != "win32":
-                await shutdown_requested.wait()
-            else:
-                # No SIGTERM support via asyncio on Windows (`add_signal_handler` raises
-                # NotImplementedError there) — Ctrl+C's own KeyboardInterrupt is what
-                # this platform actually gets, caught below same as everywhere else.
-                while True:
-                    await asyncio.sleep(3600)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            pass
-        return 0
+        print("All services up. Starting the TUI...")
+        tui_exit_code = await asyncio.to_thread(_launch_tui, clone_dir)
+        # The TUI closing is the operator closing the program — the fleet shuts down
+        # with it rather than lingering headless. A detachable-client re-attach flow
+        # (start the TUI again against an already-running fleet, without this shutdown)
+        # is real, named future work, not silently assumed solved by this pass.
+        return tui_exit_code
     except (KeyboardInterrupt, asyncio.CancelledError):
         return 0
     finally:
