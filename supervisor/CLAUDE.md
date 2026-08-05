@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.00`
+`a01.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,3 +46,62 @@ No `FrozenDict`-typed field, no GIL-dependent assumption, and no `asyncio` behav
 ## Real gotchas specific to this folder
 
 Structurally neither Layer 1 nor Layer 2 (`docs/PROCESS_TOPOLOGY.md` §1): it lives outside every release clone, permanently, because it is what decides which clone is active and cannot be part of what it launches. Keeping it small is a load-bearing design goal, not tidiness — it is the one component that cannot update itself the way it updates everything else. It launches processes and watches health signals; it has no opinion about what any service does.
+
+**Every file this session was entirely 0-byte scaffolding until this pass.** `contracts.py`, `errors.py`, `arbitration.py`, `boot_sequence.py`, `rollback.py`, `single_instance.py` (§5.4, not in the deep-dive's own §2 layout — real, substantial staged-restart logic that belongs in its own module), `version_pins.py` (§5.2, also not in §2's layout, for the identical reason), `sleep_wake/classification.py`, `sleep_wake/state.py` (live tracking, not in §2's layout — `classification.py` only answers the static policy question), `sleep_wake/socket_activation_linux.py`, `sleep_wake/activation_proxy_windows.py`, `self_update/reexec.py`, plus `supervisor.proto` + `service.py`. 65 tests, all live-confirmed.
+
+**The Boot Sequence health gate is a real gRPC-reachability probe, not a Watchdog kick — a real, named, honest gap.** Watchdog's own `Kick` RPC (`core/health/health.proto`) is real and tested, but **no Core API built this session actually calls it** — none of this repo's ~25 servicers send their own periodic heartbeat to Watchdog. Wiring self-kicks into every Core API is real, separate, substantially larger future work. Until that lands, `wait_until_reachable()` (`boot_sequence.py`) answers "is this service up" the same honest way this session's other servicers answer "is this dependency reachable" — a real `grpc.aio.insecure_channel` + `channel_ready_future` probe, confirmed live against real launched subprocesses. It proves the process accepted a real connection; it does not prove the deeper Watchdog liveness contract the deep-dive's own prose describes.
+
+**A real, live-found bug in `_spawn()`: the launched subprocess must be told which address to bind to.** Every servicer's own `__main__` block accepts an optional address override via `sys.argv[1]` (`core/geo_address/service.py`'s own `addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS`), but the first version of `_spawn()` launched with no argument at all — the subprocess silently bound its own hardcoded `DEFAULT_ADDRESS` instead of `spec.address`, so the health gate waited out its own full timeout probing a port nothing was listening on. Confirmed live before the fix (a real subprocess launched and ran fine, health check still failed) and after (real reachability confirmed in well under a second).
+
+**Isolation for Boot Sequence's own dependency-order failure is fail-closed, matching Migration API's own "a missing step stops the walk."** `boot_many()` stops launching further services the moment one fails, rather than continuing past a dependency gap the rest of the fleet may need — confirmed live: a three-service chain with a broken middle service correctly launches the first, fails the second, and never even attempts the third.
+
+**`GetActiveChannels`-shaped state (`ChannelArbitrator`, `VersionPinStore`) is a small, persisted JSON file each, matching §3.1's own "a small local record (not a full database — this is genuinely simple state)."** Both persist under `<install-root>/supervisor/`, a sibling of every release clone — Supervisor's own permanent top-level home (`docs/PRINCIPLES.md` §1.6).
+
+**The Windows activation proxy (§6.3) is real and live-confirmed on this development machine** — a genuine bidirectional relay, real wake-on-first-connection, real second-connection-skips-wake behaviour. **The Linux systemd path (`socket_activation_linux.py`) is unverified against a real `systemd`** — this development machine is Windows; what is real and tested is the unit-file text generation (pure string formatting) and `is_systemd_available()`'s own live subprocess probe (confirmed correctly reporting unavailable here). The deeper runtime question — whether this project's `grpc.aio.server()` processes accept a passed-in `SD_LISTEN_FDS`-style socket, or whether the simpler `systemd-socket-proxyd` fallback is what a real deployment actually wires in — is flagged honestly as still open, not assumed working.
+
+**§4.2's own named "single most important test in this entire document" is real and passing**: `self_update/reexec.py`'s `update_supervisor()`, given a deliberately broken new build, confirms `handoff` is never called and the failure is reported cleanly — the old Supervisor instance keeps running untouched. Also confirmed: an unconfirmed owner request is refused before the smoke test even runs, and a hanging smoke test times out cleanly without ever handing off.
+
+**`RestartServiceOnVersion`'s own step-1-before-step-2 asymmetry (§5.4, §7's own named testing hook) is confirmed live, not just described**: a target version with no release clone at all, and a target with a release clone but no provisioned venv for the service, both fail at `confirming_target` — before `stopping_old` is ever reached. Step 1's own "health-check-capable" check is honestly narrower than a full launch rehearsal — this codebase has no sandboxed dry-run launch mode, so it treats "the clone directory exists and names a real venv for this service" as the real, checkable proxy, documented as such rather than claimed to be the deeper guarantee.
+
+**`ForceWake`/`PinServiceVersion` are Audit-logged (§11's own resolved "yes" for both) using the exact same gap-shape `core/review_flagging/gateways.py` already documents** — Audit's own closed operation vocabulary does not register Supervisor's own operations yet, so a real call today returns `recorded=False, error_code="UNKNOWN_ACTION"`, surfaced honestly (best-effort, never fails the operation it describes) rather than silently dropped.
+
+**`boot_sequence.py`'s `boot_many()` gained an optional `on_result` callback**, added while building the TUI's own Boot Sequence screen (`services/interface/tui/custom_screens/boot_sequence.py`) — that screen needed real per-service progress as it happens, and `boot_many()` previously only returned once at the very end. Backward-compatible by construction (`on_result: BootProgressCallback | None = None`); a new test (`test_boot_many_calls_on_result_once_per_service_as_it_completes`) confirms it fires once per service with that service's own real result, and the full pre-existing suite stayed green with no changes needed at any other call site.
+
+**The multi-version-per-service architecture is now real, built to the owning
+conversation's own verbatim spec, not the earlier single-version-per-channel model
+alone.** Most services can run several concurrent version instances at once, started
+dynamically on real webapp demand rather than every available version being pre-booted;
+`interface_tui`/`inference` remain the sole single-instance exceptions, restarted in
+place via the pre-existing `single_instance.py` mechanism. Four new pieces, each with
+real, passing tests (`tests/unit/supervisor/test_available_versions.py`,
+`test_instance_registry.py`, `test_dynamic_start.py`, plus new cases in
+`test_service.py`):
+
+- **`available_versions.py`'s `AvailableVersionsStore`** — a genuinely distinct concept
+  from `version_pins.py`'s own `VersionPinStore`: a pin *forces* one version, overriding
+  the channel's normal release; this store tracks the *set* of versions a service is
+  allowed to run concurrently at all. `SINGLE_INSTANCE_SERVICES = frozenset({"interface_tui",
+  "inference"})` is enforced structurally in `set_available()` itself (truncates to the
+  last-requested version), not left to caller discipline.
+- **`instance_registry.py`'s `InstanceRegistry`** — real, in-memory, this-process-lifetime
+  tracking of every running `(service_name, version)` instance, the same scope
+  `sleep_wake/state.py`'s own live tracker already uses (never persisted; a restarted
+  Supervisor re-derives it by nothing being "running" until it launches something again).
+- **`dynamic_start.py`'s `ensure_version_running()`** — the real on-demand launch:
+  returns an already-tracked healthy instance without relaunching, otherwise resolves the
+  requested version's own release clone via `single_instance.find_release_dir_for_version()`
+  (the identical function §5.4's restart already uses, reused rather than reimplemented)
+  and launches for real via `boot_sequence.launch_one()`. Refuses `SINGLE_INSTANCE_SERVICES`
+  outright — those two must go through `restart_service_on_version()` instead.
+- **Four new `supervisor.proto` RPCs** (`SetAvailableVersions`, `ListAvailableVersions`,
+  `StartVersion`, `ListRunningInstances`), wired into `SupervisorServicer`.
+  `StartVersion`'s own `_resolve_spec()` falls back to building the fleet fresh from the
+  active release and matching by name when `self._specs` (often empty — most callers
+  don't pre-build a registry) has nothing registered; a spec resolved against whichever
+  release is currently active is valid for launching *any* version of that same service,
+  since `import_path`/`serve_module` don't change release to release.
+
+**The real "Fleet & Updates" TUI screen is built** (`services/interface/tui/
+custom_screens/fleet_screen.py`, `restart_screen.py`) — see `services/interface/
+CLAUDE.md` for the screen-level details and the Rich-markup square-bracket gotcha found
+while testing it.

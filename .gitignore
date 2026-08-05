@@ -84,6 +84,10 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+# Per-service venvs, created inside each release clone by Setup/Update's own provisioning
+# (docs/VENV_AND_IMPORTS.md §2). A generated build product of the clone, like the webapp
+# bundle — and this repo is itself a clone in developer mode, so it genuinely appears here.
+.venvs/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

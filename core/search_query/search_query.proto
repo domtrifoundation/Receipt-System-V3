@@ -1,0 +1,101 @@
+// Search/Query API gRPC surface (`v3-deepdive-21-search-query-api.md` §6, §8).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// Errors are data, not gRPC status codes (`docs/PRINCIPLES.md` §4.1): every response message
+// carries `error_code`/`error_detail` rather than aborting with a gRPC status, so a client
+// denied a cross-user or cross-group read gets a reason it can show rather than an exception.
+//
+// `requesting_user_id`/`requesting_role` are the authenticated caller, trusted on the wire
+// the same way `LogQueryRequest.requesting_user_id` already is (`core/logs/logs.proto`) —
+// whatever resolved the caller's session upstream is expected to have attached them
+// correctly; this service holds no session concept of its own (`permission_gate.py`).
+
+syntax = "proto3";
+
+package resibo.search_query.v1;
+
+service SearchQueryService {
+  // §4's single-target search: one user's own receipts, or another's with a break-glass
+  // grant or group-manager standing.
+  rpc Search(SearchRequest) returns (SearchResponse);
+  // §4's group-scoped equivalent: every member of one group at once.
+  rpc SearchGroup(GroupSearchRequest) returns (SearchResponse);
+  // §8's resolved open question: grouped/faceted totals, sharing this surface's own
+  // permission and scoping model rather than a second, parallel query mechanism.
+  rpc Aggregate(AggregateRequest) returns (AggregateResponse);
+}
+
+message SearchRequest {
+  string query_text = 1;
+  // The subject whose receipts are wanted.
+  string target_user_id = 2;
+  string date_from = 3;               // RFC 3339, empty for unbounded
+  string date_to = 4;                 // RFC 3339, empty for unbounded
+  float amount_min = 5;                // 0 means unset; a genuine 0 floor is not distinguishable
+  float amount_max = 6;                // from "unset" on the wire today — see this package's
+                                       // own CLAUDE.md for why that is an accepted limitation.
+  // Added after the §6 sketch; every field below is additive and optional.
+  string vendor_name = 7;
+  int32 limit = 8;                    // 0 defers to the server default
+  string requesting_user_id = 9;
+  string requesting_role = 10;        // "owner" | "staff" | "client"
+}
+
+message GroupSearchRequest {
+  string group_id = 1;
+  string query_text = 2;
+  string vendor_name = 3;
+  string date_from = 4;
+  string date_to = 5;
+  float amount_min = 6;
+  float amount_max = 7;
+  int32 limit = 8;
+  string requesting_user_id = 9;
+  string requesting_role = 10;
+}
+
+message SearchResultEntry {
+  string receipt_id = 1;
+  string user_id = 2;
+  string vendor_name = 3;
+  string transaction_date = 4;        // RFC 3339, empty when unset
+  string total_amount = 5;            // decimal text, empty when unset — never a float,
+                                       // the same reasoning Persistence's own wire mapping uses
+  string currency = 6;
+  string fields_json = 7;
+}
+
+message SearchResponse {
+  repeated SearchResultEntry results = 1;
+  bool truncated = 2;
+  // True when a `query_text` was supplied but FTS5 could not be used against at least one
+  // queried database — structured filters still ran (`docs/PRINCIPLES.md` §4.4).
+  bool fts_degraded = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message AggregateRequest {
+  // Exactly one of target_user_id/group_id is set — both or neither is INVALID_QUERY.
+  string target_user_id = 1;
+  string group_id = 2;
+  string date_from = 3;
+  string date_to = 4;
+  string requesting_user_id = 5;
+  string requesting_role = 6;
+}
+
+message AggregateBucketEntry {
+  string vendor_name = 1;
+  int32 receipt_count = 2;
+  string total_amount = 3;            // decimal text, never a float
+}
+
+message AggregateResponse {
+  repeated AggregateBucketEntry buckets = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}

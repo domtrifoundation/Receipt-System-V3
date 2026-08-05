@@ -1,0 +1,65 @@
+// Billing & Subscription API gRPC surface (`v3-deepdive-22-billing-subscription-api.md` §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+//
+// This surface only ever tracks *which tier* a subscription is paying for and reports that
+// fact (§1's own boundary) — it never executes a charge, transfer, or refund itself; that is
+// each PSP provider's own job behind `psp/base.py`'s Provider Registry, driven by
+// `ProrationOutcome`'s signed amount, which this surface does not yet expose as its own RPC
+// (`change_tier` is not part of the deep-dive's own four-RPC sketch).
+
+syntax = "proto3";
+
+package resibo.billing.v1;
+
+service BillingService {
+  rpc CreateSubscription(CreateSubRequest) returns (SubscriptionResponse);
+  rpc CancelSubscription(CancelSubRequest) returns (SubscriptionResponse);
+  rpc GetSubscriptionStatus(StatusRequest) returns (SubscriptionResponse);
+  rpc HandleWebhook(WebhookPayload) returns (WebhookAck);
+}
+
+message SubscriptionInfo {
+  string subscription_id = 1;
+  string user_id = 2;
+  string tier = 3;
+  string status = 4;               // "active" | "past_due" | "cancelled" | "pending_deletion_hold"
+  string current_period_end = 5;   // RFC 3339, empty when unset
+  string created_at = 6;           // RFC 3339
+  string updated_at = 7;           // RFC 3339
+}
+
+message CreateSubRequest {
+  string user_id = 1;
+  string tier = 2;
+}
+
+message CancelSubRequest {
+  string subscription_id = 1;
+}
+
+message StatusRequest {
+  string subscription_id = 1;
+}
+
+message SubscriptionResponse {
+  SubscriptionInfo subscription = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message WebhookPayload {
+  bytes payload = 1;
+  string signature = 2;
+}
+
+message WebhookAck {
+  bool accepted = 1;
+  bool verified = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}

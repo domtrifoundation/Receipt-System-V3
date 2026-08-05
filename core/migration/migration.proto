@@ -1,0 +1,59 @@
+// Migration API gRPC surface (`v3-deepdive-23-migration-api.md` §7).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+
+syntax = "proto3";
+
+package resibo.migration.v1;
+
+service MigrationService {
+  rpc RunMigration(MigrationRequest) returns (MigrationResponse);
+  rpc GetCurrentVersion(VersionRequest) returns (VersionResponse);
+}
+
+message StepResultInfo {
+  string kind = 1;
+  int32 from_version = 2;
+  int32 to_version = 3;
+  string description = 4;
+  string outcome = 5;             // "applied" | "already_applied" | "failed"
+  string started_at = 6;          // RFC 3339
+  string finished_at = 7;         // RFC 3339
+  string error_code = 8;
+  string error_detail = 9;
+}
+
+message MigrationRequest {
+  string structure_id = 1;
+  string kind = 2;                 // "database_schema" | "config" | "vendor_data"
+  int32 current_version = 3;
+  // 0 means "this build's own current version for that kind" (`CURRENT_VERSIONS`) — the
+  // ordinary case; a caller supplying a specific positive value overrides it.
+  int32 target_version = 4;
+}
+
+message MigrationResponse {
+  string structure_id = 1;
+  string kind = 2;
+  int32 from_version = 3;
+  int32 reached_version = 4;
+  int32 target_version = 5;
+  repeated StepResultInfo steps = 6;
+  string error_code = 7;
+  string error_detail = 8;
+}
+
+message VersionRequest {
+  string kind = 1;                 // "database_schema" | "config" | "vendor_data"
+}
+
+message VersionResponse {
+  string kind = 1;
+  int32 current_version = 2;       // this build's own CURRENT_VERSIONS[kind]
+  string error_code = 3;
+  string error_detail = 4;
+}

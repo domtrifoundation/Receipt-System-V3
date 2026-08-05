@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.02`
+`a01.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,3 +46,24 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 This is the one deliberate exception to errors-as-data (`docs/PRINCIPLES.md` §4.1): session/role failures raise and stop, because a caller silently ignoring an auth failure is worse than one ignoring a business error. **No local password authentication exists anywhere in this design, under any circumstance** — four passwordless primary methods plus composable 2FA. A PR adding a password field is wrong before it is reviewed.
+
+**Real, persisted `tenancy_mode` config — `GetTenancyMode`/`SetTenancyMode`, added for the
+TUI's own Settings screen.** A genuine, previously-live-found gap: `resolve_profile(None)`
+was called unconditionally in this file's own `__main__`, so a real running Auth process
+*always* came up in `"multi"` mode regardless of anything a wizard or an owner had ever
+set — there was no persistence at all behind `settings.py`'s own `"Set once during
+first-run setup"` tooltip. Fixed with `<install_root>/auth/config.json`
+(`common/local_config_store.LocalConfigStore`, the same lightweight-per-API-JSON pattern
+`supervisor/arbitration.py`'s `ChannelArbitrator` established) and `common/install_paths.
+resolve_install_root()` (new — every service launched by Boot Sequence runs with `cwd` set
+to its own release clone, not the install root, so there was never a shared, honest way to
+compute it; this walks up from the caller's own file path looking for a `releases`-named
+ancestor, degrading to `None` in a dev checkout).
+
+**`SetTenancyMode` is honest about not being a live toggle.** `self._profile` and every
+collaborator wired from it (`LoginFlow`, `StepUpFlow`, `TwoFactorGate`) are constructed
+once at process start and never re-read this file — a `SetTenancyMode` call persists the
+new value and reports `takes_effect_on_restart=true` rather than implying an immediate
+change that doesn't actually happen. `GetTenancyMode` always reads the persisted file
+directly (never `self._profile`), so it reflects the real current-on-disk value even
+between a `Set` call and the next restart.

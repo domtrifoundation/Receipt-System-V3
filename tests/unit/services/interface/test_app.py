@@ -1,0 +1,158 @@
+"""`InterfaceApp` — real Textual `Pilot`-driven tests, never a mocked screen tree. Boot
+tests launch a genuine `core/geo_address/service.py` subprocess via `boot_many()`, same as
+Supervisor's own tests.
+
+Plain `asyncio.run()` wrapping, matching this repo's own convention (`tests/unit/
+supervisor/conftest.py`'s `run()`) rather than adding a `pytest-asyncio` dependency for
+one test file.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import signal
+import socket
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("textual", reason="textual is not installed in this interpreter")
+
+from services.interface.tui.app import InterfaceApp  # noqa: E402
+from services.interface.tui.custom_screens.credits import CreditsScreen  # noqa: E402
+from services.interface.tui.custom_screens.monitor_screen import MonitorScreen  # noqa: E402
+from services.interface.tui.menu_screen import MenuScreen  # noqa: E402
+from supervisor.arbitration import ChannelArbitrator  # noqa: E402
+from supervisor.contracts import ServiceSpec  # noqa: E402
+from supervisor.service import serve as supervisor_serve  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_launch_without_boot_specs_goes_straight_to_the_monitor_screen():
+    """The real landing screen is now the Monitor dashboard, not the root menu — the
+    explicit operator requirement that the first thing shown is a live view of the whole
+    program's workings, not a bare list of labeled actions."""
+
+    async def scenario():
+        app = InterfaceApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert isinstance(app.screen, MonitorScreen)
+
+    run(scenario())
+
+
+def test_pressing_m_from_the_monitor_screen_opens_the_root_menu():
+    async def scenario():
+        app = InterfaceApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            assert isinstance(app.screen, MenuScreen)
+
+    run(scenario())
+
+
+def test_selecting_credits_pushes_the_real_credits_screen():
+    async def scenario():
+        app = InterfaceApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            list_view = app.screen.query_one("#menu-list")
+            credits_index = next(i for i, item in enumerate(list_view.children) if item.id == "item-credits")
+            list_view.index = credits_index
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, CreditsScreen)
+
+    run(scenario())
+
+
+def test_selecting_an_unbuilt_custom_screen_reports_honestly_rather_than_crashing():
+    async def scenario():
+        app = InterfaceApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            list_view = app.screen.query_one("#menu-list")
+            target_index = next(i for i, item in enumerate(list_view.children) if item.id == "item-staff_audit_queue")
+            list_view.index = target_index
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            tooltip = app.screen.query_one("#menu-tooltip")
+            assert "isn't built yet" in str(tooltip.render())
+
+    run(scenario())
+
+
+def test_settings_submenu_navigates_and_back_returns_to_root():
+    async def scenario():
+        app = InterfaceApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            list_view = app.screen.query_one("#menu-list")
+            list_view.index = next(i for i, item in enumerate(list_view.children) if item.id == "item-settings")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, MenuScreen)
+            assert app.screen._title == "Settings"
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.screen._title != "Settings"
+
+    run(scenario())
+
+
+def test_boot_sequence_screen_streams_a_real_boot_from_a_real_supervisor(tmp_path, monkeypatch):
+    """The real, corrected architecture end to end: a genuine `SupervisorServicer` boots
+    a real service and streams the result over `StreamBootProgress`; `InterfaceApp` is a
+    pure display client of that stream, never calling `boot_many()` itself."""
+    spec = ServiceSpec(
+        name="geo_address", import_path="core.geo_address", serve_module="core.geo_address.service",
+        address=f"127.0.0.1:{_free_port()}",
+    )
+    monkeypatch.setattr("supervisor.fleet.build_fleet_specs", lambda clone_dir: (spec,))
+
+    async def scenario():
+        arbitrator = ChannelArbitrator(tmp_path)
+        arbitrator.set_active("local", REPO_ROOT)
+        server = await supervisor_serve("127.0.0.1:0", install_root=tmp_path, specs={})
+        try:
+            app = InterfaceApp(supervisor_address=server.bound_address, channel="local")
+            async with app.run_test() as pilot:
+                for _ in range(60):
+                    await pilot.pause(0.5)
+                    if isinstance(app.screen, MonitorScreen):
+                        break
+                assert isinstance(app.screen, MonitorScreen)
+        finally:
+            for pid in server.servicer.spawned_pids:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+            await server.stop(grace=1.0)
+
+    run(scenario())

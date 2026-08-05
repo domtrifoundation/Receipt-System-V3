@@ -1,0 +1,6 @@
+# Third-party runtime dependencies beyond `common/requirements.txt`.
+
+# --- Fuzzy matching ----------------------------------------------------------
+# Imported at module scope in this package (not lazily), so it is a hard runtime requirement
+# here rather than a degrade-to-unavailable optional: this package fails to import without it.
+rapidfuzz>=3.0

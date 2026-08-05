@@ -16,7 +16,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -42,7 +42,20 @@ valid the moment it is removed, and this file is what future sessions will have 
 
 ## Forward-Compatibility Pattern applicability
 
-No `FrozenDict`-typed field, no GIL-dependent assumption, and no `asyncio` behaviour that has changed across 3.14/3.15/3.16 in this folder as designed (`docs/PRINCIPLES.md` §3.3.1). Re-check this line in the same PR that adds one — a stale "not applicable" is the specific drift the guide's §6 warns about.
+**Yes — this line changed when the implementation landed, and this is the PR that changed it.**
+It previously read "not applicable" because the folder was scaffolding. It has a `FrozenDict`-typed
+field now: `WatchdogConfig.per_service_timeouts`, which is how §10's resolved open question
+(a global default plus real per-service overrides, since Inference's model-load cycle is
+genuinely longer than a lightweight API's heartbeat) is carried. `timeout_detector.resolve_timeout`
+reads it through `.get` and never through `isinstance(x, dict)` — on 3.15 the builtin
+`frozendict` is not a `dict` subclass, so such a check silently returns False and hands every
+service the global default while appearing to honour the override
+(`docs/PRINCIPLES.md` §2.1, §2.1.1). `tests/unit/core/health/test_contracts.py` carries the
+`@pytest.mark.forward_compat` assertion for it.
+
+`KickRegistry`'s own map is genuinely mutable internal state, which §2.1.1 does not reach, and
+is guarded by a real lock rather than relying on the GIL making `dict` mutation atomic — this
+project targets free-threaded 3.14t, where that assumption does not hold (§3.3.1).
 
 ## Real gotchas specific to this folder
 

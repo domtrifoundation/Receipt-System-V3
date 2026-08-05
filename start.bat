@@ -1,24 +1,18 @@
 @echo off
-REM Manual runtime launcher — see start.sh for the full reasoning (identical here, this is
-REM its Windows counterpart). Short version: in its final, shipped form this hands off to
-REM Supervisor's own Boot Sequence, which isn't real code yet; the one thing that genuinely
-REM runs today is Agent Control's gRPC service, so that's what this launches for now.
-REM
-REM PYTHON_BIN — the interpreter this launches under. Unset on every real end-user install,
-REM always (Setup API's own environment detection picks the interpreter there, never this
-REM variable). Set it here, in a dev checkout, to hands-on test against a non-default
-REM interpreter — e.g. Python 3.15 ahead of a Forward-Compatibility Pattern review
-REM (docs/PRINCIPLES.md §3.3.1), separately from noxfile.py's automated `forward_compat` gate.
-REM
-REM   start.bat                                   :: default pinned interpreter
-REM   set PYTHON_BIN=py -3.15 ^&^& start.bat        :: the whole system running under 3.15
-REM
-REM The Windows `py` launcher (not a bare `python3.15` command) is the standard way to
-REM select a specific installed version here — set PYTHON_BIN to "py -3.15", not "python3.15".
+REM Manual runtime launcher. Hands off to Supervisor's own real fleet-boot entrypoint
+REM (supervisor/__main__.py), run from Supervisor's own top-level install
+REM (supervisor/install.py's install_supervisor() -- this directory's supervisor\ folder
+REM is a real, permanent copy, never inside a release clone, per docs/PRINCIPLES.md
+REM section 1.6). Supervisor's own venv (supervisor\.venv\) is separate from every
+REM service's -- it only needs grpc, never a clone's full dependency set.
 
 setlocal
 cd /d "%~dp0"
 
-if not defined PYTHON_BIN set "PYTHON_BIN=python"
+set "SUP_PY=%~dp0supervisor\.venv\Scripts\python.exe"
+if not exist "%SUP_PY%" (
+    echo Supervisor's own venv is missing at supervisor\.venv\ -- run setup first.
+    exit /b 1
+)
 
-%PYTHON_BIN% -m core.agent_control.service %*
+"%SUP_PY%" -m supervisor %*

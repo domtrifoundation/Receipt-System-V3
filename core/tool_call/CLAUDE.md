@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,3 +46,95 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 V2's propose-then-confirm pattern for mutating tools is deliberately *not* carried forward (`docs/MAINTENANCE.md` §4): V3 has no interactive chat surface during automated processing, so there is no live user to confirm with. Safety comes from *which* tools are offered — only ones staging into an existing review gate — not from a confirmation step with nothing to confirm against. The `DEV_OBSERVABILITY` category is defined here and consumed by Agent Control; it is not Agent Control's own private category.
+
+**`ToolContext` carries no `role` field, and that absence is the guarantee.** Permission
+resolution happens server-side from the caller's session through Auth & Tenancy; a `role` field
+on the context would be a caller-asserted role, and the gate would be checking the caller's own
+claim about itself. `session_id` is an addition beyond the deep-dive's own §5 sketch for exactly
+this reason — a session is the one thing Auth can resolve a real `Role` from.
+
+**The two gates are independent and both must pass, in this order**: the calling-context gate
+first (`CALLING_API_ALLOWED_CATEGORIES`), then the role gate (`CATEGORY_ALLOWED_ROLES`). The
+order is asserted in the tests, not incidental — if the role gate ran first, an owner-role
+reconciliation run denied a `TEST_EXECUTION` tool would get `PERMISSION_DENIED`, implying the
+right role would unlock it. `CONTEXT_NOT_ENABLED` says the correct thing instead: this surface
+does not offer that tool at all, to anyone.
+
+**Everything unresolvable is a denial.** A resolver that raises (Auth unreachable), a resolver
+that returns `None`, an availability check that throws, an unknown `calling_api` — all four
+deny (`docs/PRINCIPLES.md` §4.2). The default resolver, `deny_all_permissions`, denies
+unconditionally, so a caller that forgets to wire Auth in gets a closed gate rather than a
+silently permissive one.
+
+**`MUTATING_DIRECT` deliberately does not exist as a category.** §4 of the deep-dive is
+structural about this: an unattended pipeline has no confirmation mechanism to gate such a tool
+*with*, so an ungated mutation is simply never on the menu rather than existing-but-restricted.
+A test asserts the enum's exact membership so adding one has to be deliberate.
+
+**A denied privileged attempt is audited, not just a successful one.** An audit trail showing
+only what succeeded cannot answer "did something try", which is where an investigation starts.
+This is why `dispatch` looks the entry up once *before* the enforcement gate — so a refused
+`MUTATING_STAGED` call still has a known category to record against.
+
+**Files here that the deep-dive's §2 package layout does not list**, added with reasons:
+- `metrics.py` — listed in the layout but with no design behind it; the counters are shaped to
+  make one specific degradation visible: a gap between privileged `invocations_total` and
+  `audit_records_written` is the operator-facing signal that the audit sink is failing, since
+  an audit-sink outage must not corrupt a tool result already computed (§4.4) and therefore
+  cannot announce itself by failing the call.
+
+**The conflict this section used to describe is now resolved, deliberately, and the same
+decision covers `core/background_workers/CLAUDE.md`'s identical question.**
+`docs/PROCESS_TOPOLOGY.md` wins — every Core API gets a real gRPC surface. Unlike Background
+Workers' own scheduled, in-process job handlers, this API's registered tools are exactly the
+kind of thing a *different* process genuinely needs to invoke remotely: the deep-dive's own
+§3.3 names Inference API's own agentic tool-calling loop as the caller, "consuming this
+registry's manifest to build a constrained-decoding grammar and receiving back which tool the
+model chose." So `tool_call.proto` exposes real dispatch, not just observability —
+`ListTools` for the manifest (filtered to exactly what a `calling_api` is enabled for AND the
+resolved caller's role covers — the same two independent gates `registry.ToolRegistry.check()`
+already enforced at dispatch time), `DispatchTool` routing through that identical `check()`
+gate and `dispatch.dispatch()` pipeline (permission, availability, timeout, audit).
+`GrpcPermissionResolver` (`service.py`) is a real, synchronous client against Auth's
+`ValidateSession` — synchronous because `registry.PermissionResolver`'s own type is a plain
+callable, not a coroutine function.
+
+**Every module in `tools/*.py` was also a 0-byte scaffold until this session — the actual,
+larger gap underneath the wire-contract question.** `registry.py`'s enforcement pipeline and
+`dispatch.py`'s full audit/timeout/error-conversion logic were real and independently tested,
+but there was nothing to register: no tool the deep-dive's own §2 package layout named had a
+single line of logic in it. All five now do:
+
+- `geo_tools.py`'s `geocode_place` — `READ_ONLY`, a thin wrapper over Geo/Address's real
+  `Geocode` RPC, gated by a live reachability probe (§3.3's "only offer the tool if a
+  provider is actually configured" pattern, applied literally rather than assumed).
+- `vendor_tools.py`'s `lookup_vendor_canon` (`READ_ONLY`) and `remember_vendor`
+  (`MUTATING_STAGED`) — wrap Architect's real `SearchVendorDirectory`/`SubmitContribution`
+  RPCs (built this same session). `remember_vendor` self-applies during automated processing
+  precisely because it stages into Architect's own moderation queue, never a live
+  confirmation — confirmed live: a real contribution submitted, correctly `pending` and
+  unmerged, through a real running `ArchitectServicer`.
+- `query_tools.py`'s `persistence_query` — `READ_ONLY`, wraps Search/Query's real `Search`
+  RPC, scoped to the calling user's own receipts. The V3 replacement for V2's `excel_query`
+  (§3.2) — there is no live, directly-queryable workbook in this system at all.
+- `persistence_write_tools.py`'s `persistence_write_field` — `MUTATING_STAGED`, a real
+  read-modify-write over Persistence's `GetReceipt`/`SaveReceipt` (the same composition
+  `core/review_flagging/gateways.py::GrpcPersistenceWriteGateway` already uses, since
+  `persistence.proto` still has no dedicated field-level `ApplyEdit` RPC). §9's own resolved
+  scope — "a narrower, explicitly-enumerated set of writable fields, even within
+  `MUTATING_STAGED`" — is `WRITABLE_FIELDS`, a real, checked allowlist, not a comment.
+  Confirmed live: a real receipt field written through a real running
+  `PersistenceGrpcServicer`, and Historian-logged (`historian_event_id` populated) exactly
+  as any other write is.
+- `settings_tools.py` registers **nothing**, and that is §9's own resolved conclusion, not an
+  unfinished file: "Whether any settings-change tool is needed during automated processing at
+  all, resolved: no, not in the initial design ... not built speculatively now."
+  `register_settings_tools` is a real, callable no-op so `service.py`'s assembly needs no
+  special case, matching `core/migration/steps/`'s own deliberately-empty registration point.
+
+**A real synchronous-vs-async deadlock was found and fixed while testing this** — calling a
+tool handler's synchronous `grpc.insecure_channel` call directly from the same event loop a
+`grpc.aio` test server is running on blocks that loop and the RPC never completes. This is
+exactly why `dispatch.py`'s own design runs every handler on a `ThreadPoolExecutor` future
+rather than calling it inline, and why `service.py`'s `DispatchTool` RPC wraps its own call to
+`dispatch()` in `asyncio.to_thread` — the identical fix, applied one level up.

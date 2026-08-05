@@ -1,0 +1,9 @@
+# Interface API's own dependencies, on top of common/requirements.txt's shared base
+# (venv_provisioning.py's own two-file discovery — see docs/VENV_AND_IMPORTS.md §4).
+
+# --- TUI (v3-deepdive-14-interface-api.md §7) --------------------------------
+# asyncio-native by construction; the admin/status console and the first-run wizard
+# screen are both built on it. This is the venv bootstrap.py's own finalize routine
+# re-execs into to run the interactive wizard, since the bootstrap script itself runs
+# under the bare pinned interpreter, before any service venv exists.
+textual>=0.60

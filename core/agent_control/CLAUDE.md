@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.00`
+`a01.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -58,3 +58,24 @@ This is the one API implemented for real in Phase 1 rather than scaffolded — i
 - `store.py` — SQLite for tokens, the agent audit trail, and rate counters. **This is a bounded exception to "only Persistence touches disk"**, taken because Agent Control is implemented before Persistence exists. It holds no receipt or user business data and lives in the top-level install directory, never the repo. When Persistence and Audit exist, the audit half moves to Audit API's own append-only log and this file keeps only the token table.
 
 **Unavailable callees return `CoreUnavailable`, never plausible-looking data.** A fabricated health report or invented run status is worse than an error, because an agent will reason from it. Preserve that when filling the backends in.
+
+**`dev_token_gateway.py` — the real answer to "how does a fully-AI developer, with no
+human ever in the loop, get MCP access from a fresh install."** This project's own rule
+(above) is that a token is always issued by a real human — correct for a human-operated
+install, where the whole premise of a human sitting there means MCP would not typically
+even be used. It does not fit an unattended AI-developer install, where there is no human
+to click anything, ever. `AgentControlDevTokenGateway` implements
+`services/setup/contracts.py`'s `AgentTokenSeedGateway` Protocol, called only from
+`services/setup/dev_fixtures.py`'s `seed_dev_environment()` when a caller explicitly
+supplies it — never automatically. The authorizing human act is running `setup-dev`
+itself (the same reasoning the deep-dive's §4.1 already uses for silently creating the
+implicit-owner account in dev mode); `issued_by="setup-dev-bootstrap"` names that decision
+honestly rather than attributing it to an invented person. The issued token is `staff`-role
+(never `owner`, §3.1's ceiling still applies), scoped to `read_only`/`mutating_staged`/
+`dev_observability` — never `test_execution`, which kills processes and wipes test
+tenants — and its plaintext is written to `<install_root>/config/dev_agent_token.txt`
+rather than shown once through a UI, since there is no human present to show it to.
+
+**This is documented explicitly for the AI-developer-only track this project is headed
+toward once Zircon ships** (see `docs/MAINTENANCE.md`'s own "AI-developer installs" note)
+— a future session picking up that track should start here, not reinvent this seam.

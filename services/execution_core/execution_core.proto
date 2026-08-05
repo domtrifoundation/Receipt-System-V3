@@ -1,0 +1,139 @@
+// Execution Core gRPC surface (`v3-deepdive-10-execution-core-api.md` §11).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated in
+// a comment; its number is never reused.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair. Execution Core has no equivalent of Auth's raise-loudly
+// carve-out — nothing here is a security decision, and a rejected state transition ("you
+// cannot pause a run that already shut down") is information the caller needs, not a crash.
+//
+// `state` is a string rather than a proto enum, matching §11's own sketch. That is a
+// deliberate cost: a proto enum would be validated on the wire, but it would also make
+// `RunState.RUNNING` — which §3 keeps in the Python enum purely for compatibility and which
+// `state_machine.ALLOWED_TRANSITIONS` gives no inbound edge — into a value the wire says is
+// legitimate. The string keeps the wire honest about what it is: a report of a state, checked
+// against `ASSIGNABLE_STATES` on the way in.
+
+syntax = "proto3";
+
+package resibo.execution_core.v1;
+
+service ExecutionCoreService {
+  // Triggered by direct upload, scanner finalize, or a webhook-driven event (§11). The run
+  // this returns may be an existing OPEN run rather than a new one — §5.2's debounce coalescer
+  // decides, and `started_new_run` reports which happened.
+  rpc StartRun(StartRunRequest) returns (RunResponse);
+
+  // Server-streaming, and that is the point (§11): it is the direct answer to V2's "results
+  // only show at end of run" bug. A unary call here would reproduce the exact defect the
+  // choice of gRPC was made to fix.
+  rpc GetRunStatus(RunStatusRequest) returns (stream RunProgress);
+
+  // §8's fine-grained cancellation. Takes effect within one receipt's processing time because
+  // `pipeline.process_run` checks the signal at the top of every receipt, not once per run.
+  rpc CancelRun(CancelRunRequest) returns (RunResponse);
+
+  // §14 resolved who may call this: a client can pause their own run; owner/staff can pause
+  // any run. The role check for the broader case is Auth's, not this API's.
+  rpc PauseRun(PauseRunRequest) returns (RunResponse);
+
+  // Real per-receipt processing, added post-§11 to close a genuine, previously-confirmed
+  // gap: StartRun only ever tracked run metadata (debounce coalescing, state) -- nothing
+  // anywhere constructed a real ReceiptWork and called pipeline.process_receipt. This is
+  // the actual trigger a caller (Ingestion, after normalizing an upload) uses to run one
+  // receipt through Preprocessing -> OCR -> Persistence for real
+  // (`receipt_orchestration.py`'s own docstring states plainly which stages are wired and
+  // which are not yet).
+  rpc SubmitReceipt(SubmitReceiptRequest) returns (SubmitReceiptResponse);
+  rpc ListActiveRuns(ListActiveRunsRequest) returns (ListActiveRunsResponse);
+}
+
+message SubmitReceiptRequest {
+  string run_id = 1;
+  string user_id = 2;
+  string receipt_id = 3;
+  string source_blob_ref = 4;
+  string content_hash = 5;
+  // "preprocessed" (default, empty also means this) -- OCR reads the rasterized bitmap,
+  // correct for a photographed/scanned upload. "source" -- OCR reads source_blob_ref
+  // directly, correct for a digital PDF whose own embedded text layer rasterizing first
+  // would destroy (`receipt_orchestration.py`'s own docstring has the full explanation).
+  string ocr_source = 6;
+  // Empty means "every enabled engine" -- OCR's real multi-engine corroboration default.
+  // A caller pins specific engines only when it has a real reason to (a known-digital
+  // PDF wanting text_layer specifically, a test wanting deterministic, fast results).
+  repeated string ocr_engines = 7;
+}
+
+// Real, previously-missing enumeration -- `GetRunStatus` requires already knowing a
+// run_id, and nothing exposed the actual set of runs this process knows about. The real
+// gap behind the TUI's own Run Monitor screen never being buildable at all.
+message ListActiveRunsRequest {
+  string user_id = 1;   // empty means "every user's runs" (owner/staff view)
+}
+
+message ListActiveRunsResponse {
+  repeated Run runs = 1;
+}
+
+message SubmitReceiptResponse {
+  string receipt_id = 1;
+  string reached_stage = 2;   // ReceiptStage value the receipt actually reached
+  string outcome = 3;         // StageOutcome value -- "completed" | "failed" | "escalated" | ...
+  string persisted_receipt_id = 4;   // set when reached_stage == "written" and outcome == "completed"
+  string error_code = 5;
+  string error_detail = 6;
+}
+
+message StartRunRequest {
+  string user_id = 1;
+  // How many files this trigger brought. §5.2 coalesces triggers into runs; the caller does
+  // not choose the run id, because choosing it is what the coalescer is for.
+  int32 file_count = 2;
+}
+
+message RunStatusRequest {
+  string run_id = 1;
+}
+
+message CancelRunRequest {
+  string run_id = 1;
+}
+
+message PauseRunRequest {
+  string run_id = 1;
+}
+
+message Run {
+  string run_id = 1;
+  string user_id = 2;
+  // waiting_for_trigger | open | closing | paused | shutting_down. Never "running" — §3.
+  string state = 3;
+  // RFC 3339. A string rather than google.protobuf.Timestamp to avoid a well-known-type
+  // dependency for a field only ever displayed or compared, matching every other .proto here.
+  string opened_at = 4;
+  string closing_started_at = 5;
+  int32 receipt_count = 6;
+}
+
+message RunResponse {
+  Run run = 1;
+  // True when this trigger opened a new run rather than joining an open one (§5.2). A caller
+  // that batched files across the ceiling needs to know its files landed in two runs.
+  bool started_new_run = 2;
+  string error_code = 3;
+  string error_detail = 4;
+}
+
+message RunProgress {
+  string run_id = 1;
+  string state = 2;
+  int32 receipts_total = 3;
+  int32 receipts_completed = 4;
+  // e.g. "12 of 40 receipts at OCR stage"
+  string current_stage_summary = 5;
+  string error_code = 6;
+  string error_detail = 7;
+}

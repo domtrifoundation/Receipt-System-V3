@@ -1,0 +1,124 @@
+// Telemetrees API gRPC surface (`v3-deepdive-28-telemetrees-api.md` §6).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+
+syntax = "proto3";
+
+package resibo.telemetrees.v1;
+
+service TelemetreesService {
+  rpc GetTrackedDependencies(TrackedDepsRequest) returns (TrackedDepsResponse);
+  rpc GetChangelog(ChangelogRequest) returns (ChangelogResponse);
+
+  // Real, persisted opt-in flag, added post-§6 for the TUI's own Settings screen
+  // (`services/interface/tui/menu_data/settings.py`'s `telemetrees_opt_in`). Off by
+  // default -- data only ever leaves the install when explicitly turned on.
+  rpc GetOptIn(OptInConfigRequest) returns (OptInResponse);
+  rpc SetOptIn(SetOptInRequest) returns (OptInResponse);
+
+  // Real filed-issue tracking, added for the TUI's own "what has this install reported
+  // to the developers, and what's its status" screen. `RecordFiledIssue` is the seam a
+  // future bug-detector calls once it exists (`core/telemetrees/diagnostics/contracts.py`'s
+  // own docstring is explicit that no such detector exists yet -- this ledger and status
+  // lookup are real, but nothing in this codebase currently calls RecordFiledIssue).
+  // `ListFiledIssues` does a real, live GitHub status check per record.
+  rpc RecordFiledIssue(RecordFiledIssueRequest) returns (RecordFiledIssueResponse);
+  rpc ListFiledIssues(ListFiledIssuesRequest) returns (ListFiledIssuesResponse);
+
+  // Real, live detection -> dedup -> GitHub-App-authenticated filing pipeline
+  // (`diagnostics/detector.py`'s own docstring has the full account, including which
+  // signal sources are wired -- Watchdog's silent-service detection -- and which
+  // aren't yet). Real and callable, not yet invoked on a timer by anything.
+  rpc DetectAndFileIssues(DetectAndFileIssuesRequest) returns (DetectAndFileIssuesResponse);
+}
+
+message DetectAndFileIssuesRequest {
+  string install_root = 1;
+  string health_address = 2;
+}
+
+message DetectAndFileIssuesResponse {
+  repeated FiledIssueStatus filed = 1;
+  bool known = 2;   // false when install_root is unknown
+}
+
+message RecordFiledIssueRequest {
+  string install_root = 1;
+  string fingerprint = 2;
+  int32 issue_number = 3;
+  string url = 4;
+  string title = 5;
+}
+
+message RecordFiledIssueResponse {
+  bool known = 1;   // false when install_root is unknown
+}
+
+message ListFiledIssuesRequest {
+  string install_root = 1;
+}
+
+message FiledIssueStatus {
+  int32 issue_number = 1;
+  string title = 2;
+  string url = 3;
+  string filed_at = 4;          // RFC 3339
+  string state = 5;             // "open" | "closed" | "" (unknown, see error_detail)
+  repeated int32 linked_pr_numbers = 6;
+  string checked_at = 7;        // RFC 3339, when this live status was fetched
+  string error_detail = 8;      // non-empty when the live GitHub lookup itself failed
+}
+
+message ListFiledIssuesResponse {
+  repeated FiledIssueStatus issues = 1;
+  bool known = 2;   // false when install_root is unknown
+}
+
+message OptInConfigRequest {
+  string install_root = 1;   // empty means "resolve from this process's own file location"
+}
+
+message OptInResponse {
+  bool opt_in = 1;
+  bool known = 2;   // false when install_root is unknown
+}
+
+message SetOptInRequest {
+  string install_root = 1;
+  bool opt_in = 2;
+}
+
+message TrackedDependencyInfo {
+  string name = 1;
+  repeated string fact_kinds = 2;
+  repeated string upstream_issue_refs = 3;
+  string source_deep_dive = 4;
+  string notes = 5;
+}
+
+message TrackedDepsRequest {
+  // Filters to dependencies declaring this fact kind; empty means every tracked dependency.
+  string fact_kind = 1;
+}
+
+message TrackedDepsResponse {
+  repeated TrackedDependencyInfo dependencies = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message ChangelogRequest {
+}
+
+message ChangelogResponse {
+  // The raw Markdown content of docs/CHANGELOG.md (Keep a Changelog format, §9) — this API
+  // does not maintain a separate structured entry store; `ChangelogWriter` is the single
+  // writer and this file is the single source of truth it writes into.
+  string markdown = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}

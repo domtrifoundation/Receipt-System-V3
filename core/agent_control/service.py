@@ -220,6 +220,12 @@ if __name__ == "__main__":  # pragma: no cover
     # section) independently verifiable from outside the process rather than trusted on
     # faith. A launcher script can echo which interpreter it *meant* to invoke; only the
     # running process itself can confirm which one it actually got.
-    print(f"AgentControlService listening on {addr}", file=sys.stderr)
+    print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
+    print(f"AgentControlService listening on {srv.bound_address}", file=sys.stderr)
     print(f"running under: {sys.executable} ({sys.version.split()[0]})", file=sys.stderr)
-    srv.wait_for_termination()
+    from common.watchdog_client import ThreadedKicker
+    kicker = ThreadedKicker('agent_control')
+    try:
+        srv.wait_for_termination()
+    finally:
+        kicker.stop()

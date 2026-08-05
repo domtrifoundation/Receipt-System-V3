@@ -49,12 +49,16 @@ from __future__ import annotations
 from pathlib import Path
 
 #: The running program version. Ticked on every commit — see the module docstring.
-PROGRAM_VERSION = "x00.00.09"
+PROGRAM_VERSION = "x00.01.00"
 
 #: Codename for the current `MM`, keyed to `MM` alone so every `x03.xx.xx` release reuses
-#: one banner asset without regeneration (`v3-plan-02-architecture.md`). Pre-release work
-#: sits at `MM == 00`, which has no codename of its own yet — Zircon belongs to `x03`.
+#: one banner asset without regeneration (`v3-plan-02-architecture.md`). `"00"` is a real,
+#: deliberate placeholder — not a future major generation's own name — for the pre-Zircon
+#: development period specifically, so the TUI's banner has something honest to show
+#: (`"BETA"`) instead of rendering nothing while this is the only thing anyone's running.
+#: Retired the moment `x03.00.00` actually ships; `"03"` onward are the real generations.
 MAJOR_CODENAMES = {
+    "00": "Beta",
     "03": "Zircon",
     "04": "Yttrium",
     "05": "Xenotime",
@@ -70,9 +74,9 @@ def major_segment(version: str = PROGRAM_VERSION) -> str:
 def codename(version: str = PROGRAM_VERSION) -> str | None:
     """Return the codename for a version's `MM`, or `None` if that `MM` has none yet.
 
-    Pre-release versions (`x00.*`) genuinely have no codename — returning `None` rather
-    than inventing a placeholder is what lets Interface API's banner correctly render
-    nothing instead of something wrong.
+    Every `MM` this project currently ships or pre-ships has one — `"00"` maps to the
+    real, deliberate `"Beta"` placeholder above. `None` stays the return type for any
+    future `MM` not yet added to `MAJOR_CODENAMES`, not for pre-release specifically.
     """
     return MAJOR_CODENAMES.get(major_segment(version))
 

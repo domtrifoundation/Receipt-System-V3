@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,3 +46,56 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 Variant generation runs in a `ProcessPoolExecutor`, not threads, because OpenCV's free-threaded wheels are not ready (tracked upstream at `opencv/opencv#27933`). That is a tracked dependency fact, not a permanent choice — when the blocker clears, this is one of the first places to revisit. The child processes are private to this service and invisible to gRPC (`docs/PROCESS_TOPOLOGY.md` §4).
+
+- **Closures cannot be pickled**, and Windows's `spawn` start method needs every object crossing
+  the process boundary to be importable by reference (`pickle.dumps` on a local function raises
+  `PicklingError: Can't pickle local object` — confirmed directly). `generation.py`'s
+  `_run_one_variant` is therefore a module-level function, never a closure, and each worker
+  reconstructs its own `VariantRegistry` from a plain, picklable `PreprocessingConfig` rather
+  than receiving a live registry object or a blob-store connection from the parent — the parent
+  hands over a zero-argument `blob_store_factory` instead, which each worker calls itself.
+- **`cv2.UMat` (the OpenCL Transparent API) has no `.ndim`, `.shape`, or any introspection
+  attribute at all.** `variants/base.py`'s `to_gray()`/`get_shape()` exist specifically to paper
+  over this: `get_shape()` special-cases `isinstance(image, cv2.UMat)` and calls `.get()` to pull
+  the array back to CPU only for the shape read, and `to_gray()` catches the `cv2.error` a
+  UMat-unaware call raises. Any new variant that touches shape/ndim directly instead of going
+  through these helpers will pass its CPU-array tests and then fail silently (or raise) the
+  moment `hardware.py` routes it through OpenCL.
+- **`np.percentile` cannot operate on a `cv2.UMat` at all** (confirmed via a direct `TypeError`).
+  `tonal_variants.py`'s `standard()` explicitly `.get()`s back to CPU before its percentile math
+  — a genuine, permanent limitation of that one variant, not a bug to route around elsewhere.
+  `fastNlMeansDenoising` and `findContours`, by contrast, both genuinely run on UMat directly —
+  don't assume every OpenCV call needs the same CPU round-trip without checking.
+- **`cv2.split()` on an already-2D (single-channel) array returns a 1-element tuple, not an
+  exception.** `channel_variants.py`'s `channel_boost_factory` checks `len(channels) == 1`
+  explicitly rather than relying on a `cv2.error` that never comes.
+- **`opencv-python` and `pymupdf` have no prebuilt wheel for Python 3.15 yet** (still beta as of
+  this writing), so they are deliberately absent from `noxfile.py`'s `FORWARD_COMPAT_DEPS` list —
+  adding them there would just fail the same from-source build every other install attempt does.
+  `tests/unit/core/preprocessing/conftest.py` guards its own `cv2`/`fitz`/`numpy` imports with
+  `pytest.importorskip` instead, the same collection-time-skip pattern `core/auth`'s and
+  `core/account_guardian`'s servicer tests already use for the equivalent `grpcio` gap.
+- **§6.7's "register lightweight usage with Health API for visibility" is deliberately
+  NOT wired in, checked against the deep-dive's own wording rather than skipped by
+  oversight.** Unlike OCR's/Inference's own §5.6/§8.6 ("check in *before claiming*
+  GPU resources" — a real reservation gating a real allocation, now built for both, see
+  their own `CLAUDE.md` gotchas), this API's own §6.7 explicitly says Preprocessing
+  "doesn't need to participate in the live reservation ledger with the same urgency" —
+  UMat's OpenCL buffers are small and short-lived per-image, not a persistent multi-GB
+  model load. A per-image reserve/release round trip to Health API would be real,
+  disproportionate gRPC overhead against a single UMat op's own cost, and the deep-dive's
+  own language is "visibility," not "gating" — a different, lighter-weight mechanism
+  (a periodic usage metric push, not a reservation) than the ledger this session built
+  for the other two APIs. Left as a real, named, still-open item rather than forced into
+  the reservation shape it doesn't actually need.
+- **`PreprocessingMetricsCollector` was built and independently tested
+  (`test_metrics.py`) but never instantiated anywhere in `PreprocessingServicer` at
+  all** — every `Rasterize`/`GenerateVariants` call went uncounted, the same
+  "declared, never wired into the real assembly" gap found and fixed in every other
+  API's own service this session (Ingestion's `GoogleDriveSource`/`webhook_manager`,
+  Inference's `max_concurrent_generations`, OCR's `per_engine_timeout_ms`). Fixed:
+  `PreprocessingServicer.__init__` now constructs one, `Rasterize` increments
+  `rasters_succeeded`/`rasters_failed`, `GenerateVariants` increments
+  `variants_succeeded`/`variants_failed` and `variants_run_on_opencl`/
+  `variants_run_on_cpu` per the real resolved device on each variant. Confirmed live
+  with a real servicer call (`test_servicer_metrics_actually_increment_not_just_declared`).

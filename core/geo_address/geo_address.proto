@@ -1,0 +1,80 @@
+// Geo/Address API gRPC surface (`v3-deepdive-16-geo-address-api.md` §6).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): `GeocodeResponse` carries
+// `error_code`/`error_detail` rather than the server aborting with a gRPC status. A genuine
+// cross-provider disagreement (§4.3) is not an error either — `conflict`/`conflict_detail`
+// carry that, with `normalized_address` left unset, so a client can tell "no answer because
+// nobody could geocode this" apart from "no answer because providers genuinely disagreed".
+//
+// One unary RPC, not streaming (§6's own sketch): a single geocode call resolves to a single
+// corroborated answer, unlike Logs' live tail or Execution Core's progress stream.
+
+syntax = "proto3";
+
+package resibo.geo_address.v1;
+
+service GeoAddressService {
+  rpc Geocode(GeocodeRequest) returns (GeocodeResponse);
+}
+
+message GeocodeRequest {
+  // OCR's ranked candidates, not just the top one — index 0 is the highest-confidence
+  // reading (§3's second corroboration axis).
+  repeated string candidate_strings = 1;
+  // Which registered providers to query; empty means every enabled provider.
+  repeated string providers = 2;
+  string country_code = 3;       // defaults to "PH" caller-side if left empty
+  // The OCR-read vendor name, for the reverse-check cross-corroboration pass (§1). Empty
+  // means the caller has nothing to corroborate that way, and that pass is skipped.
+  string vendor_name_hint = 4;
+}
+
+message GeoAddressProto {
+  string formatted = 1;
+  string line1 = 2;
+  string barangay = 3;
+  string city = 4;
+  string province = 5;
+  string region = 6;
+  string postal_code = 7;
+  string country_code = 8;
+  double latitude = 9;
+  double longitude = 10;
+}
+
+message ProviderCandidateResultProto {
+  string provider = 1;
+  string candidate_string = 2;
+  GeoAddressProto address = 3;    // unset when this provider's own call failed
+  double confidence = 4;
+  string matched_business_name = 5;
+  string error_code = 6;          // empty when this provider's own call succeeded
+  string error_detail = 7;
+}
+
+message GeoResultProto {
+  GeoAddressProto normalized_address = 1;   // unset on AgreementLevel.NONE or a real conflict
+  double confidence = 2;
+  // One of: unanimous, majority, split, single_source, none.
+  string agreement = 3;
+  string matched_candidate_string = 4;
+  repeated ProviderCandidateResultProto provider_results = 5;
+  string vendor_name_at_address = 6;
+  bool vendor_name_discrepancy = 7;
+  // A genuine cross-provider disagreement, surfaced rather than silently resolved (§4.3).
+  bool conflict = 8;
+  string conflict_detail = 9;
+  repeated string degraded_providers = 10;
+  bool from_cache = 11;
+  bool cache_stale = 12;
+}
+
+message GeocodeResponse {
+  GeoResultProto result = 1;
+  string error_code = 2;   // set only for a malformed request; never for "all providers down"
+  string error_detail = 3;
+}

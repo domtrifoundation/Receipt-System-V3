@@ -1,0 +1,72 @@
+// Tool Call API gRPC surface.
+//
+// **A deliberate, documented resolution, not a guess.** The deep-dive itself specifies no
+// wire contract at all (its own §7 is testing hooks, not a `.proto` sketch), the identical
+// gap `core/background_workers/CLAUDE.md` records and asks be resolved "as one deliberate
+// decision covering both." Unlike Background Workers' own scheduled, in-process job
+// handlers, this API's registered tools are exactly the kind of thing a *different* process
+// (Inference API's own agentic tool-calling loop, deep-dive §3.3) genuinely needs to invoke
+// remotely — the deep-dive's own words: "Inference API's tool-calling orchestrator...
+// consuming this registry's manifest to build a constrained-decoding grammar and receiving
+// back which tool the model chose." So this surface exposes real dispatch, not just
+// observability: `ListTools` for the manifest, `DispatchTool` for the actual call, both
+// routed through the exact same `registry.ToolRegistry.check()` enforcement gate and
+// `dispatch.dispatch()` pipeline (permission, availability, timeout, audit) already built
+// and tested at the in-process layer.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): `DispatchToolResponse` mirrors
+// `contracts.ToolResult` exactly — `error`/`error_code` pair, never a bare gRPC status for
+// anything a caller needs to branch on.
+
+syntax = "proto3";
+
+package resibo.tool_call.v1;
+
+service ToolCallService {
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  rpc DispatchTool(DispatchToolRequest) returns (DispatchToolResponse);
+}
+
+message ToolSpecInfo {
+  string name = 1;
+  string description = 2;
+  string parameters_schema_json = 3;
+  string category = 4;              // "read_only" | "mutating_staged" | "dev_observability" | "test_execution"
+}
+
+message ToolCallContext {
+  string run_id = 1;
+  string user_id = 2;
+  string calling_api = 3;
+  // Resolved server-side to a role — never trusted from a claim the caller makes about
+  // itself (`docs/PRINCIPLES.md` §4.2). Matches `contracts.ToolContext`'s own deliberate
+  // absence of a `role` field.
+  string session_id = 4;
+}
+
+message ListToolsRequest {
+  ToolCallContext context = 1;
+}
+
+message ListToolsResponse {
+  repeated ToolSpecInfo tools = 1;
+}
+
+message DispatchToolRequest {
+  ToolCallContext context = 1;
+  string tool_name = 2;
+  // JSON-encoded arguments object — kept as a string, matching `dispatch()`'s own
+  // deliberately-untyped `arguments: object` parameter (a caller sending something that
+  // is not even a mapping is itself one of the failures this boundary converts to data).
+  string arguments_json = 3;
+}
+
+message DispatchToolResponse {
+  string tool_name = 1;
+  string result_json = 2;
+  string error = 3;
+  string error_code = 4;
+}

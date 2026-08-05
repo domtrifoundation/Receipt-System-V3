@@ -16,7 +16,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -48,3 +48,24 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 Output branches two ways from one common source, not sequentially: the archival re-encode that gets hashed and stored, and the base image fed to Preprocessing. The content-address hash is computed over the *original uploaded bytes*, before re-encoding. One codec for the whole install, owner-selected — never a per-user or per-tier lever. `pillow-heif` is the one necessary plugin (Pillow's only real gap, for HEVC licensing reasons) and has a real CVE history, which is why it stays on Proving Grounds' radar.
+
+- **`raster.py` delegates to `core.preprocessing.raster`'s own `sniff_format`/
+  `decode_image_bytes`/`encode_image_png`** rather than re-implementing format detection
+  or decode — this sub-API's own job on top is page enumeration (a real `fitz.open()`
+  page-count call) for multi-page PDFs, confirmed live against a real 3-page synthetic
+  PDF producing exactly 3 real PNG-encoded pages.
+- **`codecs.py`'s AVIF/WebP re-encode is confirmed live**, including a genuine
+  HEIC-source round-trip (`pillow_heif`-decoded, then re-encoded to AVIF) — not assumed
+  from Pillow's own documentation. `pillow_heif.register_heif_opener()` is called
+  directly inside this module rather than relied upon as an import-order side effect of
+  `core.preprocessing.raster` having already run it elsewhere.
+- **`archive_extract.py`'s directory-entry filtering (`info.is_dir()`) is confirmed
+  live** against a real zip containing an empty directory entry — `list_entries`/
+  `extract_entries` both correctly skip it rather than yielding an empty-bytes "file."
+
+## Implementation status
+
+Implemented this session — `errors.py`, `raster.py`, `codecs.py`, `archive_extract.py`.
+All three modules validated live against real synthetic inputs (a multi-page PDF, a
+real HEIC image, a real zip archive) — see the parent `core/ingestion/CLAUDE.md` and its
+own test suite for the full pipeline this sub-API feeds into.

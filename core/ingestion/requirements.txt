@@ -1,0 +1,16 @@
+# Ingestion API — third-party runtime dependencies beyond `common/requirements.txt`.
+
+# --- Format Normalization (deep-dive §5) -------------------------------------------------
+pymupdf>=1.24
+pillow>=11.3
+pillow-heif>=0.18
+opencv-python>=4.10
+numpy>=1.26
+
+# --- Google Drive source (deep-dive §4.1) — lazily imported, degrades to unavailable ------
+# without these installed/configured (`docs/PRINCIPLES.md` §4.4). No `google-auth-oauthlib`
+# needed for the service-account path specifically (§4.1.1a); only the OAuth path (§4.1.1b,
+# inactive until Google verification clears) needs it.
+google-api-python-client>=2.100
+google-auth>=2.30
+google-auth-oauthlib>=1.2

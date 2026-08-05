@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.00`
+`a02.00.01`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -46,3 +46,36 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 Setup owns static hardware *detection*; Health owns the live resource *ledger*. That split is deliberate and worked out from what each API is actually for, not from who thought of it first (`docs/PRINCIPLES.md` §1.5) — Health reads Setup's published profile rather than re-probing. Health reports; it never decides when a rollout proceeds.
+
+**Setup API does not exist yet, so the default `HardwareProfileReader` publishes nothing and
+every reservation is rejected as `UNKNOWN_DEVICE`.** That is deliberate, not a placeholder to
+relax: granting against an unknown VRAM ceiling is the unsafe answer, so this is one place
+where §4.2's fail-closed rule outranks §4.4's degrade-gracefully default. Wiring Setup in later
+means passing a real reader, not removing a permissive default someone forgot about.
+
+**A rejected reservation is not an error.** Deep-dive §5.1 is explicit that a rejection means
+the caller falls back to CPU or queues. `ReservationOutcome.rejection_reason` carries it and
+`error_code` stays empty; a caller treating a capacity rejection as a failure has misread the
+API. The `.proto` says the same thing in a comment for the same reason.
+
+**A lapsed reservation is never revived by a late refresh** (§11). The owning process is meant
+to *discover* it lost its claim and abort its in-flight work through Execution Core's
+checkpoint-resume. Silently extending an expired reservation would hand two processes the same
+VRAM, since the second acquired it legitimately while the first was silent.
+
+**Files here that the deep-dive's §2 package layout does not list**, added with reasons:
+- `capability_drift.py` — §4's version-capability-drift check is a genuine third responsibility
+  alongside `status.py` and `live_diagnostic.py`, and folding it into either would have meant
+  one of them owning a concern that is not its own. Its probe registry is where **every future
+  Forward-Compatibility-shimmed capability registers its own check, in the same PR that
+  introduces the shim** (§4.1) — that is the concrete obligation, not a suggestion.
+- `watchdog/timeout_detector.py` — named in the sub-API's own §2 layout but absent from the
+  parent's; it is where the silent-past-timeout comparison lives, kept out of `kicks.py` so the
+  receive path stays free of the check that reads it.
+- `health.proto` + `generated/` — §8 specifies the surface but the layout predates showing where
+  the `.proto` lives. Both services live in one file because Watchdog shares the parent's
+  process (`docs/PROCESS_TOPOLOGY.md`), so one `.proto` per process keeps the generated stub
+  layout matching the process layout. Regenerate with `python -m grpc_tools.protoc` and
+  re-apply the relative-import fix in `health_pb2_grpc.py` (`from . import health_pb2`); never
+  hand-edit generated files. `service.py` imports them lazily, so the package stays importable
+  — and its tests still meaningful — on an interpreter with no `grpcio` wheel yet (3.15 today).

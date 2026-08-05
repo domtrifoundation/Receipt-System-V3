@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.00`
+`a01.00.02`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -42,8 +42,79 @@ valid the moment it is removed, and this file is what future sessions will have 
 
 ## Forward-Compatibility Pattern applicability
 
-Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed fields, so they use `common/frozen_dict.py`'s `FrozenDict` rather than a plain `dict` (`docs/PRINCIPLES.md` §2.1). Any `isinstance` check against one must test `collections.abc.Mapping`, never `dict` — the 3.15 builtin is not a `dict` subclass. Module-level lookup tables in this folder are `FrozenDict` too, per §2.1.1.
+Yes, and specifically: `UserScheduledTask.action_params` is the `FrozenDict`-typed field this
+applies to, and `errors.py`'s `ERROR_CODES`/`ERROR_SUMMARIES` are the module-level constant
+tables §2.1.1 reaches. Any `isinstance` check against one must test `collections.abc.Mapping`,
+never `dict` — the 3.15 builtin is not a `dict` subclass, and here that failure would silently
+run a scheduled action with none of its parameters (a rescan losing its `since` bound is a
+materially different job, not a smaller one). `tests/unit/core/task_scheduler/test_contracts_and_store.py`
+carries the `@pytest.mark.forward_compat` assertions.
+
+The mutable structures here are deliberately **not** `FrozenDict` and the distinction is visible
+in the type: `SchedulableActionRegistry`'s own action map and `TriggerRegistry`'s provider map
+are genuinely mutable internal state populated at startup, which §2.1.1 does not reach — both
+guarded by a real lock rather than relying on the GIL, since this project targets free-threaded
+3.14t (§3.3.1).
+
+Per the deep-dive's own §8 forward-compatibility note, this sub-API introduces **no new
+native/C-extension dependency**: the cron parser is pure Python written here rather than a
+`croniter` dependency, so there is no new Telemetrees tracking entry either.
 
 ## Real gotchas specific to this folder
 
 This has its own top-level folder rather than living inside Background Workers, and that is the correction rather than an accident: burying it as a subsection of Background Workers' own document is one of the two real instances that caused `docs/PRINCIPLES.md` §1.8 to be written as a hard rule. Scheduling arbitrary code is prohibited — the allowlist of schedulable actions is a hard requirement, not a convenience.
+
+**Missed runs never catch up** (§10's resolved open question). A task whose occurrence passed
+while the instance was down does not fire on return — it waits for the next scheduled
+occurrence. This looks like data loss and is deliberate: the alternative releases a flood of
+simultaneous catch-up jobs the moment the instance comes back, competing for resources exactly
+when the system is already recovering. `FireDecision.missed` reports it as a fact worth logging,
+not as an error.
+
+**The allowlist starts empty, and that is the safe state.** No Core API is wired to register a
+real schedulable action in this build yet, so `default_registry()` rejects every `action` at
+creation time — the same posture `core/health/resource_ledger.py` takes toward Setup's
+not-yet-existing hardware profile. An empty allowlist that denies is correct; an absent
+allowlist that permits would invert §4 during exactly the window where nothing has constrained
+it yet.
+
+**Rejection happens at creation, never at dispatch.** Both an unregistered action and a
+malformed cron expression fail when the user submits them (§9's own two hooks). The failure this
+prevents is not "the wrong thing happens" but "the wrong thing happens *later*, somewhere the
+user cannot connect back to what they did" — a task that fails at 2am on a Sunday is a support
+ticket; one rejected in the form is a form error.
+
+**Files here that the deep-dive's §2 package layout does not list**, added with reasons:
+- `cron.py` — §7's surface takes a `cron_expression` and §9 requires malformed ones rejected at
+  the boundary, but the layout names no module to do it in. Kept separate from `firing.py` so
+  parsing (a pure, total function over a string) is testable without any notion of time.
+- `firing.py` — §10's missed-run policy made a checkable value rather than a side effect buried
+  in whatever loop happens to call it. Splitting it out is what let the catch-up-flood case be
+  tested directly instead of inferred.
+- `store.py` — §3 says schedule data lives in the owning user's own Persistence database; this
+  is the adapter that puts it there, kept out of `registry.py` because the allowlist is global
+  and process-wide while this is per-user (`docs/PRINCIPLES.md` §1.5).
+
+**The `.proto` gap this section used to describe is now closed.** `task_scheduler.proto`
+defines the five RPCs the deep-dive names (`CreateScheduledTask`/`UpdateScheduledTask`/
+`DeleteScheduledTask`/`ListScheduledTasks`/`ListSchedulableActions`). Two new files carry
+the real assembly: `service.py`'s `TaskSchedulerService` combines `TaskStore` (per-user
+persistence), `SchedulableActionRegistry` (the allowlist), and `cron.parse`/
+`enforce_task_cap` (creation-time validation) into one operations surface; `grpc_servicer.py`'s
+`TaskSchedulerServicer` wires that to the wire. Confirmed live: an owner creating a task
+against a registered action and valid cron expression; a `client`-role caller and an
+unresolvable session both denied `ROLE_FORBIDDEN`; an unregistered action and a malformed
+cron expression both rejected at creation, never accepted; an update changing only the
+field actually supplied; a delete that removes the real row; and `ListScheduledTasks`
+correctly scoped per user (two different owners each seeing only their own tasks).
+
+**`errors.RoleForbidden` is a real addition, made alongside the servicer.** This package's
+own opening line ("letting an owner/staff user configure their own recurring actions")
+implies a role gate `contracts.py`'s own docstring already promised (mirroring
+`core/audit/service.py`'s injected, fail-closed `role_resolver`), but no error code existed
+for it until the servicer needed one — added to `errors.ERROR_CODES`/`ERROR_SUMMARIES` the
+same append-only way every other error code in this project is added.
+
+**`GrpcSessionResolver` (`grpc_servicer.py`) is genuinely synchronous, matching
+`core/support_ticketing/service.py`'s own equivalent** — a plain `grpc.insecure_channel`,
+not `grpc.aio`, since nothing here requires an async resolver signature.

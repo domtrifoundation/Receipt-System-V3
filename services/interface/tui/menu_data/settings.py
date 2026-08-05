@@ -134,6 +134,19 @@ SETTINGS_MENU: tuple[MenuItemSpec, ...] = (
         docs_ref="v3-deepdive-28-telemetrees-api.md",
     ),
     MenuItemSpec(
+        path="settings.diagnostics.filed_issues",
+        label="Reported issues",
+        tooltip=(
+            "Every issue this install has filed with the developers, and its real, live "
+            "GitHub status — open/closed, and any pull request already linked to it. Empty "
+            "until the diagnosed-error detector that files these actually exists; the "
+            "ledger and live status lookup are real, that detector is not yet built."
+        ),
+        target="interface.open_screen.filed_issues",
+        kind="action",
+        docs_ref="v3-deepdive-28-telemetrees-api.md",
+    ),
+    MenuItemSpec(
         path="settings.agents.agent_tokens",
         label="Agent access tokens",
         tooltip=(

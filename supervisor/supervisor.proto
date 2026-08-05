@@ -1,0 +1,178 @@
+// Supervisor gRPC surface (`v3-deepdive-38-supervisor.md` §8) — "minimal, local-only.
+// Deliberately not exposed the same way every other Core API's gRPC surface is — this is
+// a local-only control interface (Interface API's own fleet screen is the primary
+// consumer), not something reachable from the general request path, consistent with
+// keeping Supervisor's own attack/failure surface as small as its codebase."
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+
+syntax = "proto3";
+
+package resibo.supervisor.v1;
+
+service SupervisorService {
+  rpc GetActiveRelease(ChannelRequest) returns (ActiveReleaseResponse);
+  rpc TriggerRollback(RollbackRequest) returns (RollbackResponse);
+  rpc GetSleepStatus(ServiceStatusRequest) returns (SleepStatusResponse);
+  rpc ForceWake(ForceWakeRequest) returns (WakeResponse);
+  rpc PinServiceVersion(PinRequest) returns (ServiceVersionPinResponse);
+  rpc ListServiceVersionPins(ChannelRequest) returns (PinListResponse);
+  rpc RestartServiceOnVersion(RestartRequest) returns (stream RestartProgress);
+  // Added post-§8: Interface API is a genuine display-only client of Supervisor's own
+  // boot — Supervisor is the thing that actually calls boot_many(), the TUI's own
+  // loading screen streams real progress from here rather than running the boot itself
+  // (v3-deepdive-14-interface-api.md's own "the TUI is a genuinely detachable client",
+  // never the process doing the starting).
+  rpc StreamBootProgress(BootProgressRequest) returns (stream BootProgressUpdate);
+  // Multi-version-per-service architecture: most services can run several concurrent
+  // version instances at once, started dynamically based on real webapp demand; the
+  // owner sets which versions are *available* to be started at all (SetAvailableVersions
+  // -- the ceiling the webapp's own end-user version choice is bounded by), and
+  // StartVersion is the on-demand launch itself. interface_tui/inference are refused by
+  // StartVersion (single-instance -- use RestartServiceOnVersion instead); SetAvailable
+  // Versions structurally truncates either to its own last requested version.
+  rpc SetAvailableVersions(SetAvailableVersionsRequest) returns (AvailableVersionsResponse);
+  rpc ListAvailableVersions(ChannelRequest) returns (AvailableVersionsListResponse);
+  rpc StartVersion(StartVersionRequest) returns (StartVersionResponse);
+  rpc ListRunningInstances(ChannelRequest) returns (RunningInstancesResponse);
+}
+
+message ChannelRequest {
+  string channel = 1;   // empty means "every channel" for ListServiceVersionPins
+}
+
+message ActiveReleaseResponse {
+  string channel = 1;
+  string release_dir = 2;
+  string activated_at = 3;   // RFC 3339
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message RollbackRequest {
+  string channel = 1;
+}
+
+message RollbackResponse {
+  string channel = 1;
+  string reverted_to = 2;
+  bool ok = 3;
+  string error_code = 4;
+  string error_detail = 5;
+}
+
+message ServiceStatusRequest {
+  string service_name = 1;
+}
+
+message SleepStatusResponse {
+  string service_name = 1;
+  string policy = 2;         // "never" | "idle_timeout" | "scheduled_only"
+  string state = 3;          // "stopped" | "starting" | "running" | "sleeping" | "failed"
+  string last_activity_at = 4;  // RFC 3339, empty when never active
+}
+
+message ForceWakeRequest {
+  string service_name = 1;
+  string requested_by = 2;   // owner/staff user_id — Audit-logged, §11
+}
+
+message WakeResponse {
+  bool woke = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message PinRequest {
+  string channel = 1;
+  string service_name = 2;
+  string pinned_version = 3;   // empty means "clear the pin" (follow the channel normally)
+  string pinned_by = 4;        // owner/staff user_id — Audit-logged, §11
+}
+
+message ServiceVersionPinResponse {
+  string channel = 1;
+  string service_name = 2;
+  string pinned_version = 3;   // empty means unpinned
+  string pinned_by = 4;
+  string pinned_at = 5;        // RFC 3339
+}
+
+message PinListResponse {
+  repeated ServiceVersionPinResponse pins = 1;
+}
+
+message RestartRequest {
+  string service_name = 1;     // "interface_tui" | "inference" only, §5.3
+  string target_version = 2;
+}
+
+message RestartProgress {
+  string service_name = 1;
+  string target_version = 2;
+  string stage = 3;            // "confirming_target" | "stopping_old" | "launching_new" | "waiting_healthy" | "complete" | "failed"
+  string error_detail = 4;
+}
+
+message BootProgressRequest {
+  string channel = 1;
+}
+
+message BootProgressUpdate {
+  string service_name = 1;
+  bool ok = 2;
+  int32 pid = 3;
+  string address = 4;          // the real, dynamically-bound address once known
+  string error_detail = 5;
+  bool boot_complete = 6;      // true on the final update -- every service has a result
+  bool boot_ok = 7;            // only meaningful when boot_complete is true
+  repeated string failed_services = 8;   // only meaningful when boot_complete is true
+}
+
+message SetAvailableVersionsRequest {
+  string channel = 1;
+  string service_name = 2;
+  repeated string versions = 3;   // the real, complete set -- not a delta
+  string requested_by = 4;        // owner/staff user_id -- Audit-logged, same posture as PinServiceVersion
+}
+
+message AvailableVersionsResponse {
+  string channel = 1;
+  string service_name = 2;
+  repeated string versions = 3;   // what was actually stored -- may be shorter than
+                                   // requested for interface_tui/inference (single-instance)
+}
+
+message AvailableVersionsListResponse {
+  repeated AvailableVersionsResponse entries = 1;
+}
+
+message StartVersionRequest {
+  string service_name = 1;
+  string version = 2;
+}
+
+message StartVersionResponse {
+  string service_name = 1;
+  string version = 2;
+  bool ok = 3;
+  int32 pid = 4;
+  string address = 5;             // the real, dynamically-bound address once known
+  string error_detail = 6;
+}
+
+message RunningInstance {
+  string service_name = 1;
+  string version = 2;
+  bool ok = 3;
+  int32 pid = 4;
+  string address = 5;
+}
+
+message RunningInstancesResponse {
+  repeated RunningInstance instances = 1;
+}

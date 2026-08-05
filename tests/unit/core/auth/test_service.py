@@ -412,3 +412,59 @@ def test_a_session_may_still_configure_its_own_second_factor(servicer, channel, 
     directory, attacker, _victim = two_users
     _enrol_totp(servicer, channel, attacker)
     assert directory.get_two_factor(attacker.user_id).enabled
+
+
+# --- GetTenancyMode / SetTenancyMode -----------------------------------------------------------
+
+
+def test_get_tenancy_mode_reports_unknown_with_no_install_root(servicer):
+    response = run(servicer.GetTenancyMode(pb.TenancyConfigRequest()))
+
+    assert response.known is False
+
+
+def test_get_tenancy_mode_defaults_to_multi_when_nothing_persisted(db, tmp_path):
+    from core.auth.assembly import build_servicer
+
+    servicer = build_servicer({"tenancy_mode": "multi"}, db=db, install_root=tmp_path)
+
+    response = run(servicer.GetTenancyMode(pb.TenancyConfigRequest()))
+
+    assert response.known is True
+    assert response.tenancy_mode == "multi"
+
+
+def test_set_tenancy_mode_persists_and_get_reads_it_back(db, tmp_path):
+    from core.auth.assembly import build_servicer
+
+    servicer = build_servicer({"tenancy_mode": "multi"}, db=db, install_root=tmp_path)
+
+    set_response = run(servicer.SetTenancyMode(pb.SetTenancyModeRequest(tenancy_mode="single")))
+    get_response = run(servicer.GetTenancyMode(pb.TenancyConfigRequest()))
+
+    assert set_response.known is True
+    assert set_response.takes_effect_on_restart is True
+    assert get_response.tenancy_mode == "single"
+
+
+def test_set_tenancy_mode_rejects_an_unknown_value(db, tmp_path):
+    from core.auth.assembly import build_servicer
+
+    servicer = build_servicer({"tenancy_mode": "multi"}, db=db, install_root=tmp_path)
+
+    response = run(servicer.SetTenancyMode(pb.SetTenancyModeRequest(tenancy_mode="nonsense")))
+
+    assert response.known is False
+
+
+def test_set_tenancy_mode_does_not_retroactively_change_the_running_profile(db, tmp_path):
+    """Honest, real behaviour: the already-constructed `self._profile` (and every
+    collaborator wired from it) does not re-read this file — `takes_effect_on_restart`
+    exists precisely because this is true."""
+    from core.auth.assembly import build_servicer
+
+    servicer = build_servicer({"tenancy_mode": "multi"}, db=db, install_root=tmp_path)
+
+    run(servicer.SetTenancyMode(pb.SetTenancyModeRequest(tenancy_mode="single")))
+
+    assert servicer._profile.tenancy_mode.value == "multi"

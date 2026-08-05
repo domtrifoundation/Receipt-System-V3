@@ -1,0 +1,8 @@
+# Update/Deployment API — third-party runtime dependencies beyond `common/requirements.txt`.
+
+# --- Keymaster client (v3-deepdive-24-update-deployment-api.md §4) -----------
+# A plain outbound HTTPS call to Keymaster's own separate, closed system — "the same category
+# as calling PayMongo/GitHub/LocationIQ." Module-scope import in keymaster_client.py: every
+# Update API instance needs this to gate a clone attempt, unlike an optional per-user auth
+# method, so it is a hard requirement of this package rather than a degrade-to-unavailable one.
+httpx>=0.27

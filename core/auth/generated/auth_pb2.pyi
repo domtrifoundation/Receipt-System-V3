@@ -6,6 +6,30 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class TenancyConfigRequest(_message.Message):
+    __slots__ = ("install_root",)
+    INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]
+    install_root: str
+    def __init__(self, install_root: _Optional[str] = ...) -> None: ...
+
+class TenancyModeResponse(_message.Message):
+    __slots__ = ("tenancy_mode", "known", "takes_effect_on_restart")
+    TENANCY_MODE_FIELD_NUMBER: _ClassVar[int]
+    KNOWN_FIELD_NUMBER: _ClassVar[int]
+    TAKES_EFFECT_ON_RESTART_FIELD_NUMBER: _ClassVar[int]
+    tenancy_mode: str
+    known: bool
+    takes_effect_on_restart: bool
+    def __init__(self, tenancy_mode: _Optional[str] = ..., known: _Optional[bool] = ..., takes_effect_on_restart: _Optional[bool] = ...) -> None: ...
+
+class SetTenancyModeRequest(_message.Message):
+    __slots__ = ("install_root", "tenancy_mode")
+    INSTALL_ROOT_FIELD_NUMBER: _ClassVar[int]
+    TENANCY_MODE_FIELD_NUMBER: _ClassVar[int]
+    install_root: str
+    tenancy_mode: str
+    def __init__(self, install_root: _Optional[str] = ..., tenancy_mode: _Optional[str] = ...) -> None: ...
+
 class SessionResponse(_message.Message):
     __slots__ = ("session_id", "user_id", "role", "expires_at_unix", "error_code", "csrf_token", "second_factor_challenge_id", "second_factor_method", "error_detail")
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]

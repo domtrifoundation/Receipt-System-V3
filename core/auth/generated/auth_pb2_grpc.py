@@ -124,6 +124,16 @@ class AuthServiceStub:
                 request_serializer=auth__pb2.ListAuthMethodsRequest.SerializeToString,
                 response_deserializer=auth__pb2.ListAuthMethodsResponse.FromString,
                 _registered_method=True)
+        self.GetTenancyMode = channel.unary_unary(
+                '/resibo.auth.v1.AuthService/GetTenancyMode',
+                request_serializer=auth__pb2.TenancyConfigRequest.SerializeToString,
+                response_deserializer=auth__pb2.TenancyModeResponse.FromString,
+                _registered_method=True)
+        self.SetTenancyMode = channel.unary_unary(
+                '/resibo.auth.v1.AuthService/SetTenancyMode',
+                request_serializer=auth__pb2.SetTenancyModeRequest.SerializeToString,
+                response_deserializer=auth__pb2.TenancyModeResponse.FromString,
+                _registered_method=True)
 
 
 class AuthServiceServicer:
@@ -249,6 +259,26 @@ class AuthServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetTenancyMode(self, request, context):
+        """Real, persisted tenancy-mode config, added post-§9 for the TUI's own Settings screen
+        (`services/interface/tui/menu_data/settings.py`). Reads/writes
+        `<install_root>/auth/config.json` directly rather than this servicer's own in-memory
+        `InstallProfile` (constructed once, at process start, from whatever was persisted at
+        that time) — a `SetTenancyMode` call is honestly reported as taking effect on the
+        *next* restart, matching `setup.get_dev_mode`'s own "not convertible on a live
+        install" posture for the identical underlying reason (tenancy mode is baked into
+        collaborators wired once at construction, not re-read per request).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetTenancyMode(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AuthServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -341,6 +371,16 @@ def add_AuthServiceServicer_to_server(servicer, server):
                     servicer.ListAuthMethods,
                     request_deserializer=auth__pb2.ListAuthMethodsRequest.FromString,
                     response_serializer=auth__pb2.ListAuthMethodsResponse.SerializeToString,
+            ),
+            'GetTenancyMode': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetTenancyMode,
+                    request_deserializer=auth__pb2.TenancyConfigRequest.FromString,
+                    response_serializer=auth__pb2.TenancyModeResponse.SerializeToString,
+            ),
+            'SetTenancyMode': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetTenancyMode,
+                    request_deserializer=auth__pb2.SetTenancyModeRequest.FromString,
+                    response_serializer=auth__pb2.TenancyModeResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -829,6 +869,60 @@ class AuthService:
             '/resibo.auth.v1.AuthService/ListAuthMethods',
             auth__pb2.ListAuthMethodsRequest.SerializeToString,
             auth__pb2.ListAuthMethodsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetTenancyMode(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.auth.v1.AuthService/GetTenancyMode',
+            auth__pb2.TenancyConfigRequest.SerializeToString,
+            auth__pb2.TenancyModeResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetTenancyMode(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.auth.v1.AuthService/SetTenancyMode',
+            auth__pb2.SetTenancyModeRequest.SerializeToString,
+            auth__pb2.TenancyModeResponse.FromString,
             options,
             channel_credentials,
             insecure,

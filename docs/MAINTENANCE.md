@@ -88,6 +88,38 @@ A short list of things that were seriously considered and deliberately reversed 
 ### Switching a normal install to developer mode later
 Not currently supported as a live conversion — `dev_mode` is set once at first install and read by every subsequent Update API clone (Setup deep-dive §4.1). Converting an existing normal install to developer mode means a fresh developer-mode setup run, not a config flag flip on a live instance.
 
+### AI-developer installs — unattended `setup-dev`, no human in the loop, ever
+
+**A distinct scenario from the normal contributor flow above, worth naming explicitly.**
+Once Zircon ships, this project's own next phase of development is expected to be driven
+by an AI developer working genuinely unattended — not a human running Claude Code
+interactively, but an agent that runs `setup-dev`, sets up its own working copy, and
+operates the resulting instance through MCP with no human present at any point in that
+loop. The normal MCP-access story — "a token is always issued by a real human through the
+settings surface" (`core/agent_control/CLAUDE.md`) — is correct for a human-operated
+install, where a human sitting at the controls means MCP typically isn't the interface
+being used anyway. It does not fit this scenario, where there is no human to click
+anything, ever.
+
+**The real mechanism**: `services/setup/dev_fixtures.py`'s `seed_dev_environment()`,
+called with an `AgentTokenSeedGateway` (the real implementation is
+`core/agent_control/dev_token_gateway.py`'s `AgentControlDevTokenGateway`), auto-issues a
+`staff`-role, `read_only`/`mutating_staged`/`dev_observability`-scoped agent token as part
+of running `setup-dev` — attributed to `issued_by="setup-dev-bootstrap"`, the same
+authorizing-act reasoning `v3-deepdive-11-setup-api.md` §4.1 already uses for silently
+creating dev mode's own implicit-owner account. The plaintext is written to
+`<install_root>/config/dev_agent_token.txt` rather than shown once through a UI, since
+there is no human present to show it to. An AI developer following this document's own
+step-by-step setup above, on the developer-mode path, ends up with a working MCP
+connection to its own instance with zero additional manual steps — the explicit goal.
+
+**Not yet wired into the real `setup-dev` entry point** — `bootstrap.py`'s own finalize
+routine does not currently call `seed_dev_environment()` at all (a separate, pre-existing
+gap, not introduced by this note); the mechanism above is real and tested but a future
+session needs to actually call it from the real `setup-dev` script's own handoff before an
+AI developer following these steps gets a token without extra manual wiring. Read
+`core/agent_control/CLAUDE.md`'s own `dev_token_gateway.py` section before touching this.
+
 ---
 
 ## 6. Documentation maintenance
@@ -111,7 +143,7 @@ An earlier version of step 3 above said to add "the relevant per-category checks
 
 **Six of the eight are path-scoped**, and a path-scoped workflow that doesn't trigger never reports a status at all — GitHub treats a required check that never reports as *pending forever*, so any PR not touching those paths becomes permanently unmergeable. This is the same class of mistake as naming the workflow instead of the job in step 3, and it fails in the same silent, confusing way.
 
-- **Safe to require today, unscoped, they run on every PR**: `check_menu_data_integrity.yml` (deliberately unscoped — a gRPC rename anywhere can silently break a menu entry), `check_no_shadow_taxonomy.yml`, `check_stripped_content_completeness.yml`.
+- **Safe to require today, unscoped, they run on every PR**: `check_menu_data_integrity.yml` (deliberately unscoped — a gRPC rename anywhere can silently break a menu entry), `check_no_shadow_taxonomy.yml`, `check_stripped_content_completeness.yml`, `check_no_silent_except.yml` (unscoped and genuinely verifies something today, unlike the eight below — see its own script's docstring for the real gap it exists because of: `core/logs/writer.py`'s real write path had zero callers anywhere outside `core/logs/` itself before this check existed).
 - **Not safe to require as currently written**: `check_new_core_api.yml`, `check_new_sub_api.yml`, `check_new_provider.yml`, `check_new_dependency.yml`, `check_config_schema.yml`, `check_grpc_compatibility.yml`. To make any of these required, first restructure it to run unconditionally and decide internally whether it has anything to inspect — the same "always report, skip internally" shape the three above already have — rather than gating at the `on.pull_request.paths` level.
 
 **Separately, all eight currently no-op with a `::warning::`** because their `tests/ci/test_*.py` files don't exist yet. A required check that passes vacuously is worse than an absent one: it reads as enforcement on the branch-protection screen while verifying nothing. Add each one only once its own `tests/ci` test genuinely exists *and* its trigger has been unscoped.
@@ -175,13 +207,15 @@ nox rather than tox, specifically for Python-native session config — this matt
 For actually running the program itself under a chosen interpreter, by hand — a genuinely different need from §8.1's automated test subset. `start.bat`/`start.sh` both respect a `PYTHON_BIN` environment-variable override:
 
 ```bash
-./start.sh                          # default pinned interpreter (currently 3.14)
+./start.sh                          # default pinned interpreter (currently 3.13)
 PYTHON_BIN=python3.15 ./start.sh    # the whole system running under 3.15
 ```
 
 Unset, always, on a real end-user install — those get their interpreter from Setup API's own environment detection and never touch this variable. It exists for a dev checkout, to hands-on test against a non-default interpreter ahead of (or alongside) a `forward_compat` review. **On Windows, there is usually no bare `python3.15` command even when 3.15 is genuinely installed** — the `py` launcher resolves a specific version there instead, so the override is passed as one quoted variable: `PYTHON_BIN="py -3.15" ./start.sh`.
 
-Verified for real, both directions, not just written and assumed: with `PYTHON_BIN` unset and `python` on `PATH` resolving to the pinned 3.14, `start.sh` launches Agent Control's own gRPC service (`core/agent_control/service.py` — the one real, running Core API as of Phase 1; every other API's launcher target is still scaffolding, and this script's `exec` line is expected to be replaced with a real Supervisor invocation once Supervisor itself is real code) and the running process's own `sys.executable`/`sys.version` — printed at startup specifically so this is checkable from outside the process rather than trusted on faith — confirmed `Python314\python.exe`, `3.14.6`. With `PYTHON_BIN="py -3.15"`, the exact same `exec $PYTHON_BIN` expansion was independently confirmed to resolve to `Python315\python.exe`, `3.15.0b4` — the override genuinely switches interpreters. That second run then hit the same missing-`grpc`-on-3.15 gap §8.1 already documents, which is an environment fact about an upstream dependency, not a defect in the `PYTHON_BIN` mechanism itself.
+**The default moved from 3.14 to 3.13**, confirmed directly against PyPI rather than assumed: `rapidocr-onnxruntime` has no build at all for 3.13 or newer in any released version (every 1.3.x/1.4.x release, including the latest 1.4.4, caps at `Requires-Python <3.13`), so 3.14 bought nothing over 3.13 for that one dependency while everything else this project needs — `grpcio` included — already installs cleanly on 3.13. rapidocr stays unavailable on the new default exactly as it was on the old one; `text_layer`, `pytesseract`, and Windows OCR remain real, working engines either way.
+
+Verified for real, both directions, not just written and assumed: with `PYTHON_BIN` unset and `python` on `PATH` resolving to the (then-)pinned 3.14, `start.sh` launches Agent Control's own gRPC service (`core/agent_control/service.py` — the one real, running Core API as of Phase 1; every other API's launcher target is still scaffolding, and this script's `exec` line is expected to be replaced with a real Supervisor invocation once Supervisor itself is real code) and the running process's own `sys.executable`/`sys.version` — printed at startup specifically so this is checkable from outside the process rather than trusted on faith — confirmed `Python314\python.exe`, `3.14.6`. With `PYTHON_BIN="py -3.15"`, the exact same `exec $PYTHON_BIN` expansion was independently confirmed to resolve to `Python315\python.exe`, `3.15.0b4` — the override genuinely switches interpreters. That second run then hit the same missing-`grpc`-on-3.15 gap §8.1 already documents, which is an environment fact about an upstream dependency, not a defect in the `PYTHON_BIN` mechanism itself. (Historical record of the 3.14-era verification pass — the mechanism itself is unchanged by the default moving to 3.13.)
 
 ### 8.3 The real cadence — not a one-time setup
 Run `nox -s forward_compat` after finishing each API's own implementation — a natural per-API checkpoint — and again as a required gate before tagging `x03.00.00`. **This is not optional once set up.** Treat a skipped validation checkpoint the same as a skipped version-tick on a commit (§1 above) — an incomplete unit of work, not a minor omission. This doesn't mean every PR needs a nox run (§3.3.1's own "recommendation, not a hard requirement for every PR" still holds) — it means the checkpoints above are non-negotiable when they come due, the same way a version tick isn't optional on the commit that triggers it.

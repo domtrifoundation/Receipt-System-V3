@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a01.00.00`
+`a01.00.05`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -45,3 +45,74 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 ## Real gotchas specific to this folder
 
 Deduplication is load-bearing, not polish: the same underlying problem recurring must group into one issue that gets updated, never a flood of duplicates — fingerprint the signal, not the occurrence. Authenticate with a GitHub App, not a personal access token: org-owned, scoped to `issues` and nothing else, short-lived auto-rotating tokens. Any diagnostic data leaving an install is scrubbed of receipt and financial content first, and non-DOMTRI installs must opt in explicitly.
+
+**`telemetrees.proto`/`service.py` did not exist at all until this session** — the deep-dive's
+own §6 sketches a real two-RPC contract (`GetTrackedDependencies`, `GetChangelog`), but nothing
+had compiled it. `TelemetreesServicer` wires the real `TrackedDependencyRegistry` (seeded from
+the real, complete `INVENTORY`, confirmed live at 14 tracked dependencies) and the real
+`docs/CHANGELOG.md` file to it. `GetChangelog` returns the file's own raw Markdown rather than a
+structured entry list — this API keeps no separate structured store of past entries;
+`ChangelogWriter` is the single writer and the file itself is the single source of truth.
+Confirmed live: a real repo with no changelog yet returns empty markdown with no error (the
+honest, correct state for this repository today, not a bug), and a real file's content is read
+back verbatim once one exists.
+
+**Real, live-tested `RecordFiledIssue`/`ListFiledIssues` RPCs and a new `diagnostics/`
+sub-package, answering a direct user question: "we should have honest stats about when
+it reports anything to GitHub — issue link, status, whether a fix PR is already
+developing."** `diagnostics/ledger.py`'s `FiledIssueLedger` is a real, persisted,
+append-only record of every issue this install has ever filed (deduped by `fingerprint`,
+never overwriting an existing entry). `diagnostics/github_status_client.py`'s
+`GitHubIssueStatusClient` is a real, unauthenticated, read-only GitHub REST client —
+live-tested against `python/cpython#1` (a stable public fixture, not this project's own
+issue tracker, which is currently empty) confirming both the real open/closed state lookup
+and the real cross-referenced-PR lookup via GitHub's own Timeline API. `ListFiledIssues`
+fetches live status per ledger entry on every call rather than caching it, so `checked_at`
+is always genuinely current.
+
+**Stated as plainly as `docs/PRINCIPLES.md`'s "never plausible-looking data" demands**:
+this is the real *ledger and status-reporting* half of "Telemetrees compiles diagnosed
+errors into tracked issues." The *detector* half — deciding a diagnosed error is worth
+filing, deduplicating by fingerprint, and calling GitHub's App-authenticated
+issue-creation API to actually open one — does not exist anywhere in this codebase yet.
+`RecordFiledIssue` is the real seam that future component calls once built; nothing here
+fabricates a filing that never happened. The TUI's own `custom_screens/
+filed_issues_screen.py` (`services/interface/CLAUDE.md`) is real and tested against this
+real backend, and correctly renders "no issues have been filed by this install yet" today
+— the honest, correct state, not a bug.
+
+**Real `GetOptIn`/`SetOptIn` RPCs, added for the TUI's own Settings screen**
+(`telemetrees_opt_in`). Backed by `common/local_config_store.LocalConfigStore` at
+`<install_root>/telemetrees/config.json`, defaulting to `False` — data only ever leaves
+the install once explicitly turned on, matching this API's own stated opt-in-by-default
+posture. `TelemetreesServicer` takes an optional `install_root`, resolved in `__main__`
+via `common/install_paths.resolve_install_root()` (new shared utility — see `services/
+setup/CLAUDE.md` for why no service had a way to compute this before this pass).
+
+**The detector half is now real, closing the exact gap a direct question named**:
+"what's the point of Health API if it can't detect... doesn't it have a sub-API for
+bugs?" Health's own Watchdog sub-API already detects a real, specific class of problem
+(`GetSilentServices` — a service that stopped kicking); `diagnostics/detector.py`'s
+`detect_and_file_silent_service_issues()` turns that real signal into a real,
+deduplicated (by fingerprint, never re-filing an already-open issue), GitHub-App-
+authenticated filed issue — the actual pipeline `v3-plan-01-core-apis.md` #27 describes:
+"takes a raw diagnostic signal, compiles it into a well-formed GitHub Issue... via a
+swappable issue-tracker adapter... Authenticated via a GitHub App, not a personal access
+token." `diagnostics/github_app_auth.py` implements real RS256 JWT minting directly
+against `cryptography` (no `PyJWT` dependency — verified against a real generated RSA
+keypair, signature checked with the matching public key) and the real two-step App-to-
+installation-token exchange. `diagnostics/issue_filer.py`'s `GitHubAppIssueFilingClient`
+is gated by `is_configured()` — an install with no GitHub App credentials in
+`<install_root>/telemetrees/github_app.json` files nothing, ever, matching the plan's
+own "only DOMTRI's own canonical instances have this wired up by default... any other
+install must explicitly opt in." **Real GitHub issue creation is not tested end to end**
+— this environment holds no real GitHub App installation to file against, and firing
+one as part of an automated suite would be undesirable regardless; the detection/dedup/
+gating logic is live-tested against a genuine running `WatchdogServicer` with a fake
+(Protocol-conforming) filer standing in for the one real external write this
+environment cannot perform. `DetectAndFileIssues` (new RPC) exposes this — real and
+callable, **not yet invoked on a timer by anything**, the identical honest gap
+`core/ingestion/service.py`'s own `PollDriveFallback` already states for itself. Only
+one of the plan's three named signal sources is wired (Watchdog's silent-service
+detection); Update's failed-rollout/bump-test events and Dependencies Warden's flagged
+pre-release features are the identical mechanical pattern, not yet applied.

@@ -302,10 +302,16 @@ if __name__ == "__main__":  # pragma: no cover
     async def _main() -> None:
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
         srv = await serve(addr)
-        print(f"AuditService listening on {addr}", file=sys.stderr)
+        print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
+        print(f"AuditService listening on {srv.bound_address}", file=sys.stderr)
         # The resolved interpreter, not just a launch message — this is what makes
         # `PYTHON_BIN=... ./start.sh` independently verifiable from outside the process.
         print(f"running under: {sys.executable} ({sys.version.split()[0]})", file=sys.stderr)
-        await srv.wait_for_termination()
+        from common.watchdog_client import start_kicking_for_service, stop_kick_loop
+        kick_task = start_kicking_for_service('audit')
+        try:
+            await srv.wait_for_termination()
+        finally:
+            await stop_kick_loop(kick_task)
 
     asyncio.run(_main())

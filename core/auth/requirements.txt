@@ -1,0 +1,17 @@
+# Auth & Tenancy API — third-party runtime dependencies beyond `common/requirements.txt`.
+#
+# Every entry here is imported *lazily, inside the function that needs it* (see
+# `auth_methods/sso_provider.py` and `auth_methods/passkey_provider.py`), so an install that
+# skips these degrades that one auth method to unavailable rather than failing the service
+# (`docs/PRINCIPLES.md` §4.4). They are still declared here because a provider silently
+# unavailable on every install is not "graceful degradation," it is a missing feature.
+
+# --- SSO / OIDC (v3-deepdive-05-auth-tenancy-api.md §4) ----------------------
+authlib>=1.3
+
+# `authlib.integrations.httpx_client` is the specific integration this API imports, so httpx is
+# a real requirement of that code path rather than an optional extra of authlib's.
+httpx>=0.27
+
+# --- Passkeys / WebAuthn (same §4) -------------------------------------------
+webauthn>=2.0

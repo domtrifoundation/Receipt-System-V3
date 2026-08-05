@@ -65,6 +65,7 @@ def build_servicer(
     sms_channel: NotificationChannel | None = None,
     audit_sink: AuditSink | None = None,
     db: AuthDatabase | None = None,
+    install_root: Path | str | None = None,
 ) -> AuthServicer:
     """Assemble the whole API from the `auth:` config subtree.
 
@@ -101,6 +102,7 @@ def build_servicer(
         ),
         challenges=challenges,
         metrics=metrics,
+        install_root=Path(install_root) if install_root is not None else None,
     )
 
 

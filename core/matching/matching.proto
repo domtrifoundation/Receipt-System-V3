@@ -1,0 +1,104 @@
+// Matching API gRPC surface (`v3-deepdive-15-matching-api.md` §7, extended by §5's resolved
+// vendor-corroboration mechanism — see below).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered. A field that stops being needed is marked deprecated
+// in a comment; its number is never reused.
+//
+// Errors are data, not status codes (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair. Matching has no equivalent of Auth's raise-loudly
+// carve-out — nothing here is a security decision.
+//
+// **`GetVendorMatchContext` is not in the deep-dive's own minimal §7 sketch.** That document's
+// §5.1 names `get_vendor_match_context(receipt_id)` as "the actual mechanism" Execution Core
+// calls to assemble Inference's own extraction request, but its own §7 predates that section
+// being resolved. Exposing it as its own RPC — rather than folding the policy gate into
+// `MatchVendor` — is what lets `VendorCorroborationPolicy` (§5.2) be applied without forcing
+// every `MatchVendor` caller to also carry a policy/threshold it may not have an opinion about.
+
+syntax = "proto3";
+
+package resibo.matching.v1;
+
+service MatchingService {
+  // The forward candidate lookup (§3) — an OCR-extracted vendor/franchiser string against a
+  // caller-supplied set of directory candidates. Matching never fetches those candidates
+  // itself: it consumes Architect's Vendor Directory, never holds a copy of it (this API's
+  // own CLAUDE.md, "does NOT own").
+  rpc MatchVendor(MatchRequest) returns (MatchResponse);
+
+  // The reverse gazetteer scan (§4) — known vendor names/aliases against the raw OCR text's
+  // own plausibility window, catching a mangled or missed primary vendor-field extraction.
+  rpc ReverseGazetteerScan(GazetteerScanRequest) returns (MatchResponse);
+
+  // §5.1's resolved mechanism: builds the context Execution Core hands to Inference alongside
+  // the raw OCR text, gated by the caller's own `VendorCorroborationPolicy` (§5.2) rather than
+  // by Matching's own confidence — the direct fix for "a deterministic fuzzy-matcher can be
+  // confidently wrong, not just uncertain."
+  rpc GetVendorMatchContext(VendorMatchContextRequest) returns (MatchContextResponse);
+}
+
+// One directory entry Matching searches against — this API's own read-only echo of whatever
+// Architect's `SearchVendorDirectory` returned, not a second copy of the directory (Architect
+// owns the data; Matching only ever holds what one call's caller handed it). `entity_kind`
+// carries "corporation" or "franchiser" so the identical forward-match pass serves both of
+// the deep-dive's own resolved open question #2 (franchise-vs-franchiser is two independent
+// passes over this same message shape, never one combined heuristic).
+message VendorCandidateProto {
+  string entity_id = 1;
+  string name = 2;
+  string entity_kind = 3;      // "corporation" | "franchiser" — defaults to "corporation"
+  string tin = 4;
+  string category_code = 5;
+  repeated string aliases = 6;
+}
+
+message MatchRequest {
+  string extracted_text = 1;     // the OCR-extracted vendor/franchiser field
+  string raw_ocr_text = 2;       // full raw OCR text, for the reverse gazetteer axis
+  repeated VendorCandidateProto candidates = 3;
+  int32 limit = 4;
+  int32 plausibility_window = 5; // §4's cost-bounding window, chars of raw_ocr_text scanned
+}
+
+message GazetteerScanRequest {
+  string raw_ocr_text = 1;
+  repeated VendorCandidateProto candidates = 2;
+  int32 plausibility_window = 3;
+  int32 limit = 4;
+}
+
+message MatchCandidateProto {
+  string canonical_name = 1;
+  float score = 2;
+  string source = 3;             // "forward" | "reverse_gazetteer"
+  string entity_id = 4;
+  string entity_kind = 5;
+  string tin = 6;
+  string category_code = 7;
+  string matched_alias = 8;      // which alias actually matched; empty when the name itself won
+}
+
+message MatchResponse {
+  repeated MatchCandidateProto candidates = 1;   // ranked, highest score first
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message VendorMatchContextRequest {
+  MatchRequest match_request = 1;
+  string policy = 2;              // "always" | "below_threshold" | "never" — §5.2
+  double threshold = 3;           // only consulted under "below_threshold"
+}
+
+message MatchContextResponse {
+  repeated MatchCandidateProto candidates = 1;
+  // Whether Execution Core should actually forward `candidates` into Inference's own context
+  // this run. `candidates` is still populated when false, for transparency/logging — the gate
+  // is this field, never an emptied list standing in for it.
+  bool included = 2;
+  string policy = 3;
+  double top_score = 4;
+  string error_code = 5;
+  string error_detail = 6;
+}

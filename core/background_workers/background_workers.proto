@@ -1,0 +1,96 @@
+// Background Workers API gRPC surface.
+//
+// **This surface is a deliberate, documented resolution of a real design tension, not a
+// guess.** The deep-dive itself specifies no wire contract at all — §8/§9 cover asyncio and
+// testing hooks only — while `docs/PROCESS_TOPOLOGY.md` establishes every Core API as its
+// own gRPC-reachable process. `core/tool_call/CLAUDE.md` records the identical conflict and
+// asks for "one deliberate decision covering both rather than two independent guesses."
+//
+// The resolution: this API's own boundary is explicit that non-LLM workers run *in-process*
+// inside Execution Core (registered handlers are live Python callables, not something a
+// remote caller can invoke by name) — so this surface is deliberately observability/control
+// only, never remote dispatch. `ListJobs`/`GetJobHealth`/`GetNextDue` give a TUI or webapp
+// real visibility into what is registered and how it is running; `EnableJob` gives staff the
+// one explicit action the deep-dive's own §10 retry guard requires ("re-enabling is an
+// explicit staff action, never automatic"). Actually running a job — `JobScheduler.dispatch`
+// — stays an in-process call only, made by whichever process holds the real handler.
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+
+syntax = "proto3";
+
+package resibo.background_workers.v1;
+
+service BackgroundWorkersService {
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc GetJobHealth(JobHealthRequest) returns (JobHealthResponse);
+  rpc EnableJob(EnableJobRequest) returns (JobHealthResponse);
+  rpc GetNextDue(NextDueRequest) returns (NextDueResponse);
+}
+
+message JobRegistrationInfo {
+  string job_id = 1;
+  string owning_api = 2;
+  string job_class = 3;            // "async_io" | "native_thread" | "cpu_process"
+  bool idle_only = 4;
+  bool event_triggered = 5;        // true means interval_seconds is not meaningful
+  int32 interval_seconds = 6;
+  string scope = 7;                // "global" or a real user id
+  string description = 8;
+}
+
+message JobHealthInfo {
+  string job_id = 1;
+  int32 consecutive_failures = 2;
+  int32 total_runs = 3;
+  int32 total_failures = 4;
+  string last_run_at = 5;          // RFC 3339, empty when never run
+  string last_outcome = 6;         // "" | "succeeded" | "failed" | "skipped_not_idle" | ...
+  string last_error_detail = 7;
+  string disabled_at = 8;          // RFC 3339, empty when not disabled
+  string disabled_reason = 9;
+}
+
+message ListJobsRequest {
+}
+
+message ListJobsResponse {
+  repeated JobRegistrationInfo jobs = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message JobHealthRequest {
+  string job_id = 1;
+}
+
+message JobHealthResponse {
+  JobHealthInfo health = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}
+
+message EnableJobRequest {
+  string session_id = 1;
+  string job_id = 2;
+}
+
+message NextDueRequest {
+}
+
+message NextDueEstimateInfo {
+  string job_id = 1;
+  double seconds_until_due = 2;
+  bool approximate = 3;
+  bool blocked_by_idle = 4;
+}
+
+message NextDueResponse {
+  repeated NextDueEstimateInfo estimates = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}

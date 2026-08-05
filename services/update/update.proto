@@ -1,0 +1,62 @@
+// Update/Deployment API gRPC surface (`v3-deepdive-24-update-deployment-api.md` §8).
+//
+// Field-numbering discipline (`docs/templates/new_grpc_endpoint.md`): fields are only ever
+// added, never removed or renumbered.
+//
+// Errors are data (`docs/PRINCIPLES.md` §4.1): every response carries an
+// `error_code`/`error_detail` pair.
+//
+// `TriggerRollback` is deliberately absent — it was removed from this surface during the
+// deep-dive's own double-check pass: activating/reverting a release is entirely Supervisor's
+// job (`v3-deepdive-38-supervisor.md`), never this API's, so the thing choosing to swap a
+// release is never the release being swapped in.
+
+syntax = "proto3";
+
+package resibo.update.v1;
+
+service UpdateService {
+  rpc CloneRelease(CloneRequest) returns (ReleaseDirectoryResponse);
+  rpc GetActiveChannels(ChannelRequest) returns (ChannelListResponse);
+}
+
+message CloneRequest {
+  string install_root = 1;
+  string channel = 2;              // "ltsc" | "stable" | "beta" | "alpha" | "latest_commit"
+  string ref_override = 3;         // the standing REF_OVERRIDE escape hatch; empty means unset
+  string license_key = 4;          // empty means skip the Keymaster exchange
+  string instance_id = 5;
+  bool dev_mode_set = 6;           // true means dev_mode below is authoritative
+  bool dev_mode = 7;
+  string python_bin = 8;
+}
+
+message ReleaseDirectoryResponse {
+  bool ok = 1;
+  string path = 2;
+  string version = 3;
+  string commit_hash = 4;
+  string ref = 5;
+  string channel = 6;
+  bool used_fallback_ref = 7;
+  bool keymaster_token_used = 8;
+  bool finalize_ok = 9;
+  string error_code = 10;
+  string error_detail = 11;
+}
+
+message ChannelRequest {
+  string install_root = 1;
+}
+
+message ChannelUsageInfo {
+  string channel = 1;
+  string last_release_name = 2;
+  string last_cloned_at = 3;       // RFC 3339
+}
+
+message ChannelListResponse {
+  repeated ChannelUsageInfo channels = 1;
+  string error_code = 2;
+  string error_detail = 3;
+}

@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 import grpc
 
+from common.local_config_store import LocalConfigStore
 from .auth_methods.base import AuthMethodRegistry
 from .auth_methods.passkey_provider import PasskeyProvider
 from .auth_methods.two_factor import TwoFactorGate
@@ -38,6 +40,7 @@ from .contracts import (
     AuthMethod,
     InstallProfile,
     Role,
+    TenancyMode,
 )
 from .errors import AuthFailure, RoleInsufficient, StepUpRequired
 from .generated import auth_pb2 as pb
@@ -62,6 +65,14 @@ from .store import UserDirectory, in_thread
 from .tenancy import implicit_owner_session
 
 DEFAULT_ADDRESS = "127.0.0.1:50056"
+
+#: Real, persisted tenancy config — `<install_root>/auth/config.json`, the same
+#: lightweight-per-API-JSON-file pattern `supervisor/arbitration.py`'s `ChannelArbitrator`
+#: already established. `GetTenancyMode`/`SetTenancyMode` read/write this directly rather
+#: than `self._profile` (constructed once, at process start) — see those methods' own
+#: docstrings for why a live `SetTenancyMode` call cannot retroactively change the
+#: already-wired collaborators.
+TENANCY_CONFIG_RELPATH = "auth/config.json"
 
 
 def _status_for(exc: AuthFailure) -> grpc.StatusCode:
@@ -95,8 +106,13 @@ class AuthServicer(pb_grpc.AuthServiceServicer):
         break_glass: BreakGlassLedger,
         challenges: ChallengeStore,
         metrics: AuthMetrics | None = None,
+        install_root: Path | None = None,
     ) -> None:
         self._profile = profile
+        #: `None` in a dev checkout — `GetTenancyMode`/`SetTenancyMode` report
+        #: `known=false` rather than fabricating a value (`common/install_paths.
+        #: resolve_install_root()`, same posture as `services/setup/service.py`).
+        self._install_root = install_root
         self._registry = registry
         self._sessions = sessions
         self._directory = directory
@@ -420,6 +436,41 @@ class AuthServicer(pb_grpc.AuthServiceServicer):
             two_factor_policy=self._profile.two_factor_policy.value,
         )
 
+    def _resolve_install_root(self, request_install_root: str) -> Path | None:
+        if request_install_root:
+            return Path(request_install_root)
+        return self._install_root
+
+    async def GetTenancyMode(self, request, context=None):
+        """Reads the real, persisted config directly — not `self._profile`, which was
+        fixed at process construction and may be stale relative to a `SetTenancyMode`
+        call made since. Defaults to `"multi"` (the same default `tenancy.resolve_profile`
+        itself falls back to) when nothing has been persisted yet."""
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.TenancyModeResponse(known=False)
+        store = LocalConfigStore(install_root, TENANCY_CONFIG_RELPATH)
+        mode = store.get("tenancy_mode", TenancyMode.MULTI.value)
+        return pb.TenancyModeResponse(tenancy_mode=mode, known=True)
+
+    async def SetTenancyMode(self, request, context=None):
+        """Persists the new mode for the *next* restart — real, not fabricated, but
+        honestly incomplete as a live toggle: `self._profile` and every collaborator
+        wired from it (`LoginFlow`, `StepUpFlow`, `TwoFactorGate`) were constructed once
+        at process start and do not re-read this file. `takes_effect_on_restart=True`
+        tells a caller (the TUI's own settings screen) the truth about when this applies,
+        rather than implying an immediate live change that doesn't actually happen."""
+        install_root = self._resolve_install_root(request.install_root)
+        if install_root is None:
+            return pb.TenancyModeResponse(known=False)
+        try:
+            mode = TenancyMode(request.tenancy_mode)
+        except ValueError:
+            return pb.TenancyModeResponse(known=False)
+        store = LocalConfigStore(install_root, TENANCY_CONFIG_RELPATH)
+        store.set("tenancy_mode", mode.value)
+        return pb.TenancyModeResponse(tenancy_mode=mode.value, known=True, takes_effect_on_restart=True)
+
 
 async def serve(servicer: AuthServicer, address: str = DEFAULT_ADDRESS) -> grpc.aio.Server:
     """Start the service and return the running server so a caller can stop it.
@@ -440,3 +491,55 @@ async def serve(servicer: AuthServicer, address: str = DEFAULT_ADDRESS) -> grpc.
 
 
 __all__ = ["DEFAULT_ADDRESS", "AuthServicer", "serve"]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import asyncio
+    import sys
+
+    async def _main() -> None:
+        addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
+
+        from .auth_methods.base import AuthMethodRegistry
+        from .auth_methods.two_factor import TwoFactorGate
+        from .break_glass.grant import BreakGlassLedger
+        from .challenges import ChallengeStore
+        from .session.session_store import SessionStore
+        from .store import AuthDatabase, UserDirectory
+        from .tenancy import resolve_profile
+
+        from common.install_paths import resolve_install_root
+
+        install_root = resolve_install_root(Path(__file__))
+        # A real, previously-live-found gap: this always passed `None` regardless of what
+        # `SetTenancyMode` (or a first-run wizard) had ever persisted, so a real running
+        # Auth process could never actually come up in single-tenant mode from a saved
+        # choice — it silently defaulted to "multi" every single launch. Fixed by reading
+        # the same `auth/config.json` `GetTenancyMode`/`SetTenancyMode` read and write.
+        persisted_mode = None
+        if install_root is not None:
+            persisted_mode = LocalConfigStore(install_root, TENANCY_CONFIG_RELPATH).get("tenancy_mode")
+        db = AuthDatabase()
+        profile = resolve_profile({"tenancy_mode": persisted_mode} if persisted_mode else None)
+        directory = UserDirectory(db)
+        servicer = AuthServicer(
+            profile=profile,
+            registry=AuthMethodRegistry(),
+            sessions=SessionStore(db),
+            directory=directory,
+            two_factor=TwoFactorGate(directory, profile),
+            break_glass=BreakGlassLedger(db),
+            challenges=ChallengeStore(db),
+            install_root=install_root,
+        )
+        srv = await serve(servicer, addr)
+        print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
+        print(f"listening on {srv.bound_address}", file=sys.stderr)
+        from common.watchdog_client import start_kicking_for_service, stop_kick_loop
+        kick_task = start_kicking_for_service('auth')
+        try:
+            await srv.wait_for_termination()
+        finally:
+            await stop_kick_loop(kick_task)
+
+    asyncio.run(_main())

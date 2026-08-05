@@ -8,6 +8,8 @@ This document exists because "process separation via gRPC" (`docs/PRINCIPLES.md`
 
 **There is no single "main process."** Update API's own Boot Sequence design (originally documented at `v3-deepdive-24-update-deployment-api.md` §5, since moved to Supervisor's own dedicated document, `v3-deepdive-38-supervisor.md`, during a later double-check pass) is the proof: Supervisor "launches each service in dependency order (Persistence before Execution Core, which depends on it)" — services launched individually, in a real dependency order, is not consistent with one bundled process. The underlying reason is stated even earlier in the same original source: Supervisor launches "each service from the correct per-user-channel release's own **per-service venv**" — a venv is a single Python environment; a service with its own venv is, structurally, its own OS process. This isn't incidental. Every Core API in this project has a genuinely different, sometimes conflicting dependency footprint (OCR's OpenCV/Tesseract/PaddleOCR stack has nothing to do with Auth's Authlib, and bundling them into one shared environment would be a real version-pinning conflict risk) — one venv per service is what avoids that, and one process per venv is what falls out of it naturally.
 
+**How those per-service venvs are actually created, and how service code becomes importable inside one, is [`docs/VENV_AND_IMPORTS.md`](VENV_AND_IMPORTS.md).** This document asserts the venvs exist and gives the reason they exist; it deliberately does not describe the mechanism, and for a long time neither did anything else — a real gap, since a venv is an isolated `site-packages` and nothing in this corpus installed `common/` or `core/*` into one. The short version: venvs live inside the clone they serve, hold third-party packages only, and first-party code resolves from the clone root on `PYTHONPATH`.
+
 **Supervisor itself is neither Layer 1 nor Layer 2 — worth naming as its own, structurally distinct category.** Every Layer 1 process lives inside a versioned release clone; every Layer 2 process (Interface, Gateway) is a detachable client of Layer 1. Supervisor lives **outside every release clone, permanently** — it's the thing that decides which clone is even active and launches Layer 1 from it in the first place, so it structurally can't be part of what it launches. Its own full design, including why it can't update itself the same way it updates everything else, lives in `v3-deepdive-38-supervisor.md`.
 
 **So: every one of the 32 Core APIs runs as its own independently-launched process**, tied together entirely by internal gRPC calls. Wherever another document in this corpus says "the main process" (Logs, Health, and Interface's own deep-dives all do this, as loose shorthand written before this document existed), read it as **"the core service cluster"** — a set of independent, cooperating processes, not a literal singular process. None of the *conclusions* those documents draw change (Logs API is still fully independent of Interface either way) — only the precision of how it's described.
@@ -24,6 +26,30 @@ All 32 Core APIs (OCR, Preprocessing, Inference, Persistence, Execution Core, Au
 
 ### Layer 3 — The browser (external, not managed by this system at all)
 The webapp's actual **runtime** — the React application executing — runs entirely on the end user's own machine, inside their own browser. This project doesn't run, host, or manage this process in any sense; it's genuinely external, the same way any web application's client-side code runs on a machine the server operator doesn't control.
+
+### 2.1 Which tree a Core API's package lives in — `core/` vs `services/`
+
+Layer 1 vs Layer 2 is about *runtime*. It is not the same question as which source tree a
+package sits in, and conflating the two is what let five packages drift. Stated here because it
+was previously nowhere: every package re-derived it from whichever neighbour it happened to look
+at, and `services/execution_core/`'s own `CLAUDE.md` justified its (wrong) location with the
+claim that "every Core API in this repo lives under `core/`" — which was never true.
+
+- **`core/`** — continuously-running Layer 1 domain services. The pipeline and everything it
+  calls: OCR, Preprocessing, Inference, Persistence, Auth, Audit, Logs, Health, Architect,
+  Matching, Reconciliation, Content Security, Telemetrees, Account Guardian, and the rest.
+- **`services/`** — the five Core APIs that are *not* continuously-running domain services:
+  the detachable Layer 2 clients (**Interface** #6, **Gateway** #16), the lifecycle/one-shot
+  APIs (**Setup** #23 — its own §1 says it "does not run on every launch"; **Update** #21), and
+  the externally-facing **Status Page** #30 — plus **Execution Core** #24, whose own deep-dive
+  §2 places it here.
+
+**The authority for any individual package's path is that API's own deep-dive §2**, not
+`v3-plan-01-core-apis.md`'s parenthetical. `v3-plan-00-index.md` says so directly — the
+deep-dives own "package layout, data contracts, dependencies…" and the instruction is to "check
+that document for the real detail, not just this summary line." Four entries in file 01
+(Architect, Content Security, Telemetrees, Account Guardian) said `services/` while all four
+deep-dives said `core/`; file 01 was the stale one and has been corrected to match.
 
 ---
 
