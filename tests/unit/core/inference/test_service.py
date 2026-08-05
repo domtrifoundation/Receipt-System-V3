@@ -20,7 +20,7 @@ grpc = pytest.importorskip("grpc", reason="grpcio is not installed in this inter
 
 from core.inference.contracts import FinishReason, GenerationResult  # noqa: E402
 from core.inference.model_registry import InferenceConfig  # noqa: E402
-from core.inference.service import InferenceServicer, serve  # noqa: E402
+from core.inference.service import InferenceServicer, _config_from_env, serve  # noqa: E402
 
 
 class _FakeWorker:
@@ -77,6 +77,43 @@ def test_list_presets_reflects_the_real_registry():
 
     response = asyncio.run(go())
     assert "phi4-mini" in response.available_presets
+
+
+# --------------------------------------------------------------------- _config_from_env
+
+
+def test_config_from_env_defaults_match_inferenceconfig_defaults(monkeypatch):
+    for var in ("RESIBO_INFERENCE_MODELS_DIR", "RESIBO_INFERENCE_PRESETS_ENABLED", "RESIBO_INFERENCE_DEVICE"):
+        monkeypatch.delenv(var, raising=False)
+
+    config = _config_from_env()
+
+    assert config == InferenceConfig()
+
+
+def test_config_from_env_models_dir_override(monkeypatch):
+    monkeypatch.setenv("RESIBO_INFERENCE_MODELS_DIR", r"C:\InferenceModels")
+
+    config = _config_from_env()
+
+    assert config.models_dir == r"C:\InferenceModels"
+
+
+def test_config_from_env_presets_enabled_override(monkeypatch):
+    monkeypatch.setenv("RESIBO_INFERENCE_PRESETS_ENABLED", "phi4-mini, phi4-vision")
+
+    config = _config_from_env()
+
+    assert config.presets_enabled == frozenset({"phi4-mini", "phi4-vision"})
+
+
+def test_config_from_env_device_applies_to_every_enabled_preset(monkeypatch):
+    monkeypatch.setenv("RESIBO_INFERENCE_PRESETS_ENABLED", "phi4-mini,phi4-vision")
+    monkeypatch.setenv("RESIBO_INFERENCE_DEVICE", "dml")
+
+    config = _config_from_env()
+
+    assert dict(config.device_by_preset) == {"phi4-mini": "dml", "phi4-vision": "dml"}
 
 
 @pytest.mark.slow

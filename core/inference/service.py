@@ -12,6 +12,7 @@ importable — and its tests meaningful — on an interpreter with no `grpcio` w
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from common.frozen_dict import FrozenDict
 
@@ -126,13 +127,47 @@ async def serve(
     return server
 
 
+def _config_from_env() -> InferenceConfig:
+    """Real, live-found gap: unlike every other service in this repo that reads an
+    external-resource path from an env var (`RESIBO_CLAMAV_DATABASE_DIR`,
+    `RESIBO_CLAMD_HOST`), this one had no seam at all — `InferenceConfig.models_dir`'s
+    `"models"` default and `device_by_preset`'s empty default were the only values a real
+    install could ever get, with no way for an operator to point this at real downloaded
+    model weights or a real non-CPU device without editing code. Confirmed live: this is
+    exactly what blocked testing this service against a real, actually-downloaded model.
+
+    `RESIBO_INFERENCE_DEVICE`, if set, applies to every enabled preset uniformly — a real
+    install has one machine with one chosen execution provider, not a different device
+    per preset; `device_by_preset`'s own per-preset shape stays available for a caller
+    that constructs `InferenceConfig` directly and wants finer control than this
+    environment-variable convenience offers.
+    """
+    import os
+
+    config = InferenceConfig()
+    models_dir = os.environ.get("RESIBO_INFERENCE_MODELS_DIR")
+    if models_dir:
+        config = replace(config, models_dir=models_dir)
+    presets_enabled = os.environ.get("RESIBO_INFERENCE_PRESETS_ENABLED")
+    if presets_enabled:
+        config = replace(
+            config, presets_enabled=frozenset(p.strip() for p in presets_enabled.split(",") if p.strip())
+        )
+    device = os.environ.get("RESIBO_INFERENCE_DEVICE")
+    if device:
+        config = replace(
+            config, device_by_preset=FrozenDict({p: device for p in config.presets_enabled})
+        )
+    return config
+
+
 if __name__ == "__main__":  # pragma: no cover
     import asyncio
     import sys
 
     async def _main():
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        srv = await serve(addr)
+        srv = await serve(addr, config=_config_from_env())
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)
         from common.watchdog_client import start_kicking_for_service, stop_kick_loop
