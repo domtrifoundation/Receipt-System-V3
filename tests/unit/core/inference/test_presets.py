@@ -105,3 +105,27 @@ def test_phi4_vision_has_no_cpu_variant_hint():
 def test_resolve_variant_path_for_phi4_vision_cpu_raises_no_variant_hint(_stub_huggingface_hub):
     with pytest.raises(ValueError, match="no variant hint"):
         resolve_variant_path("phi4-vision", "cpu")
+
+
+def test_flat_repo_with_no_subfolders_resolves_to_the_repo_root(_stub_huggingface_hub):
+    """The real, live-found second repo shape: `keisuke-miyako/Qwen2.5-3B-Instruct-onnx-
+    int4` ships every file directly at the repo root, real `genai_config.json` included,
+    with no tagged subfolder to match against at all -- unlike Microsoft's own multi-
+    variant-per-repo convention the rest of this suite covers. A flat repo has exactly one
+    variant by construction, regardless of which precision/quant tag was requested."""
+    _stub_huggingface_hub.files = [
+        "genai_config.json", "model.onnx", "model.onnx.data", "tokenizer.json",
+    ]
+
+    result = resolve_variant_path("qwen2.5-3b", "cpu")
+
+    assert result == ""
+
+
+def test_flat_repo_resolves_identically_for_every_device_family(_stub_huggingface_hub):
+    """A single-build flat repo has nothing for `cuda`/`directml` to disambiguate either
+    -- the fallback applies uniformly, not just for the `cpu` case above."""
+    _stub_huggingface_hub.files = ["genai_config.json", "model.onnx"]
+
+    assert resolve_variant_path("qwen2.5-3b", "cuda") == ""
+    assert resolve_variant_path("qwen2.5-3b", "directml") == ""

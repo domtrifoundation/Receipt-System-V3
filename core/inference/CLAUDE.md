@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.12`
+`a03.00.13`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -449,6 +449,25 @@ full pool loads once, serially, at process startup, so real concurrent request t
 never arrives before the pool is ready to actually serve it. `test_service.py`'s
 `test_warm_up_loads_the_full_pool_for_every_enabled_preset_before_returning` asserts
 `worker_pool_size` real loads happen, not just one.
+
+**Real, live-found second repo shape: `resolve_variant_path()` only handled Microsoft's
+own tagged-subfolder-per-variant convention, and a real community repo doesn't follow
+it.** Added the `qwen2.5-3b` preset (`keisuke-miyako/Qwen2.5-3B-Instruct-onnx-int4`) as a
+direct, same-hardware, same-backend comparison point for a real "is V3's own architecture
+the bottleneck, or is this model/hardware just slow" question — confirmed live via
+`list_repo_files` before adding it that this repo genuinely has a real `genai_config.json`
+(loadable by the existing `OnnxGenAiBackend`, unlike `onnx-community`'s own Transformers.js-
+style Qwen exports, which have none). Its real layout is flat — every file directly at the
+repo root, no `cpu_and_mobile/<tag>/` nesting to disambiguate among, because there is
+nothing to disambiguate: one repo, one build. `resolve_variant_path()` now falls back to
+`""` (meaning "the repo root itself") whenever no file anywhere in a repo's listing
+contains `/`, regardless of which precision/quant tag was requested — a flat repo has
+exactly one variant by construction. `model_provisioning.py`'s two prefix-stripping call
+sites (`list_remote_variant_files`, `provision_preset`) both needed the matching fix:
+`f"{variant}/"` produces a bare `"/"` for an empty variant, which no real file path starts
+with, silently excluding every file rather than including all of them. Existing nested-repo
+behavior (`phi4-mini`, `phi4-vision`) is unchanged — the fallback only triggers when zero
+subfolders exist anywhere, never when tags simply don't match a real multi-variant repo.
 
 ## Implementation status
 

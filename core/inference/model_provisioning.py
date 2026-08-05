@@ -83,7 +83,10 @@ def list_remote_variant_files(
     size_by_name = dict(all_files)
 
     variant = resolve_variant_path(preset_name, device_family, list_repo_files_fn=lambda _repo: filenames)
-    prefix = f"{variant}/"
+    # `variant == ""` means "the repo root itself" (`resolve_variant_path`'s own flat-repo
+    # case) -- an empty prefix matches (and strips nothing from) every file, rather than
+    # the `"/"` a naive `f"{variant}/"` would produce, which no real file path starts with.
+    prefix = f"{variant}/" if variant else ""
 
     return tuple(
         RemoteFile(relative_path=name[len(prefix):], size_bytes=size_by_name[name])
@@ -159,7 +162,7 @@ async def provision_preset(
         )
 
     size_by_name = dict(all_files)
-    prefix = f"{variant}/"
+    prefix = f"{variant}/" if variant else ""
     remote_files = tuple(
         RemoteFile(relative_path=name[len(prefix):], size_bytes=size_by_name[name])
         for name in filenames

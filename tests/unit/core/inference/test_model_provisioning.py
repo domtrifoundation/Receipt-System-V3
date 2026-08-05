@@ -54,6 +54,37 @@ def test_list_remote_variant_files_unknown_preset_raises_key_error():
         list_remote_variant_files("no-such-preset", "cpu", hub_lister=_fake_lister())
 
 
+#: The real shape `keisuke-miyako/Qwen2.5-3B-Instruct-onnx-int4` returns -- every file at
+#: the repo root, no tagged subfolder, `resolve_variant_path`'s own flat-repo fallback.
+_QWEN_FLAT_FILES = (
+    ("genai_config.json", 1400),
+    ("model.onnx", 120),
+    ("model.onnx.data", 3_000_000),
+    ("tokenizer.json", 800),
+)
+
+
+def _fake_qwen_lister(files=_QWEN_FLAT_FILES):
+    def lister(repo: str):
+        assert repo == "keisuke-miyako/Qwen2.5-3B-Instruct-onnx-int4"
+        return files
+    return lister
+
+
+def test_list_remote_variant_files_for_a_flat_repo_strips_no_prefix():
+    """The real, live-found second repo shape: an empty `resolve_variant_path()` result
+    (`variant == ""`, meaning "the repo root itself") must produce an empty prefix, not
+    the `"/"` a naive `f"{variant}/"` would -- every filename comes back unchanged, not
+    silently excluded because no real path starts with a bare `/`."""
+    files = list_remote_variant_files("qwen2.5-3b", "cpu", hub_lister=_fake_qwen_lister())
+
+    by_name = {f.relative_path: f.size_bytes for f in files}
+    assert by_name == {
+        "genai_config.json": 1400, "model.onnx": 120,
+        "model.onnx.data": 3_000_000, "tokenizer.json": 800,
+    }
+
+
 # --------------------------------------------------------------------- preset_status
 
 

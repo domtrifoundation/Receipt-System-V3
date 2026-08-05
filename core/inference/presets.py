@@ -64,6 +64,33 @@ MODEL_PRESETS: FrozenDict = FrozenDict({
         "estimated_vram_mb": 5_000,
         "reasoning_marker": None,
     }),
+    "qwen2.5-3b": FrozenDict({
+        #: A real, live-found second repo shape: `keisuke-miyako/Qwen2.5-3B-Instruct-
+        #: onnx-int4` ships as a single flat build (every file at the repo root, real
+        #: `genai_config.json` present, confirmed live via `list_repo_files` before
+        #: adding this entry) rather than Microsoft's own tagged-subfolder-per-variant
+        #: convention `resolve_variant_path()` was originally built against. This preset
+        #: exists specifically to test a real, direct hypothesis about V3's own
+        #: performance against a same-ish-size model (~3B) on the identical hardware and
+        #: backend as `phi4-mini` -- not a hardcoded assumption that a differently-shaped
+        #: repo can't be a real preset. `variant_hints` below still supplies real tags
+        #: (matching the other presets' own convention) even though a flat repo's own
+        #: fallback in `resolve_variant_path()` ignores them once no tagged subfolder
+        #: exists -- keeping every preset's `variant_hints` shape uniform is worth more
+        #: than saving three tuples here.
+        "repo": "keisuke-miyako/Qwen2.5-3B-Instruct-onnx-int4",
+        "variant_hints": FrozenDict({
+            "cpu": ("cpu", "int4"), "cuda": ("gpu", "int4"), "directml": ("gpu", "int4"),
+        }),
+        "context_window": 32_768, "supports_tools": True, "supports_vision": False,
+        #: Reasoned placeholder, not bench-measured -- same caveat as every other
+        #: preset's own `estimated_vram_mb` here. Qwen2.5-3B int4 weight-only
+        #: quantization is roughly 1.5-2GB of raw weights; sized a little above that for
+        #: KV-cache/activation overhead, the same reasoning `phi4-mini`'s own estimate
+        #: documents.
+        "estimated_vram_mb": 2_500,
+        "reasoning_marker": None,
+    }),
 })
 
 
@@ -153,8 +180,22 @@ def resolve_variant_path(
             if "/" in f and precision_tag in f and quant_tag in f
         }
     )
-    if not candidates:
-        raise ValueError(
-            f"no variant folder in {spec.repo!r} matched hint ({precision_tag}, {quant_tag})"
-        )
-    return candidates[0]
+    if candidates:
+        return candidates[0]
+
+    # Real, live-found second repo shape, not a hypothetical: a growing number of
+    # community genai-format exports (e.g. Qwen2.5 conversions) ship as exactly one
+    # build with every file directly at the repo root -- no `cpu_and_mobile/<tag>/`
+    # nesting to disambiguate, because there is nothing to disambiguate among. Requiring
+    # a tag match here would raise `no variant folder matched` against a real, loadable
+    # repo purely because Microsoft's own multi-variant convention doesn't apply to it.
+    # A flat repo (no file anywhere contains a `/`) has exactly one variant by
+    # construction, so it is unconditionally that variant regardless of which
+    # precision/quant tag was requested -- the empty string, meaning "the repo root
+    # itself" to `model_provisioning.py`'s own prefix-stripping callers.
+    if files and not any("/" in f for f in files):
+        return ""
+
+    raise ValueError(
+        f"no variant folder in {spec.repo!r} matched hint ({precision_tag}, {quant_tag})"
+    )
