@@ -116,8 +116,21 @@ def resolve_variant_path(preset_name: str, device_family: str) -> str:
     from huggingface_hub import list_repo_files  # noqa: PLC0415
 
     files = list_repo_files(spec.repo)
+    # Real, live-found bug, caught only by actually calling this against the real Hub
+    # (permission granted, not hypothetical): `f.split("/")[0]` returns the repo's
+    # top-level folder ("cpu_and_mobile"), never the actual model directory one level
+    # deeper that holds `genai_config.json`/`model.onnx`
+    # ("cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4") -- confirmed live against
+    # `microsoft/Phi-4-mini-instruct-onnx`'s real file listing. The full directory
+    # (everything but the filename) is the actual variant path; every file inside one
+    # variant folder shares the same dirname, so this still resolves to exactly one
+    # candidate per real variant, not one per file.
     candidates = sorted(
-        {f.split("/")[0] for f in files if "/" in f and precision_tag in f and quant_tag in f}
+        {
+            "/".join(f.split("/")[:-1])
+            for f in files
+            if "/" in f and precision_tag in f and quant_tag in f
+        }
     )
     if not candidates:
         raise ValueError(
