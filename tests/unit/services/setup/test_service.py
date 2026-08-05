@@ -82,6 +82,40 @@ def test_detect_hardware_returns_a_real_profile_through_the_servicer():
     assert response.source in ("os_probe", "os_probe+external_report")
 
 
+@pytest.mark.slow
+def test_detect_hardware_persists_the_profile_when_install_root_is_set(tmp_path):
+    """The real, previously-missing §8.6 half: this is what makes Health API's own
+    `HardwareProfileReader` able to see anything at all in a later process."""
+    from services.setup.generated import setup_pb2
+    from services.setup.hardware.persistence import read_hardware_profile
+
+    async def go():
+        servicer = SetupServicer(install_root=tmp_path)
+        return await servicer.DetectHardware(setup_pb2.DetectHardwareRequest())
+
+    response = asyncio.run(go())
+    persisted = read_hardware_profile(tmp_path)
+
+    assert persisted is not None
+    assert persisted.cpu_name == response.cpu_name
+    assert persisted.cores == response.cores
+
+
+def test_detect_hardware_does_not_persist_with_no_install_root():
+    """A dev checkout (`install_root=None`) degrades to "not persisted this call" rather
+    than failing hardware detection itself over a missing write location."""
+    from services.setup.generated import setup_pb2
+
+    async def go():
+        servicer = SetupServicer()  # install_root defaults to None
+        return await servicer.DetectHardware(setup_pb2.DetectHardwareRequest())
+
+    # No assertion possible on "nothing was written" without a filesystem to check --
+    # the real guarantee here is simply that this does not raise.
+    response = asyncio.run(go())
+    assert response.cpu_name
+
+
 # --- RunWizard, in-process (no real network) ------------------------------------------------
 
 

@@ -36,11 +36,14 @@ mutation is not implicitly serialized (`docs/PRINCIPLES.md` §3.3.1).
 
 from __future__ import annotations
 
+import re
 import threading
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Protocol, runtime_checkable
+
+from common.execution_provider import GpuLike
 
 from .contracts import (
     DEFAULT_RESERVATION_TTL_SECONDS,
@@ -81,6 +84,18 @@ class HardwareProfileReader(Protocol):
         """That device's total VRAM in MB, or `None` if the profile does not name it."""
 
 
+@runtime_checkable
+class _HardwareProfileLike(Protocol):
+    """Structural, not an import of `services.setup.contracts.HardwareProfile` —
+    `PublishedHardwareProfile` only ever reads `.gpus`, and this repo's own established
+    convention (`core/inference/contracts.py`'s `BlobRef`, re-declared rather than
+    imported from `core.persistence`) is exactly this: a package beneath every service
+    (`common/`, and this ledger by extension) never imports a specific service's own
+    concrete type."""
+
+    gpus: Sequence[GpuLike]
+
+
 class NoHardwareProfile:
     """The default reader: nothing is published, so nothing is grantable.
 
@@ -108,6 +123,69 @@ class StaticHardwareProfile:
 
     def total_mb(self, device_id: str) -> int | None:
         return self._devices.get(device_id)
+
+
+class PublishedHardwareProfile:
+    """The real reader over Setup API's now-actually-published `HardwareProfile`
+    (`services/setup/hardware/persistence.py` — real, live-found gap closed there: nothing
+    ever wrote a detected profile anywhere before that module existed). Setup owns
+    detection, this ledger owns the live commitment count on top of it (§1's own division,
+    this file's module docstring) — this class is the one adapter between them, matching
+    `HardwareProfileReader`'s own stated purpose exactly.
+
+    **Two real, independent `device_id` conventions coexist in this codebase today, not
+    unified into one** (confirmed live: `core/inference/model_registry.py`'s
+    `device_by_preset` uses compute-API-style strings — `"cuda"`, `"directml"` — while
+    `core/ocr/engines/rapidocr_engine.py`/`paddleocr_engine.py` default their own
+    `device_id` config to `"gpu0"`-style index strings). Neither is wrong; forcing either
+    caller to rename would be a breaking change to code this pass has no reason to touch.
+    `total_mb()` resolves `device_id` three ways, first match wins:
+    1. **Exact `compute_api` match** — `"cuda"`/`"sycl"`/`"rocm"` picks the best (most
+       VRAM) GPU reporting that compute API.
+    2. **`"gpuN"` index match** — the Nth GPU in detection order, OCR's own convention.
+    3. **`"computeapi:N"` match** — the Nth GPU among those sharing that compute API, for
+       a real multi-GPU-of-the-same-vendor machine neither convention above disambiguates
+       on its own.
+    `None` (never a fabricated ceiling) when nothing matches — `ResourceLedger.reserve()`
+    reads that as `UNKNOWN_DEVICE`, the same fail-closed rejection `NoHardwareProfile`
+    already produces for everything, per this file's own §4.2 posture.
+    """
+
+    _GPU_INDEX_RE = re.compile(r"^gpu(\d+)$")
+    _COMPUTE_API_INDEX_RE = re.compile(r"^([a-z]+):(\d+)$")
+
+    def __init__(self, profile: _HardwareProfileLike | None) -> None:
+        self._profile = profile
+
+    def total_mb(self, device_id: str) -> int | None:
+        if self._profile is None:
+            return None
+        gpus = self._profile.gpus
+
+        by_index = self._GPU_INDEX_RE.match(device_id)
+        if by_index:
+            index = int(by_index.group(1))
+            if 0 <= index < len(gpus):
+                return _vram_to_mb(gpus[index].vram_gb)
+            return None
+
+        by_api_index = self._COMPUTE_API_INDEX_RE.match(device_id)
+        if by_api_index:
+            api, index = by_api_index.group(1), int(by_api_index.group(2))
+            matching = [g for g in gpus if g.compute_api == api]
+            if 0 <= index < len(matching):
+                return _vram_to_mb(matching[index].vram_gb)
+            return None
+
+        matching = [g for g in gpus if g.compute_api == device_id]
+        if not matching:
+            return None
+        best = max(matching, key=lambda g: g.vram_gb or 0)
+        return _vram_to_mb(best.vram_gb)
+
+
+def _vram_to_mb(vram_gb: float | None) -> int | None:
+    return round(vram_gb * 1024) if vram_gb is not None else None
 
 
 class ResourceLedger:
@@ -343,6 +421,7 @@ def total_committed(reservations: Iterable[ResourceReservation], device_id: str)
 __all__ = [
     "HardwareProfileReader",
     "NoHardwareProfile",
+    "PublishedHardwareProfile",
     "ResourceLedger",
     "StaticHardwareProfile",
     "total_committed",

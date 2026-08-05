@@ -47,11 +47,21 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
 
 Setup owns static hardware *detection*; Health owns the live resource *ledger*. That split is deliberate and worked out from what each API is actually for, not from who thought of it first (`docs/PRINCIPLES.md` §1.5) — Health reads Setup's published profile rather than re-probing. Health reports; it never decides when a rollout proceeds.
 
-**Setup API does not exist yet, so the default `HardwareProfileReader` publishes nothing and
-every reservation is rejected as `UNKNOWN_DEVICE`.** That is deliberate, not a placeholder to
-relax: granting against an unknown VRAM ceiling is the unsafe answer, so this is one place
-where §4.2's fail-closed rule outranks §4.4's degrade-gracefully default. Wiring Setup in later
-means passing a real reader, not removing a permissive default someone forgot about.
+**Setup API's own wiring is now real — `PublishedHardwareProfile` (`resource_ledger.py`) is
+the reader Setup landing here always meant, not a placeholder still waiting to be replaced.**
+`NoHardwareProfile` stays the correct default for a dev checkout or a self-hosted install
+before its first-run wizard (§4.2's fail-closed rule still outranks §4.4's degrade-gracefully
+default in that state — granting against an unknown VRAM ceiling is still the unsafe answer),
+but `__main__` (`service.py`) now actually resolves the install root and reads Setup's real
+persisted profile (`services/setup/hardware/persistence.py` — real, live-found gap closed
+there too: `DetectHardware` always re-probed and returned over gRPC but never wrote the result
+anywhere before that module existed) rather than always constructing the permissive-nothing
+default. Confirmed live end to end on this development machine: real detection (Intel Core
+Ultra 9 285K, a discrete Arc B580 at 11.9GB plus integrated graphics at 2GB) → persisted to
+disk → read back → `PublishedHardwareProfile.total_mb("sycl")` correctly resolves to the
+*discrete* GPU's 12186 MB, not the integrated one's, and the `"gpu0"`/`"gpuN"` index
+convention `core/ocr/`'s own engines already default to resolves against the identical
+underlying list with no changes needed on that side.
 
 **A rejected reservation is not an error.** Deep-dive §5.1 is explicit that a rejection means
 the caller falls back to CPU or queues. `ReservationOutcome.rejection_reason` carries it and

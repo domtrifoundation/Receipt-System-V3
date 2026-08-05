@@ -30,6 +30,7 @@ from pathlib import Path
 from .bootstrap import read_dev_mode, read_run_on_startup, write_run_on_startup
 from .contracts import HardwareProfile, WizardAnswer, WizardStepId
 from .hardware.detect import default_detector
+from .hardware.persistence import write_hardware_profile
 from .hardware.report_import import DEFAULT_CANDIDATE_DIRS, find_and_merge
 from .venv_provisioning import provision_clone
 from .wizard import WizardEngine
@@ -118,6 +119,15 @@ class SetupServicer:
 
         search_paths = tuple(Path(p) for p in request.extra_report_search_paths) or DEFAULT_CANDIDATE_DIRS
         profile = await find_and_merge(profile, search_paths)
+
+        # Real, live-found gap closed here: every prior call detected hardware and
+        # returned it over gRPC without ever writing it anywhere, so no *other* process
+        # (Health API's own VRAM ledger, in particular, §8.6) could ever learn what this
+        # one just found. `None` in a dev checkout (no `install_root`) — degrades to "not
+        # persisted this call" rather than failing hardware detection itself over a
+        # missing write location.
+        if self._install_root is not None:
+            write_hardware_profile(self._install_root, profile)
 
         return _profile_to_pb(profile, pb)
 

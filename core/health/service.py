@@ -366,8 +366,29 @@ def serve(
 if __name__ == "__main__":  # pragma: no cover
     import sys
 
+    # Real, live-found gap closed here: `serve()` always accepted a `profile` override,
+    # but nothing here ever actually built one, so every real install's Health process
+    # ran with the default `NoHardwareProfile()` regardless of what Setup API's own
+    # `DetectHardware` had already found and persisted (`services/setup/hardware/
+    # persistence.py`) -- every reservation against any real device rejected as
+    # UNKNOWN_DEVICE forever, not because no GPU existed, but because nothing ever told
+    # this process one did. `install_root=None` (a dev checkout, or a self-hosted install
+    # before its first-run wizard) degrades to the same `NoHardwareProfile` behavior as
+    # before -- not a regression, the same fail-closed default this ledger has always had.
+    from common.install_paths import resolve_install_root
+    from pathlib import Path as _Path
+
+    from .resource_ledger import PublishedHardwareProfile
+
+    install_root = resolve_install_root(_Path(__file__))
+    hardware_profile = None
+    if install_root is not None:
+        from services.setup.hardware.persistence import read_hardware_profile
+
+        hardware_profile = read_hardware_profile(install_root)
+
     addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-    srv = serve(addr)
+    srv = serve(addr, profile=PublishedHardwareProfile(hardware_profile))
     print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
     print(f"HealthService listening on {srv.bound_address}", file=sys.stderr)
     print(f"running under: {sys.executable} ({sys.version.split()[0]})", file=sys.stderr)
