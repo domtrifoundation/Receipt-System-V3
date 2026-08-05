@@ -17,7 +17,7 @@ The generated stubs are imported lazily, same convention as every other API's
 
 from __future__ import annotations
 
-from .content_security_client import ContentSecurityClient
+from .content_security_client import DEFAULT_CONTENT_SECURITY_ADDRESS, ContentSecurityClient
 from .contracts import (
     BlobStoreGateway,
     IngestionError,
@@ -446,7 +446,10 @@ def _normalization_response(pb, result: NormalizationResult):
     return response
 
 
-async def serve(address: str = DEFAULT_ADDRESS, *, blob_store: BlobStoreGateway, execution_core_address: str | None = None):
+async def serve(
+    address: str = DEFAULT_ADDRESS, *, blob_store: BlobStoreGateway,
+    execution_core_address: str | None = None, content_security: ContentSecurityClient | None = None,
+):
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
     import grpc
 
@@ -454,7 +457,10 @@ async def serve(address: str = DEFAULT_ADDRESS, *, blob_store: BlobStoreGateway,
 
     server = grpc.aio.server()
     ingestion_pb2_grpc.add_IngestionServiceServicer_to_server(
-        IngestionServicer(blob_store, execution_core_address=execution_core_address), server
+        IngestionServicer(
+            blob_store, execution_core_address=execution_core_address, content_security=content_security,
+        ),
+        server,
     )
     port = server.add_insecure_port(address)
     host = address.rsplit(":", 1)[0]
@@ -476,12 +482,31 @@ if __name__ == "__main__":  # pragma: no cover
         from pathlib import Path as _Path
 
         install_root = resolve_install_root(_Path(__file__))
-        client = GrpcBlobStoreClient(PERSISTENCE_ADDRESS, install_root=_Path.cwd().parent.parent)
+        # Real, live-found gap: every one of these three peer addresses was either a
+        # hardcoded fixed default or (for content_security) never resolved/passed at
+        # all — confirmed live, a real install's SubmitDirectUpload failed every single
+        # call with content_security_unavailable because ContentSecurityClient()'s own
+        # hardcoded 127.0.0.1:50062 default is never where the real, dynamically-bound
+        # (:0) Content Security service actually is. All three now resolve the same way
+        # execution_core_address already did.
+        persistence_address = (
+            PERSISTENCE_ADDRESS if install_root is None
+            else resolve_service_address(install_root, "persistence", PERSISTENCE_ADDRESS)
+        )
+        client = GrpcBlobStoreClient(persistence_address, install_root=_Path.cwd().parent.parent)
         execution_core_address = (
             "127.0.0.1:50068" if install_root is None
             else resolve_service_address(install_root, "execution_core", "127.0.0.1:50068")
         )
-        srv = await serve(addr, blob_store=client, execution_core_address=execution_core_address)
+        content_security_address = (
+            DEFAULT_CONTENT_SECURITY_ADDRESS if install_root is None
+            else resolve_service_address(install_root, "content_security", DEFAULT_CONTENT_SECURITY_ADDRESS)
+        )
+        content_security = ContentSecurityClient(content_security_address)
+        srv = await serve(
+            addr, blob_store=client, execution_core_address=execution_core_address,
+            content_security=content_security,
+        )
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)
         from common.watchdog_client import start_kicking_for_service, stop_kick_loop
