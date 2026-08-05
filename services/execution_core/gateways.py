@@ -6,15 +6,17 @@ this file existed: `ExecutionCoreService.StartRun` only ever tracked run metadat
 real stage closures — `pipeline.process_run` was real, tested, orchestration logic that
 nothing in the running system ever called.
 
-**Honest, stated scope for this pass**: real gRPC gateways exist here for Preprocessing,
-OCR, and Persistence — enough to rasterize a source blob, OCR it, and save a receipt
-record carrying the raw OCR text. `receipt_orchestration.build_receipt_work()` wires only
-the `preprocessed`/`ocrd`/`written` stages; `matched`/`geod`/`inferred` are left
-unregistered, and `pipeline.process_receipt` already skips any stage with no registered
-function (`fn = work.stages.get(stage); if fn is None: continue`), so a receipt reaches
-`WRITTEN` with real OCR text captured but no vendor match, no geocoded address, and no
-LLM-structured field extraction yet. Wiring those three is the identical mechanical
-pattern demonstrated here, applied to Matching/Geo/Inference.
+**All six real pipeline stages now have a real gRPC gateway** — `GrpcMatchingGateway`/
+`GrpcArchitectGateway`/`GrpcGeoGateway`/`GrpcInferenceGateway` close the gap this
+docstring used to describe (Matching/Geo/Inference previously had no gateway at all, so
+`pipeline.process_receipt`'s own "skip any stage with no registered function" behavior
+meant a receipt reached `WRITTEN` with real OCR text and nothing else). `GrpcArchitectGateway`
+is not itself a pipeline stage — `MATCHED` needs a real candidate list before it can call
+Matching's own `GetVendorMatchContext`, and Matching deliberately never fetches its own
+candidates (`core/matching/CLAUDE.md`'s own "does NOT own the Vendor Directory data"), so
+`receipt_orchestration.py`'s `matched()` closure calls Architect first, exactly mirroring
+what Execution Core's own real caller-owns-the-candidates responsibility already is
+(`v3-deepdive-15-matching-api.md` §5.1).
 
 **`CheckpointStore`/`AttemptCounter` are in-memory only, not yet durable via Persistence**
 — a real, honestly-stated gap: `persistence.proto` has no checkpoint-storage RPC at all
@@ -30,6 +32,10 @@ from __future__ import annotations
 from services.execution_core.contracts import ReceiptStage, StageCheckpoint
 
 __all__ = [
+    "GrpcArchitectGateway",
+    "GrpcGeoGateway",
+    "GrpcInferenceGateway",
+    "GrpcMatchingGateway",
     "GrpcOcrGateway",
     "GrpcPersistenceGateway",
     "GrpcPreprocessingGateway",
@@ -149,4 +155,82 @@ class GrpcPersistenceGateway:
         async with grpc.aio.insecure_channel(self._address) as channel:
             return await pb_grpc.PersistenceServiceStub(channel).SaveReceipt(
                 pb.SaveReceiptRequest(receipt=receipt_message, actor=actor)
+            )
+
+
+class GrpcArchitectGateway:
+    """Not itself a `ReceiptStage` — `matched()` (`receipt_orchestration.py`) calls this
+    first to get real candidates before it can call Matching at all (module docstring)."""
+
+    def __init__(self, address: str) -> None:
+        self._address = address
+
+    async def search_vendor_directory(self, *, query: str, user_id: str, limit: int = 10):
+        import grpc
+
+        from core.architect.generated import architect_pb2 as pb
+        from core.architect.generated import architect_pb2_grpc as pb_grpc
+
+        async with grpc.aio.insecure_channel(self._address) as channel:
+            return await pb_grpc.ArchitectServiceStub(channel).SearchVendorDirectory(
+                pb.VendorSearchRequest(query=query, user_id=user_id, limit=limit)
+            )
+
+
+class GrpcMatchingGateway:
+    def __init__(self, address: str) -> None:
+        self._address = address
+
+    async def get_vendor_match_context(self, *, match_request, policy: str = "always", threshold: float = 0.0):
+        import grpc
+
+        from core.matching.generated import matching_pb2 as pb
+        from core.matching.generated import matching_pb2_grpc as pb_grpc
+
+        async with grpc.aio.insecure_channel(self._address) as channel:
+            return await pb_grpc.MatchingServiceStub(channel).GetVendorMatchContext(
+                pb.VendorMatchContextRequest(match_request=match_request, policy=policy, threshold=threshold)
+            )
+
+
+class GrpcGeoGateway:
+    def __init__(self, address: str) -> None:
+        self._address = address
+
+    async def geocode(self, *, candidate_strings: tuple[str, ...], vendor_name_hint: str = "", country_code: str = "PH"):
+        import grpc
+
+        from core.geo_address.generated import geo_address_pb2 as pb
+        from core.geo_address.generated import geo_address_pb2_grpc as pb_grpc
+
+        async with grpc.aio.insecure_channel(self._address) as channel:
+            return await pb_grpc.GeoAddressServiceStub(channel).Geocode(
+                pb.GeocodeRequest(
+                    candidate_strings=list(candidate_strings), country_code=country_code,
+                    vendor_name_hint=vendor_name_hint,
+                )
+            )
+
+
+class GrpcInferenceGateway:
+    def __init__(self, address: str) -> None:
+        self._address = address
+
+    async def generate(
+        self, *, run_id: str, user_id: str, preset: str, prompt: str, response_schema_json: str,
+        max_tokens: int = 1024, temperature: float = 0.0, timeout_ms: int = 30000,
+    ):
+        import grpc
+
+        from core.inference.generated import inference_pb2 as pb
+        from core.inference.generated import inference_pb2_grpc as pb_grpc
+
+        message = pb.Message(role="user", content=[pb.ContentBlock(type="text", text=prompt)])
+        async with grpc.aio.insecure_channel(self._address) as channel:
+            return await pb_grpc.InferenceServiceStub(channel).Generate(
+                pb.GenerateRequest(
+                    run_id=run_id, user_id=user_id, preset=preset, messages=[message],
+                    response_schema_json=response_schema_json, max_tokens=max_tokens,
+                    temperature=temperature, timeout_ms=timeout_ms,
+                )
             )

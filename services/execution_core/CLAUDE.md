@@ -17,7 +17,7 @@ commits that got there.
 
 ## Current API version
 
-`a01.00.04`
+`a01.00.05`
 
 The **running** value, distinct from the Zircon target above. The target states where this API
 lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp` in the
@@ -160,14 +160,36 @@ so the next package does not have to re-derive it from whichever neighbour it ha
 - **`RunRegistry` keeps runs in memory.** Every behaviour above is implemented and tested; what
   is missing is the persistence adapter. This joins the same open question `core/billing/` and
   `core/support_ticketing/` each record for their own stores.
-- **The stage callables are now wired to real APIs — the note below documents what changed,
-  and what still hasn't.** OCR, Preprocessing, and Persistence are no longer scaffolding
-  (confirmed live, not assumed), and this package's own real gap was that nothing anywhere
-  constructed a `ReceiptWork` from them. Fixed below. Matching/Geo/Inference remain
-  unwired — `pipeline.process_receipt` skips any stage with no registered callable, so a
-  receipt today reaches `WRITTEN` with real OCR text and no vendor match, geocode, or
-  structured extraction. Extending those three is the identical pattern already
-  demonstrated for the three that are wired.
+- **All six real pipeline stages are now wired — the gap this bullet used to describe is
+  closed.** OCR, Preprocessing, and Persistence were the first three (below); Matching,
+  Geo, and Inference are wired now too, found and closed the same session as a real
+  prerequisite for testing extraction quality against real receipts (a real request to
+  test extraction/vendor-matching/persistence/reconciliation against real data surfaced
+  that `SubmitReceipt` produced OCR text and nothing else — not a hypothetical gap). New
+  `gateways.py` classes: `GrpcArchitectGateway` (not itself a `ReceiptStage` — `matched()`
+  needs real candidates before it can call Matching at all, and Matching never fetches its
+  own, `core/matching/CLAUDE.md`'s own "does NOT own" line), `GrpcMatchingGateway`,
+  `GrpcGeoGateway`, `GrpcInferenceGateway`. `receipt_orchestration.py`'s `matched()` takes
+  the first non-empty OCR line as a naive vendor-search query into Architect, then calls
+  Matching's `GetVendorMatchContext`; `geod()` geocodes using `matched()`'s own top
+  candidate as a hint, degrading honestly to Geo's own default `UnavailableTransport`
+  result rather than crashing when no real provider is configured; `inferred()` builds a
+  real `RECEIPT_EXTRACTION_SCHEMA` (vendor_name, transaction_date, amounts, vat_treatment,
+  tin, or_number, address — a deliberately scoped v1, not the full eventual field set) and
+  calls Inference's `Generate` with `response_schema_json` set, corroborated with
+  `matched()`'s own candidate in the prompt rather than blind to it; `written()` now folds
+  `inferred`/`matched`/`geod`'s real output into the persisted record instead of raw OCR
+  text alone. All three new stage params on `build_receipt_work()` default to `None` and
+  are skipped when absent (`docs/PRINCIPLES.md` §4.4) — an existing caller supplying only
+  the original four `addresses` keys (`tests/unit/services/execution_core/
+  test_receipt_pipeline_e2e.py`, unmodified) keeps the exact prior three-stage behavior,
+  confirmed by that test still passing unchanged. Live-tested end to end against seven
+  genuine running servicers, no mocked gRPC stub anywhere in the chain (`test_receipt_
+  pipeline_full_e2e.py`) — Inference runs a fake worker (no real model in a unit test,
+  matching `core/inference/tests`' own established pattern), Architect/Matching/Geo run
+  for real with their own real default (empty directory / no configured provider), and the
+  persisted record is asserted to actually carry the real structured extraction, a real
+  (empty-but-present) vendor-match result, and a real geocode attempt.
 
 ## Real, live-tested integration — the actual missing piece, closed
 

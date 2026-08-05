@@ -135,6 +135,8 @@ class ExecutionCoreServicer:
         self._addresses = addresses or {
             "preprocessing": "127.0.0.1:50072", "ocr": "127.0.0.1:50090",
             "persistence": "127.0.0.1:50076", "review_flagging": "127.0.0.1:50081",
+            "architect": "127.0.0.1:50060", "matching": "127.0.0.1:50065",
+            "geo_address": "127.0.0.1:50066", "inference": "127.0.0.1:50073",
         }
 
         from .gateways import InMemoryAttemptCounter, InMemoryCheckpointStore, GrpcReviewFlagger
@@ -192,7 +194,15 @@ class ExecutionCoreServicer:
         `RunScheduler`'s own docstring describes, now actually reached from a real RPC."""
         from .generated import execution_core_pb2 as pb
         from .receipt_orchestration import build_receipt_work
-        from .gateways import GrpcOcrGateway, GrpcPersistenceGateway, GrpcPreprocessingGateway
+        from .gateways import (
+            GrpcArchitectGateway,
+            GrpcGeoGateway,
+            GrpcInferenceGateway,
+            GrpcMatchingGateway,
+            GrpcOcrGateway,
+            GrpcPersistenceGateway,
+            GrpcPreprocessingGateway,
+        )
 
         run = self._registry.get(request.run_id)
         if run is None:
@@ -201,6 +211,17 @@ class ExecutionCoreServicer:
                 error_detail=f"no run {request.run_id!r} -- call StartRun first",
             )
 
+        # `.get(...)` rather than `[...]`, deliberately: a caller supplying its own
+        # `addresses` dict (this session's own earlier `test_receipt_pipeline_e2e.py`, in
+        # particular) without the four new keys gets exactly the prior three-stage
+        # behavior -- `build_receipt_work`'s own `None`-default already skips a stage
+        # whose gateway wasn't supplied, so an absent address key degrades the same way
+        # rather than raising a `KeyError` into every existing caller.
+        architect_addr = self._addresses.get("architect")
+        matching_addr = self._addresses.get("matching")
+        geo_addr = self._addresses.get("geo_address")
+        inference_addr = self._addresses.get("inference")
+
         work = build_receipt_work(
             receipt_id=request.receipt_id, run_id=request.run_id, user_id=request.user_id,
             source_blob_ref=request.source_blob_ref, content_hash=request.content_hash,
@@ -208,6 +229,10 @@ class ExecutionCoreServicer:
             preprocessing=GrpcPreprocessingGateway(self._addresses["preprocessing"]),
             ocr=GrpcOcrGateway(self._addresses["ocr"]),
             persistence=GrpcPersistenceGateway(self._addresses["persistence"]),
+            architect=GrpcArchitectGateway(architect_addr) if architect_addr else None,
+            matching=GrpcMatchingGateway(matching_addr) if matching_addr else None,
+            geo=GrpcGeoGateway(geo_addr) if geo_addr else None,
+            inference=GrpcInferenceGateway(inference_addr) if inference_addr else None,
             ocr_source=request.ocr_source or "preprocessed",
             ocr_engines=tuple(request.ocr_engines),
         )
