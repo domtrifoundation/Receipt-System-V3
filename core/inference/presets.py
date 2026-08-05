@@ -45,8 +45,16 @@ MODEL_PRESETS: FrozenDict = FrozenDict({
     }),
     "phi4-vision": FrozenDict({
         "repo": "microsoft/Phi-4-multimodal-instruct-onnx",
+        #: No `"cpu"` entry, live-confirmed against the real repo listing rather than
+        #: assumed symmetric with `phi4-mini` above: this repo ships exactly one packaged,
+        #: `og.Model`-loadable variant (`gpu/gpu-int4-rtn-block-32`) plus a bare `onnx/`
+        #: folder of Model Builder *source* (`builder.py`, `modeling_phi4mm.py`, ...), not
+        #: a second ready-to-load variant. A `"cpu": ("cpu", "int4")` entry here matched
+        #: nothing in `resolve_variant_path()` and would only ever raise `ValueError` --
+        #: correct in outcome (fails loudly, never silently wrong) but a false claim in
+        #: the data itself. `variant_hint("cpu")` now honestly returns `None`.
         "variant_hints": FrozenDict({
-            "cpu": ("cpu", "int4"), "cuda": ("gpu", "int4"), "directml": ("gpu", "int4"),
+            "cuda": ("gpu", "int4"), "directml": ("gpu", "int4"),
         }),
         "context_window": 128_000, "supports_tools": False, "supports_vision": True,
         #: Larger than the text-only preset above — a multimodal vision encoder adds real

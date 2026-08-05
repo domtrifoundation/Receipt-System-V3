@@ -87,3 +87,21 @@ def test_unknown_device_family_raises_value_error(_stub_huggingface_hub):
 
     with pytest.raises(ValueError, match="no variant hint"):
         resolve_variant_path("phi4-mini", "rocm")
+
+
+def test_phi4_vision_has_no_cpu_variant_hint():
+    """Live-confirmed against the real `microsoft/Phi-4-multimodal-instruct-onnx` repo:
+    it ships exactly one packaged variant (gpu/gpu-int4-rtn-block-32), no CPU-ready
+    equivalent -- a `"cpu": (...)` hint here would only ever raise ValueError at
+    resolution time, so the data itself should say so honestly instead."""
+    from core.inference.presets import PresetSpec
+
+    spec = PresetSpec("phi4-vision")
+
+    assert spec.variant_hint("cpu") is None
+    assert spec.variant_hint("directml") == ("gpu", "int4")
+
+
+def test_resolve_variant_path_for_phi4_vision_cpu_raises_no_variant_hint(_stub_huggingface_hub):
+    with pytest.raises(ValueError, match="no variant hint"):
+        resolve_variant_path("phi4-vision", "cpu")
