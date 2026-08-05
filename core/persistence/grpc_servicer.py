@@ -419,9 +419,11 @@ async def serve(address: str = DEFAULT_ADDRESS, **servicer_kwargs):
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
     import grpc
 
+    from common.grpc_limits import GRPC_MESSAGE_SIZE_OPTIONS
+
     from .generated import persistence_pb2_grpc
 
-    server = grpc.aio.server()
+    server = grpc.aio.server(options=GRPC_MESSAGE_SIZE_OPTIONS)
     persistence_pb2_grpc.add_PersistenceServiceServicer_to_server(
         PersistenceGrpcServicer(**servicer_kwargs), server
     )

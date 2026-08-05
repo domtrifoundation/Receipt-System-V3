@@ -80,9 +80,12 @@ class GrpcBlobStoreClient:
         if self._stub is None:
             import grpc
 
+            from common.grpc_limits import GRPC_MESSAGE_SIZE_OPTIONS
             from core.persistence.generated import persistence_pb2_grpc
 
-            self._channel = grpc.aio.insecure_channel(self._resolve_address())
+            self._channel = grpc.aio.insecure_channel(
+                self._resolve_address(), options=GRPC_MESSAGE_SIZE_OPTIONS
+            )
             self._stub = persistence_pb2_grpc.PersistenceServiceStub(self._channel)
         return self._stub
 
