@@ -125,6 +125,21 @@ class GrpcPreprocessingGateway:
                 run_id=run_id, user_id=user_id, source_blob_ref=source_blob_ref, page_index=page_index, scale=scale,
             ))
 
+    async def generate_variants(
+        self, *, run_id: str, user_id: str, image_blob_ref: str, kinds: tuple[str, ...],
+        device_preference: str = "auto",
+    ):
+        import grpc
+
+        from core.preprocessing.generated import preprocessing_pb2 as pb
+        from core.preprocessing.generated import preprocessing_pb2_grpc as pb_grpc
+
+        async with grpc.aio.insecure_channel(self._address) as channel:
+            return await pb_grpc.PreprocessingServiceStub(channel).GenerateVariants(pb.GenerateVariantsRequest(
+                run_id=run_id, user_id=user_id, image_blob_ref=image_blob_ref, kinds=list(kinds),
+                device_preference=device_preference,
+            ))
+
 
 class GrpcOcrGateway:
     def __init__(self, address: str) -> None:

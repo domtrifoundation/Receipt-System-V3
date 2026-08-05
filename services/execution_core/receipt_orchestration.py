@@ -57,6 +57,19 @@ RECEIPT_EXTRACTION_SCHEMA = {
 #: itself never fetches candidates (`gateways.GrpcArchitectGateway`'s own docstring).
 _MAX_CANDIDATE_QUERY_CHARS = 120
 
+#: Real multi-spectral corroboration -- broader than Preprocessing's own conservative
+#: `DEFAULT_VARIANTS_ENABLED` (`{standard, bw_threshold}`, `variant_registry.py`), a
+#: deliberate choice for the extraction-quality problem this set exists to help with:
+#: STANDARD (baseline), BW_THRESHOLD (high-contrast text isolation), HIGH_CONTRAST
+#: (a different tonal axis than BW_THRESHOLD), DESKEW (real-world phone-photographed
+#: receipts are rarely perfectly aligned), DENOISE (compression/scan artifacts). Each
+#: variant is read by every one of OCR's own enabled engines internally (`ocr.read()`'s
+#: own `engines=()` "every enabled engine" default) -- this is the real "N variants x M
+#: engines" corroboration surface, not Preprocessing's default-conservative pair.
+_OCR_VARIANT_KINDS: tuple[str, ...] = (
+    "standard", "bw_threshold", "high_contrast", "deskew", "denoise",
+)
+
 
 def _first_line(text: str) -> str:
     for line in text.splitlines():
@@ -114,14 +127,40 @@ def build_receipt_work(
 
     async def ocrd() -> str:
         if ocr_source == "source":
-            blob_ref = source_blob_ref
-        else:
-            checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.PREPROCESSED)
-            if checkpoint is None:
-                raise RuntimeError("ocrd stage ran before preprocessed checkpoint existed")
-            blob_ref = checkpoint.stage_output_ref
-        response = await ocr.read(run_id=run_id, user_id=user_id, blob_ref=blob_ref, engines=ocr_engines)
-        return response.merged_text
+            # A genuinely digital PDF's own embedded text layer -- variant image
+            # transforms are meaningless here (there is no rasterized image to
+            # transform), the same real reasoning `text_layer` engine's own docstring
+            # already states for why this path reads `source_blob_ref` directly.
+            response = await ocr.read(run_id=run_id, user_id=user_id, blob_ref=source_blob_ref, engines=ocr_engines)
+            return response.merged_text
+
+        checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.PREPROCESSED)
+        if checkpoint is None:
+            raise RuntimeError("ocrd stage ran before preprocessed checkpoint existed")
+        base_blob_ref = checkpoint.stage_output_ref
+
+        # Real multi-spectral corroboration: N real image variants, each read by every
+        # one of OCR's own enabled engines -- the actual "N variants x M engines" sweep,
+        # not a single rasterize-then-read pass. `variants.error_code` set is a real,
+        # honest per-variant failure (`docs/PRINCIPLES.md` §4.4) -- skipped, never fatal
+        # to the receipt as long as at least one variant produces a real image.
+        variants_response = await preprocessing.generate_variants(
+            run_id=run_id, user_id=user_id, image_blob_ref=base_blob_ref, kinds=_OCR_VARIANT_KINDS,
+        )
+        variant_blob_refs = [v.image_blob_ref for v in variants_response.variants if not v.error_code]
+        if not variant_blob_refs:
+            # Every real variant failed (or `GenerateVariants` itself degraded to
+            # nothing) -- fall back to the one base image `preprocessed()` already
+            # produced, rather than failing the whole receipt over a corroboration
+            # enhancement that has no working input to enhance.
+            variant_blob_refs = [base_blob_ref]
+
+        best_response = None
+        for blob_ref in variant_blob_refs:
+            response = await ocr.read(run_id=run_id, user_id=user_id, blob_ref=blob_ref, engines=ocr_engines)
+            if best_response is None or response.confidence > best_response.confidence:
+                best_response = response
+        return best_response.merged_text
 
     async def _raw_ocr_text() -> str:
         ocr_checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.OCRD)
@@ -184,11 +223,29 @@ def build_receipt_work(
             "Extract the following fields from this Philippine receipt's OCR text as JSON "
             "matching the given schema. Use your own reading of the vendor name even if it "
             "differs from the suggested match below -- the suggestion is a hint, not ground "
-            f"truth.\n{hint_line}\nOCR text:\n{raw_text}"
+            "truth.\n"
+            "Real, live-confirmed extraction mistakes to specifically avoid: "
+            "(1) vendor_name must be ONLY the business/company name (e.g. 'Jollibee Foods "
+            "Corporation') -- never include the street address, branch location, or store "
+            "number; put those in the separate address field instead. "
+            "(2) tin is the BIR Tax Identification Number, usually printed near a 'VAT REG "
+            "TIN' or 'TIN' label as a series of digits, often with dashes (e.g. "
+            "'123-456-789-000'); look for it specifically rather than leaving it blank if "
+            "any digit sequence resembling one appears. "
+            "(3) or_number is the Official Receipt or Sales Invoice number, usually near an "
+            "'OR#'/'SI#'/'Invoice No.' label. "
+            "Leave a field as an empty string only if it is genuinely not present in the "
+            f"text below, not as a default.\n{hint_line}\nOCR text:\n{raw_text}"
         )
         response = await inference.generate(
             run_id=run_id, user_id=user_id, preset=inference_preset, prompt=prompt,
             response_schema_json=json.dumps(RECEIPT_EXTRACTION_SCHEMA),
+            # Real, live-confirmed right-sizing: this schema's own JSON output is a
+            # compact single object, not free-form prose -- 1024 tokens was the generic
+            # Inference-wide default, not reasoned for this specific call, and let a
+            # struggling generation run 2-3x longer than a genuinely complete answer
+            # ever needs before finish_reason=LENGTH would even kick in.
+            max_tokens=400,
         )
         if response.finish_reason == "error":
             raise RuntimeError(f"inference failed: {response.error_code}: {response.error_detail}")

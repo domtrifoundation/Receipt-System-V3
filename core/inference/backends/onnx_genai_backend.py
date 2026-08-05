@@ -105,6 +105,40 @@ _PROVIDER_NAMES: dict[str, str] = {
 }
 
 
+def _session_thread_overlay(cpu_count: int | None = None) -> dict:
+    """§8.2's own `intra_op_num_threads`/`inter_op_num_threads` settings, real now —
+    genai_config.json's own `model.decoder.session_options` schema, merged in via
+    `Config.overlay()` (the mechanism `og.Config` actually exposes for this; no
+    dedicated setter exists). `cpu_count` is injectable for tests; real callers get
+    `os.cpu_count()`.
+
+    Half the detected core count, not all of them and not a fixed small number —
+    real, live-confirmed reasoning: this project's own `SubmitReceipt` pipeline runs
+    Inference concurrently with OCR (and Preprocessing) on the same machine, and an
+    unbounded ONNX Runtime session claiming every core starves OCR for the same
+    threads it needs, worsening exactly the wall-clock slowness this was written to
+    fix. `inter_op_num_threads=1` matches ONNX Runtime's own documented default
+    recommendation for a single-graph inference session (no benefit from inter-op
+    parallelism here — one model, one sequential decode loop, not a multi-branch
+    graph) freeing the reserved intra-op budget for the actual per-op parallelism
+    that matters.
+    """
+    import os
+
+    detected = cpu_count if cpu_count is not None else os.cpu_count()
+    intra_op = max(1, (detected or 4) // 2)
+    return {
+        "model": {
+            "decoder": {
+                "session_options": {
+                    "intra_op_num_threads": intra_op,
+                    "inter_op_num_threads": 1,
+                }
+            }
+        }
+    }
+
+
 def _provider_options(provider_name: str, model_dir: str) -> dict[str, str]:
     """Provider-specific options passed via `config.set_provider_option(name, key,
     value)` — same confidence caveat as `_PROVIDER_NAMES` itself (module docstring).
@@ -186,20 +220,27 @@ class OnnxGenAiBackend:
 
         provider_name = _PROVIDER_NAMES.get(device)
         try:
+            # Real, previously-missing §8.2 session setting, closing a live-confirmed
+            # gap: `og.Config` has no dedicated thread-count setter, but `overlay()`
+            # (confirmed live: accepts a JSON string merged into the same schema
+            # `genai_config.json` itself uses) does. Found and applied the same session
+            # this project's own real receipt pipeline showed CPU-bound generation
+            # (openvino's own CPU device_type, DirectML being unstable) genuinely
+            # starving concurrently-running OCR for the same cores -- half the detected
+            # core count, not all of them, is the real fix, not a guess.
+            config = og.Config(model_dir)
+            config.overlay(json.dumps(_session_thread_overlay()))
             if provider_name is not None:
                 # Real EP-selection mechanism (deep-dive §8.1) — see module docstring for
                 # the per-provider confidence caveats.
-                config = og.Config(model_dir)
                 config.clear_providers()
                 config.append_provider(provider_name)
                 for key, value in _provider_options(provider_name, model_dir).items():
                     config.set_provider_option(provider_name, key, value)
-                self._model = og.Model(config)
-            else:
-                # "cpu" (or an unrecognized device string — degrade to CPU rather than
-                # fail the load over a config typo, `docs/PRINCIPLES.md` §4.4) needs no
-                # provider appended at all; CPU is onnxruntime-genai's own built-in default.
-                self._model = og.Model(model_dir)
+            # else: "cpu" (or an unrecognized device string — degrade to CPU rather than
+            # fail the load over a config typo, `docs/PRINCIPLES.md` §4.4) needs no
+            # provider appended at all; CPU is onnxruntime-genai's own built-in default.
+            self._model = og.Model(config)
             self._tokenizer = og.Tokenizer(self._model)
         except Exception as exc:  # noqa: BLE001 - any construction failure is a load failure
             raise ModelLoadFailed(f"{type(exc).__name__}: {exc}") from exc

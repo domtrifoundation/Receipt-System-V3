@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.07`
+`a03.00.08`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -375,6 +375,23 @@ export tonight. Real follow-up, not done here: a statically-shaped model export 
 Builder can target this) might unlock OpenVINO's GPU/NPU compiler; DirectML's own
 instability needs either a driver update or an upstream Intel/Microsoft bug report to
 actually resolve.
+
+**§8.2's `intra_op_num_threads`/`inter_op_num_threads` are real now — found and fixed
+the same session, directly connected to the finding above.** Running real receipts
+through the full `SubmitReceipt` pipeline (Execution Core's own real six-stage flow)
+concurrently exercises Inference *and* OCR on the same machine, and an unbounded ONNX
+Runtime session claiming every core genuinely starved OCR for the same threads — a real,
+observed cause of some of Phase 1's own real timeout failures (`services/execution_core/
+CLAUDE.md`), not just DirectML/OpenVINO-GPU's own separate instability. `og.Config` has
+no dedicated thread-count setter, but `overlay()` (confirmed live: accepts a JSON string
+merged into the exact same schema `genai_config.json` itself uses) does —
+`onnx_genai_backend.py`'s new `_session_thread_overlay()` sets `intra_op_num_threads` to
+half the detected core count (never all of them, never a fixed guess) and
+`inter_op_num_threads=1` (this is one sequential decode loop, not a multi-branch graph —
+no benefit from inter-op parallelism here). Applied to every load path, not just the
+non-CPU ones — `og.Config(model_dir)` is now always constructed and overlaid before
+`og.Model(config)`, replacing the old `og.Model(model_dir)` bare-string-path shortcut for
+the CPU-default case, since that shortcut had no `Config` object to overlay onto at all.
 
 ## Implementation status
 

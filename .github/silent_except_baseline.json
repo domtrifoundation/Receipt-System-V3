@@ -28,7 +28,7 @@
   "core/groups/permission_gate.py:83",
   "core/health/capability_drift.py:180",
   "core/health/capability_drift.py:95",
-  "core/inference/backends/onnx_genai_backend.py:355",
+  "core/inference/backends/onnx_genai_backend.py:396",
   "core/inference/ep_plugins.py:216",
   "core/inference/generation.py:220",
   "core/inference/health_client.py:55",

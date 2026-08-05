@@ -13,6 +13,7 @@ referenced by automated tests.
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 from pathlib import Path
 
@@ -31,6 +32,20 @@ from services.execution_core.service import serve as execution_core_serve  # noq
 
 def run(coro):
     return asyncio.run(coro)
+
+
+_PERSISTENCE_ADDRESS_ENV = "EXECUTION_CORE_TEST_PERSISTENCE_ADDRESS"
+
+
+def _grpc_blob_store_factory() -> GrpcBlobStoreClient:
+    """Module-level, not a closure -- Preprocessing's own `GenerateVariants` runs variant
+    generation in a real `ProcessPoolExecutor` (`core/preprocessing/CLAUDE.md`'s own
+    "closures cannot be pickled" gotcha), so `blob_store_factory` must be importable by
+    reference and reconstruct its own client from real, picklable state -- an env var,
+    matching `core/preprocessing`'s own `tests/unit/core/preprocessing/test_service.py`
+    `_make_test_blob_store` pattern, since a per-test dynamic address can't be a literal
+    here."""
+    return GrpcBlobStoreClient(os.environ[_PERSISTENCE_ADDRESS_ENV])
 
 
 def _free_port() -> int:
@@ -206,16 +221,20 @@ def test_two_different_users_receipts_process_concurrently_not_serially(tmp_path
     run(scenario())
 
 
-def test_the_default_production_path_reaches_written_even_with_no_text_layer_match(tmp_path: Path):
+def test_the_default_production_path_reaches_written_even_with_no_text_layer_match(tmp_path: Path, monkeypatch):
     """The real production default (`ocr_source="preprocessed"`, `ocr_engines=()` meaning
     "every enabled engine") against a rasterized bitmap -- confirms the pipeline completes
     honestly (reaches WRITTEN, empty OCR text is not an error) rather than crashing, even
-    though no bitmap-capable engine is exercised by this fast test run."""
+    though no bitmap-capable engine is exercised by this fast test run. This is also the
+    one real test exercising `ocrd()`'s own multi-variant `GenerateVariants` corroboration
+    sweep (`receipt_orchestration.py`'s `_OCR_VARIANT_KINDS`), since the other tests in
+    this file use `ocr_source="source"` and skip it entirely."""
 
     async def scenario():
         persistence_server = await persistence_serve(f"127.0.0.1:{_free_port()}", top_level=tmp_path)
         blob_client = GrpcBlobStoreClient(persistence_server.bound_address)
-        preprocessing_server = await preprocessing_serve(f"127.0.0.1:{_free_port()}", blob_store_factory=lambda: blob_client)
+        monkeypatch.setenv(_PERSISTENCE_ADDRESS_ENV, persistence_server.bound_address)
+        preprocessing_server = await preprocessing_serve(f"127.0.0.1:{_free_port()}", blob_store_factory=_grpc_blob_store_factory)
         ocr_server = await ocr_serve(f"127.0.0.1:{_free_port()}", blob_store=blob_client)
         execution_core_server = await execution_core_serve(
             f"127.0.0.1:{_free_port()}",

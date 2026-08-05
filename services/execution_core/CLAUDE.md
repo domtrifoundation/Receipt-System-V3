@@ -17,7 +17,7 @@ commits that got there.
 
 ## Current API version
 
-`a01.00.06`
+`a01.00.07`
 
 The **running** value, distinct from the Zircon target above. The target states where this API
 lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp` in the
@@ -190,6 +190,48 @@ so the next package does not have to re-derive it from whichever neighbour it ha
   for real with their own real default (empty directory / no configured provider), and the
   persisted record is asserted to actually carry the real structured extraction, a real
   (empty-but-present) vendor-match result, and a real geocode attempt.
+
+**`ocrd()` now runs a real multi-variant, multi-engine corroboration sweep, not a single
+rasterize-then-read pass — a direct fix for a real, live-found extraction-quality problem,
+not a speculative enhancement.** Running real receipts through the full pipeline for the
+first time surfaced messy extraction (vendor names with the street address run in,
+`tin`/`or_number` never populated) that traced back to `ocrd()` only ever reading one
+plain rasterized image — Preprocessing's own real `GenerateVariants` RPC (`generate_
+variants()`, new on `GrpcPreprocessingGateway`) was built and tested in its own package
+but never actually called from the live pipeline. `_OCR_VARIANT_KINDS` (`standard`,
+`bw_threshold`, `high_contrast`, `deskew`, `denoise`) is a deliberately broader real set
+than Preprocessing's own conservative `DEFAULT_VARIANTS_ENABLED` (`{standard,
+bw_threshold}`, `variant_registry.py`) — chosen for the extraction-quality problem this
+exists to help with, each variant read by every one of OCR's own enabled engines
+internally (the real "N variants x M engines" sweep). The variant/engine combination
+with the highest real `OcrReadResponse.confidence` wins; a variant whose own generation
+failed (`Variant.error_code` set) is skipped, never fatal, and if every variant fails the
+stage falls back to the one base rasterized image rather than failing the receipt over a
+corroboration enhancement with nothing to enhance. Only applies to the real production
+default (`ocr_source="preprocessed"`) — the `ocr_source="source"` digital-PDF-text-layer
+path has no rasterized image to generate variants from, unaffected. **Real, live-found
+test-setup bug fixed in the same pass**: the one existing test exercising this default
+path (`test_receipt_pipeline_e2e.py`'s own `test_the_default_production_path_...`) passed
+a lambda as `blob_store_factory`, which had silently worked until `GenerateVariants` was
+actually called for the first time — Preprocessing's own variant generation runs in a
+real `ProcessPoolExecutor` (`core/preprocessing/CLAUDE.md`'s own documented "closures
+cannot be pickled" constraint), and a lambda genuinely cannot cross that boundary
+(`_pickle.PicklingError`, confirmed live). Fixed with a module-level factory reading a
+real env var for the dynamic per-test address, matching `core/preprocessing`'s own
+established `_make_test_blob_store` pattern exactly rather than inventing a new one.
+
+**`inferred()`'s own prompt was rewritten with explicit, real corrections for the exact
+mistakes live testing found**, not generic prompt-engineering guesswork: real extracted
+output before this fix included `vendor_name` fields with the street address run
+directly into the business name (`"J.R. Balara Puregold Ommonwealih Ave City Quezon
+Balara M.E."`) and `tin`/`or_number` left empty on every single real receipt tested. The
+prompt now explicitly names both mistakes and states the fix (`vendor_name` is the
+business name only, address goes in the separate `address` field; look specifically near
+`"VAT REG TIN"`/`"TIN"`/`"OR#"`/`"SI#"` labels). `max_tokens` for this specific call also
+dropped from Inference's generic 1024 default to 400 — this schema's own output is one
+compact JSON object, and letting a struggling generation run 2-3x longer than a complete
+answer ever needs was real, unnecessary latency on top of the real timeout problem the
+thread-limiting fix (`core/inference/CLAUDE.md`) addresses from the other side.
 
 ## Real, live-tested integration — the actual missing piece, closed
 
