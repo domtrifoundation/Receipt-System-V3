@@ -192,6 +192,40 @@ to point a real install at real downloaded models at all (unlike every other ser
 an external resource dependency); `RESIBO_INFERENCE_MODELS_DIR`/
 `RESIBO_INFERENCE_PRESETS_ENABLED`/`RESIBO_INFERENCE_DEVICE` close that gap.
 
+**The "model manager"/"EP manager"/"downloader" gap identified by a direct follow-up
+audit ("is any of the operational layer around the engine actually built") is now real,
+built to §4.4/§8.6's own design, not just the engine underneath it.** Confirmed missing
+by that audit: `resolve_variant_path()` was called nowhere outside its own tests, no
+execution-provider auto-selection existed anywhere, and the venv installer always
+installed the CPU-only `onnxruntime-genai` regardless of detected hardware. Fixed across
+several passes:
+- **`model_provisioning.py`** — the real downloader `presets.py`'s own docstring pointed
+  at without ever building. `list_remote_variant_files()`/`preset_status()`/
+  `provision_preset()`, built on `services/update/proving_grounds/download.py`'s new
+  resumable (`Range`-header), retrying `download_file()` — a third real caller of that
+  shared infrastructure. Naturally resumable across a full process restart: every call
+  re-checks real disk state before touching the network, so there is no separate resume
+  token to lose. Confirmed live against the real Hugging Face Hub (11 real files/sizes
+  for `phi4-mini`, matching an earlier manual download exactly) and against a real,
+  already-downloaded model correctly reporting `READY`.
+- **`ProvisionPreset`, a new server-streaming RPC** (`inference.proto`, matching
+  Supervisor's own `StreamBootProgress` shape exactly) — real per-file, per-chunk
+  progress over the wire. `ListPresets` gained an appended `preset_statuses` field;
+  its one real Hub round trip per preset is cached after the first call
+  (`InferenceServicer._live_status`), never a live network call per request, matching
+  `model_registry.py`'s own existing "never per-request" rule for model-directory
+  resolution.
+- **`common/execution_provider.py`'s `select_execution_provider()`** — the real "shared
+  session/EP-selection utility" §8.6 designed and never built, generic-enough to sit
+  outside both this API and OCR's own domain (structural `GpuLike` typing, not an import
+  of `services.setup.contracts`, matching this package's own `BlobRef`-re-declaration
+  convention). Wired into `InferenceModelRegistry._device_for`: an operator's explicit
+  `device_by_preset` entry still wins outright; an *unconfigured* preset now falls back
+  to a real hardware-derived device when a `HardwareProfile` is published (new optional
+  `hardware_profile` constructor param), `"cpu"` only when neither is available —
+  existing callers (no profile passed) keep the exact prior behavior. Confirmed live:
+  resolves this development machine's real Intel Arc B580 to `"directml"`.
+
 ## Implementation status
 
 Implemented this session — `contracts.py`, `errors.py`, `backends/` (Protocol + the one

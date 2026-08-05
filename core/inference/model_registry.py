@@ -89,6 +89,7 @@ class InferenceModelRegistry:
         *,
         worker_factory=None,
         health_client: HealthClient | None = None,
+        hardware_profile=None,
     ) -> None:
         self._config = config or InferenceConfig()
         self._blob_store = blob_store
@@ -101,6 +102,12 @@ class InferenceModelRegistry:
         #: awaitable, so existing sync test fakes keep working unchanged.
         self._worker_factory = worker_factory or self._default_worker
         self._health_client = health_client or HealthClient()
+        #: A `services.setup.contracts.HardwareProfile`-shaped object (or `None`) — real
+        #: hardware-aware device selection (§8.6) for a preset an operator never
+        #: explicitly pinned in `device_by_preset`. `None` (the default, and every
+        #: existing caller/test that doesn't pass this) preserves the exact prior
+        #: behavior: an unconfigured preset stays on `"cpu"`, never guessed at.
+        self._hardware_profile = hardware_profile
         self._loaded_workers: dict[str, PresetWorker] = {}
         self._reservations: dict[str, str] = {}
         self._load_locks: dict[str, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
@@ -133,13 +140,21 @@ class InferenceModelRegistry:
         )
 
     def _device_for(self, preset_name: str) -> str:
-        return self._config.device_by_preset.get(preset_name, "cpu")
+        configured = self._config.device_by_preset.get(preset_name)
+        if configured is not None:
+            return configured
+        if self._hardware_profile is not None:
+            from common.execution_provider import select_execution_provider
+
+            return select_execution_provider(self._hardware_profile.gpus)
+        return "cpu"
 
     def device_for(self, preset_name: str) -> str:
         """Public wrapper over `_device_for` — the effective device a preset would load
-        on, real config today (§8.6's own hardware-aware fallback lands in a later pass).
-        `service.py`'s `ListPresets` reports this per preset rather than reaching into a
-        private method."""
+        on: an operator-pinned `device_by_preset` entry wins if set, otherwise a real
+        hardware-derived default (§8.6) when a `HardwareProfile` was published, otherwise
+        `"cpu"`. `service.py`'s `ListPresets` reports this per preset rather than reaching
+        into a private method."""
         return self._device_for(preset_name)
 
     def models_dir(self) -> str:

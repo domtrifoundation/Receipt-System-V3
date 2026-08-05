@@ -11,9 +11,11 @@ covers the real multiprocessing mechanics separately.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 
 import pytest
 
+from common.frozen_dict import FrozenDict
 from core.inference.contracts import GenerationRequest, MessageRole
 from core.inference.model_registry import InferenceConfig, InferenceModelRegistry
 
@@ -240,3 +242,49 @@ def test_shutdown_releases_every_tracked_reservation(monkeypatch):
 
     assert fake_health.released == ["res-1"]
     assert registry._reservations == {}
+
+
+# --------------------------------------------------------------------- device_for / §8.6
+
+
+@dataclass(frozen=True)
+class _FakeGpu:
+    vendor: str
+    compute_api: str
+    discrete: bool = True
+    vram_gb: float | None = None
+
+
+@dataclass(frozen=True)
+class _FakeHardwareProfile:
+    gpus: tuple
+
+
+def test_device_for_stays_on_cpu_with_no_hardware_profile_published():
+    """Existing, pre-Phase-D behavior, unchanged: no profile means no guessing."""
+    registry = InferenceModelRegistry(InferenceConfig(presets_enabled=frozenset({"phi4-mini"})))
+
+    assert registry.device_for("phi4-mini") == "cpu"
+
+
+def test_device_for_uses_hardware_profile_when_preset_is_unconfigured():
+    profile = _FakeHardwareProfile(gpus=(_FakeGpu(vendor="intel", compute_api="sycl", vram_gb=12.0),))
+    registry = InferenceModelRegistry(
+        InferenceConfig(presets_enabled=frozenset({"phi4-mini"})), hardware_profile=profile,
+    )
+
+    # os_name isn't injectable through this layer (real platform.system() applies) --
+    # assert only that it resolved to *something other than* the "no profile" cpu default,
+    # avoiding coupling this test to whichever OS actually runs the suite.
+    assert registry.device_for("phi4-mini") in ("directml", "openvino")
+
+
+def test_device_for_operator_pin_wins_over_the_hardware_profile():
+    profile = _FakeHardwareProfile(gpus=(_FakeGpu(vendor="nvidia", compute_api="cuda", vram_gb=24.0),))
+    config = InferenceConfig(
+        presets_enabled=frozenset({"phi4-mini"}),
+        device_by_preset=FrozenDict({"phi4-mini": "cpu"}),
+    )
+    registry = InferenceModelRegistry(config, hardware_profile=profile)
+
+    assert registry.device_for("phi4-mini") == "cpu"
