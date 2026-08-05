@@ -24,6 +24,15 @@ service InferenceService {
   // Server-streaming, matching supervisor.proto's StreamBootProgress: one reused message,
   // `complete` is the terminal-update sentinel, same shape family as BootProgressUpdate.
   rpc ProvisionPreset(ProvisionPresetRequest) returns (stream ProvisionProgressMessage);
+  // Manual EP selection, real not just auto-detected (§8.6's own hardware-aware default
+  // is a default, not a mandate) -- ListExecutionProviders reports the full, honest
+  // device catalog (common/execution_provider.py's own EXECUTION_PROVIDERS, confirmed
+  // live against the real PyPI index for which ones actually have an installable wheel);
+  // SetPresetDevice persists an operator's explicit per-preset override, effective on the
+  // next Inference process start (device_overrides.py's own module docstring has the
+  // full "why not live" account).
+  rpc ListExecutionProviders(ListExecutionProvidersRequest) returns (ListExecutionProvidersResponse);
+  rpc SetPresetDevice(SetPresetDeviceRequest) returns (SetPresetDeviceResponse);
 }
 
 message GenerateRequest {
@@ -103,4 +112,31 @@ message ProvisionProgressMessage {
   bool ok = 8;             // only meaningful when complete is true
   string error_code = 9;
   string error_detail = 10;
+}
+
+message ListExecutionProvidersRequest {
+}
+
+message ListExecutionProvidersResponse {
+  repeated ExecutionProviderMessage providers = 1;
+}
+
+message ExecutionProviderMessage {
+  string device = 1;
+  string label = 2;
+  string confidence = 3;      // "high" | "medium" | "low" -- deep-dive §8.1's own grading
+  bool installable = 4;       // a real prebuilt onnxruntime-genai wheel exists for this device
+  string note = 5;
+}
+
+message SetPresetDeviceRequest {
+  string preset = 1;
+  string device = 2;
+}
+
+message SetPresetDeviceResponse {
+  bool ok = 1;
+  bool takes_effect_on_restart = 2;
+  string error_code = 3;
+  string error_detail = 4;
 }

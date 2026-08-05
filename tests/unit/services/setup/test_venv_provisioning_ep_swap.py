@@ -126,6 +126,41 @@ def test_cuda_device_installs_the_cuda_variant(monkeypatch, spec, tmp_path):
     assert any("onnxruntime-genai-cuda" in c for c in calls)
 
 
+def test_tensorrt_device_installs_the_cuda_variant_not_a_fabricated_tensorrt_package(monkeypatch, spec, tmp_path):
+    """Confirmed live against the real PyPI index: no `onnxruntime-genai-tensorrt`
+    package exists. TensorRT rides on the CUDA-enabled build, selected by provider name
+    at runtime -- installing anything else for `"tensorrt"` would be guessing at a
+    package name that doesn't exist."""
+    import services.setup.venv_provisioning as vp
+
+    _real_or_fake_venv_setup(monkeypatch, tmp_path, spec)
+    calls = []
+    monkeypatch.setattr(vp, "_run_with_retries", lambda cmd: (calls.append(cmd), _ok())[1])
+
+    outcome = provision_service(spec, inference_device="tensorrt", upgrade=True)
+
+    assert outcome.error is None
+    assert any("onnxruntime-genai-cuda" in c for c in calls)
+    assert not any("onnxruntime-genai-tensorrt" in c for c in calls)
+
+
+def test_openvino_qnn_migraphx_have_no_installable_wheel_and_leave_the_venv_alone(monkeypatch, spec, tmp_path):
+    """Real, honest gap (confirmed live against PyPI, not assumed): none of these three
+    have a prebuilt onnxruntime-genai wheel, so provisioning must never guess at a
+    package name for them -- the venv stays on the base CPU install."""
+    import services.setup.venv_provisioning as vp
+
+    for device in ("openvino", "qnn", "migraphx"):
+        _real_or_fake_venv_setup(monkeypatch, tmp_path, spec)
+        calls = []
+        monkeypatch.setattr(vp, "_run_with_retries", lambda cmd: (calls.append(cmd), _ok())[1])
+
+        outcome = provision_service(spec, inference_device=device, upgrade=True)
+
+        assert outcome.error is None, device
+        assert not any("uninstall" in c for c in calls), device
+
+
 def test_swap_failure_is_reported_as_data_not_a_silent_stay_on_cpu(monkeypatch, spec, tmp_path):
     """A failed swap must be visible to the caller, not silently leave the venv on
     whatever it happened to have -- `docs/PRINCIPLES.md` §4.1."""
@@ -184,6 +219,75 @@ def test_a_device_with_no_known_variant_package_leaves_the_venv_alone(monkeypatc
     monkeypatch.setattr(vp, "_run_with_retries", lambda cmd: (calls.append(cmd), _ok())[1])
 
     outcome = provision_service(spec, inference_device="openvino", upgrade=True)
+
+    assert outcome.error is None
+    assert not any("uninstall" in c for c in calls)
+
+
+def test_openvino_with_install_root_fetches_the_real_nuget_ep_plugin(monkeypatch, spec, tmp_path):
+    """The other real distribution channel `EXECUTION_PROVIDERS` documents (`nuget_
+    package`, `core/inference/ep_plugins.py`) -- exercised here via `ensure_ep_plugin`
+    itself patched (real network coverage lives in `test_ep_plugins.py`'s own local-HTTP-
+    server tests), proving `provision_service` reaches and calls it correctly with a real
+    `install_root`."""
+    import services.setup.venv_provisioning as vp
+    from services.update.proving_grounds.contracts import DownloadResult
+
+    _real_or_fake_venv_setup(monkeypatch, tmp_path, spec)
+    monkeypatch.setattr(vp, "_run_with_retries", lambda cmd: _ok())
+
+    calls = []
+
+    async def _fake_ensure(device, install_root):
+        calls.append((device, install_root))
+        return DownloadResult(ok=True, destination="fake.dll", bytes_written=123)
+
+    import core.inference.ep_plugins as ep_plugins_module
+
+    monkeypatch.setattr(ep_plugins_module, "ensure_ep_plugin", _fake_ensure)
+
+    install_root = tmp_path / "install"
+    outcome = provision_service(spec, inference_device="openvino", upgrade=True, install_root=install_root)
+
+    assert outcome.error is None
+    assert calls == [("openvino", install_root)]
+
+
+def test_openvino_ep_plugin_fetch_failure_is_reported_as_data(monkeypatch, spec, tmp_path):
+    import services.setup.venv_provisioning as vp
+    from services.update.proving_grounds.contracts import DownloadResult
+
+    _real_or_fake_venv_setup(monkeypatch, tmp_path, spec)
+    monkeypatch.setattr(vp, "_run_with_retries", lambda cmd: _ok())
+
+    async def _fake_ensure(device, install_root):
+        return DownloadResult(ok=False, error_code="DOWNLOAD_FAILED", error_detail="simulated network failure")
+
+    import core.inference.ep_plugins as ep_plugins_module
+
+    monkeypatch.setattr(ep_plugins_module, "ensure_ep_plugin", _fake_ensure)
+
+    outcome = provision_service(
+        spec, inference_device="openvino", upgrade=True, install_root=tmp_path / "install"
+    )
+
+    assert outcome.error is not None
+    assert outcome.error.code == ProvisionErrorCode.DEPENDENCY_INSTALL_FAILED
+    assert "simulated network failure" in outcome.error.detail
+
+
+def test_migraphx_with_install_root_still_leaves_the_venv_alone(monkeypatch, spec, tmp_path):
+    """migraphx has neither a pip wheel nor a confirmed NuGet package -- `install_root`
+    being given must not change that; there is nothing real to fetch."""
+    import services.setup.venv_provisioning as vp
+
+    _real_or_fake_venv_setup(monkeypatch, tmp_path, spec)
+    calls = []
+    monkeypatch.setattr(vp, "_run_with_retries", lambda cmd: (calls.append(cmd), _ok())[1])
+
+    outcome = provision_service(
+        spec, inference_device="migraphx", upgrade=True, install_root=tmp_path / "install"
+    )
 
     assert outcome.error is None
     assert not any("uninstall" in c for c in calls)

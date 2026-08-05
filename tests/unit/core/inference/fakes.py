@@ -23,7 +23,7 @@ class FakeBackend:
     def __init__(self) -> None:
         self.loaded = False
 
-    def load(self, model_dir: str, device: str) -> None:
+    def load(self, model_dir: str, device: str, install_root: str | None = None) -> None:
         self.loaded = True
 
     def unload(self) -> None:
@@ -71,7 +71,7 @@ def make_fake_backend() -> FakeBackend:
 
 
 class FailingLoadBackend:
-    def load(self, model_dir: str, device: str) -> None:
+    def load(self, model_dir: str, device: str, install_root: str | None = None) -> None:
         from core.inference.errors import ModelLoadFailed
 
         raise ModelLoadFailed("simulated missing model directory")

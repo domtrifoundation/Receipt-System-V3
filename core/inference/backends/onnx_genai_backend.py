@@ -83,6 +83,7 @@ degrades this backend to unavailable rather than failing this module's own impor
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from ..contracts import ContentBlockType, FinishReason, Message, MessageRole
 from ..errors import GenerationCrashed, ModelLoadFailed
@@ -152,11 +153,23 @@ class OnnxGenAiBackend:
         self._tokenizer = None
         self._device = "cpu"
 
-    def load(self, model_dir: str, device: str) -> None:
+    def load(self, model_dir: str, device: str, install_root: str | None = None) -> None:
         try:
             import onnxruntime_genai as og  # noqa: PLC0415
         except ImportError as exc:
             raise ModelLoadFailed(f"onnxruntime_genai is not installed: {exc}") from exc
+
+        if install_root is not None:
+            # NuGet-distributed EPs (openvino/qnn — no prebuilt pip wheel exists for
+            # either, `common/execution_provider.py`'s own `nuget_package` field) need a
+            # real, already-provisioned plugin DLL registered before `og.Config` can
+            # select them by name. A no-op for every other device (`ep_plugins.
+            # register_ep_plugin` returns `False` immediately when `device` has no known
+            # NuGet plugin) and safely idempotent across repeated loads within one
+            # process (`ep_plugins.py`'s own module docstring).
+            from ..ep_plugins import register_ep_plugin  # noqa: PLC0415
+
+            register_ep_plugin(device, Path(install_root))
 
         provider_name = _PROVIDER_NAMES.get(device)
         try:

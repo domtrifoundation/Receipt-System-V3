@@ -288,3 +288,111 @@ def test_a_real_client_can_generate_over_an_actual_grpc_connection():
 
     response = asyncio.run(go())
     assert "phi4-mini" in response.available_presets
+
+
+# --------------------------------------------------------------------- ListExecutionProviders
+
+
+@pytest.mark.slow
+def test_list_execution_providers_reports_the_full_real_catalog():
+    async def go():
+        servicer = InferenceServicer(InferenceConfig(), hub_lister=_empty_hub_lister)
+        from core.inference.generated import inference_pb2 as pb
+
+        return await servicer.ListExecutionProviders(pb.ListExecutionProvidersRequest())
+
+    response = asyncio.run(go())
+    by_device = {p.device: p for p in response.providers}
+    assert set(by_device) == {"cpu", "cuda", "tensorrt", "directml", "openvino", "qnn", "migraphx"}
+    assert by_device["cpu"].installable is True
+    assert by_device["cuda"].installable is True
+    # No prebuilt onnxruntime-genai *pip* wheel installs openvino/qnn, but a real
+    # NuGet-distributed EP plugin package exists for both (confirmed live -- see
+    # common/execution_provider.py's own openvino/qnn notes) -- installable via that
+    # separate channel. migraphx has neither a pip wheel nor a confirmed NuGet package.
+    assert by_device["openvino"].installable is True
+    assert by_device["qnn"].installable is True
+    assert by_device["migraphx"].installable is False
+    # TensorRT rides on the CUDA wheel -- still real and installable, just not its own
+    # separate pip package (confirmed live: no onnxruntime-genai-tensorrt wheel exists).
+    assert by_device["tensorrt"].installable is True
+    assert by_device["cpu"].confidence == "high"
+
+
+# --------------------------------------------------------------------- SetPresetDevice
+
+
+@pytest.mark.slow
+def test_set_preset_device_with_no_install_root_reports_that_honestly():
+    async def go():
+        servicer = InferenceServicer(InferenceConfig(), hub_lister=_empty_hub_lister)
+        from core.inference.generated import inference_pb2 as pb
+
+        return await servicer.SetPresetDevice(
+            pb.SetPresetDeviceRequest(preset="phi4-mini", device="cuda")
+        )
+
+    response = asyncio.run(go())
+    assert response.ok is False
+    assert response.error_code == "NO_INSTALL_ROOT"
+
+
+@pytest.mark.slow
+def test_set_preset_device_unknown_preset_reports_error_not_a_write(tmp_path):
+    async def go():
+        servicer = InferenceServicer(InferenceConfig(), hub_lister=_empty_hub_lister, install_root=tmp_path)
+        from core.inference.generated import inference_pb2 as pb
+
+        return await servicer.SetPresetDevice(
+            pb.SetPresetDeviceRequest(preset="no-such-preset", device="cuda")
+        )
+
+    response = asyncio.run(go())
+    assert response.ok is False
+    assert response.error_code == "PRESET_NOT_CONFIGURED"
+
+
+@pytest.mark.slow
+def test_set_preset_device_persists_for_real_and_reports_takes_effect_on_restart(tmp_path):
+    async def go():
+        servicer = InferenceServicer(InferenceConfig(), hub_lister=_empty_hub_lister, install_root=tmp_path)
+        from core.inference.generated import inference_pb2 as pb
+
+        return await servicer.SetPresetDevice(
+            pb.SetPresetDeviceRequest(preset="phi4-mini", device="cuda")
+        )
+
+    response = asyncio.run(go())
+    assert response.ok is True
+    assert response.takes_effect_on_restart is True
+
+    from core.inference.device_overrides import read_device_overrides
+
+    assert read_device_overrides(tmp_path) == {"phi4-mini": "cuda"}
+
+
+# --------------------------------------------------------------------- _config_from_env + overrides
+
+
+def test_config_from_env_merges_persisted_overrides_on_top_of_the_env_default(tmp_path, monkeypatch):
+    from core.inference.device_overrides import write_device_override
+
+    monkeypatch.setenv("RESIBO_INFERENCE_PRESETS_ENABLED", "phi4-mini,phi4-vision")
+    monkeypatch.setenv("RESIBO_INFERENCE_DEVICE", "directml")
+    write_device_override(tmp_path, "phi4-mini", "cuda")
+
+    config = _config_from_env(install_root=tmp_path)
+
+    # The env-var default still applies to the preset with no explicit override...
+    assert dict(config.device_by_preset)["phi4-vision"] == "directml"
+    # ...but the persisted, more specific override wins for the one that has one.
+    assert dict(config.device_by_preset)["phi4-mini"] == "cuda"
+
+
+def test_config_from_env_with_no_install_root_ignores_overrides_gracefully(monkeypatch):
+    monkeypatch.setenv("RESIBO_INFERENCE_PRESETS_ENABLED", "phi4-mini")
+    monkeypatch.setenv("RESIBO_INFERENCE_DEVICE", "directml")
+
+    config = _config_from_env(install_root=None)
+
+    assert dict(config.device_by_preset) == {"phi4-mini": "directml"}

@@ -24,12 +24,15 @@ whether a clone is salvageable needs the whole picture, not the first failure.
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from common.execution_provider import EXECUTION_PROVIDERS
 
 from .contracts import (
     ProvisionError,
@@ -75,10 +78,24 @@ _SERVICE_REQUIREMENTS_FILENAME = "requirements.txt"
 #: and this is the swap performed afterward only when a real non-CPU device was resolved.
 _INFERENCE_IMPORT_PATH = "core.inference"
 _BARE_ONNXRUNTIME_GENAI_PACKAGE = "onnxruntime-genai"
+#: Derived from `common/execution_provider.py`'s own `EXECUTION_PROVIDERS` table — one
+#: real source of truth for "which device installs which package," never a second,
+#: independently-maintained copy of it here. `"tensorrt"` genuinely maps to the same
+#: `onnxruntime-genai-cuda` package `"cuda"` does (confirmed live against PyPI: no
+#: separate `onnxruntime-genai-tensorrt` wheel exists — TensorRT rides on the CUDA-enabled
+#: build, selected by provider name at runtime); `"openvino"`/`"qnn"`/`"migraphx"` have no
+#: `pip_package` at all in that table, so they are correctly absent here too — `provision_
+#: service()` leaves the venv alone for those rather than guessing at a package name.
 _ONNXRUNTIME_GENAI_VARIANT_BY_DEVICE = {
-    "cuda": "onnxruntime-genai-cuda",
-    "directml": "onnxruntime-genai-directml",
+    ep.device: ep.pip_package for ep in EXECUTION_PROVIDERS if ep.pip_package is not None
 }
+#: The other real distribution channel `EXECUTION_PROVIDERS` documents — a device with no
+#: pip wheel but a real NuGet-distributed EP plugin (`core/inference/ep_plugins.py`,
+#: `common/execution_provider.py`'s own `nuget_package` field). Pre-fetched here, during
+#: provisioning, for the identical reason the pip swap above happens here rather than at
+#: generation time: `core/inference/model_registry.py`'s own docstring is explicit that
+#: per-request generation must never make a network call.
+_NUGET_EP_DEVICES = {ep.device for ep in EXECUTION_PROVIDERS if ep.nuget_package is not None}
 
 
 def venv_python(venv_dir: Path) -> Path:
@@ -141,6 +158,7 @@ def provision_service(
     python_bin: str | None = None,
     upgrade: bool = False,
     inference_device: str = "cpu",
+    install_root: Path | None = None,
 ) -> ProvisionOutcome:
     """Create and populate one service's venv.
 
@@ -149,9 +167,13 @@ def provision_service(
     environment. Re-running after a partial failure is a normal, safe operation
     (`v3-deepdive-11-setup-api.md` §4's re-runnability property).
 
-    `inference_device` only ever affects `core.inference`'s own venv (§8.6 execution-
-    provider selection) — every other service's provisioning is completely unaffected by
-    this parameter, checked by import path, not applied globally.
+    `inference_device`/`install_root` only ever affect `core.inference`'s own venv (§8.6
+    execution-provider selection) — every other service's provisioning is completely
+    unaffected by either parameter, checked by import path, not applied globally.
+    `install_root` is what a NuGet-distributed EP plugin (openvino/qnn) gets downloaded
+    under (`ep_plugins.ep_plugins_dir`); `None` (a caller that hasn't resolved one yet)
+    degrades that one step to a no-op rather than failing provisioning outright — a real
+    pip-only device still provisions exactly as before.
     """
     interpreter = python_bin or sys.executable
 
@@ -221,6 +243,13 @@ def provision_service(
                     import_path=spec.import_path, venv_dir=spec.venv_dir, created=created,
                     error=swap_result,
                 )
+        elif inference_device in _NUGET_EP_DEVICES and install_root is not None:
+            plugin_result = _fetch_ep_plugin(inference_device, install_root)
+            if plugin_result is not None:
+                return ProvisionOutcome(
+                    import_path=spec.import_path, venv_dir=spec.venv_dir, created=created,
+                    error=plugin_result,
+                )
 
     return ProvisionOutcome(
         import_path=spec.import_path, venv_dir=spec.venv_dir, created=created
@@ -256,6 +285,29 @@ def _swap_onnxruntime_genai_variant(py: Path, variant_package: str) -> Provision
     return None
 
 
+def _fetch_ep_plugin(device: str, install_root: Path) -> ProvisionError | None:
+    """Pre-fetches `device`'s real NuGet-distributed EP plugin (`core/inference/
+    ep_plugins.py` — openvino/qnn today, no prebuilt pip wheel exists for either) into
+    `install_root`, so it's already on disk before Inference ever tries to load a model
+    on this device. `asyncio.run()` here is the one real sync/async seam in this
+    otherwise-synchronous module — `ensure_ep_plugin` reuses Phase A's resumable
+    `download_file()`, which is async throughout; `provision_service`'s own callers
+    (Setup's finalize routine, Update's release manager) are synchronous, matching the
+    same synchronous-call-into-async-download shape this project has no other precedent
+    for avoiding without threading `asyncio` through the entire provisioning stack for
+    one downstream step.
+    """
+    from core.inference.ep_plugins import ensure_ep_plugin
+
+    result = asyncio.run(ensure_ep_plugin(device, install_root))
+    if result.ok:
+        return None
+    return ProvisionError(
+        code=ProvisionErrorCode.DEPENDENCY_INSTALL_FAILED,
+        detail=f"fetching {device} EP plugin: {result.error_detail}",
+    )
+
+
 def provision_clone(
     clone_root: Path,
     *,
@@ -263,6 +315,7 @@ def provision_clone(
     upgrade: bool = False,
     max_workers: int | None = None,
     inference_device: str = "cpu",
+    install_root: Path | None = None,
 ) -> ProvisionReport:
     """Provision every service venv in a clone.
 
@@ -274,8 +327,8 @@ def provision_clone(
     Never raises for a service-level failure. The caller decides what an incomplete report
     means; `ProvisionReport.fully_provisioned` is the gate Supervisor needs before cutover.
 
-    `inference_device` (§8.6) only ever changes `core.inference`'s own venv — see
-    `provision_service`'s own docstring.
+    `inference_device`/`install_root` (§8.6) only ever change `core.inference`'s own venv —
+    see `provision_service`'s own docstring.
     """
     specs = discover_services(clone_root)
     if not specs:
@@ -285,7 +338,10 @@ def provision_clone(
     if workers <= 1:
         return ProvisionReport(
             outcomes=tuple(
-                provision_service(s, python_bin=python_bin, upgrade=upgrade, inference_device=inference_device)
+                provision_service(
+                    s, python_bin=python_bin, upgrade=upgrade,
+                    inference_device=inference_device, install_root=install_root,
+                )
                 for s in specs
             )
         )
@@ -294,7 +350,7 @@ def provision_clone(
         futures = {
             pool.submit(
                 provision_service, s, python_bin=python_bin, upgrade=upgrade,
-                inference_device=inference_device,
+                inference_device=inference_device, install_root=install_root,
             ): s
             for s in specs
         }

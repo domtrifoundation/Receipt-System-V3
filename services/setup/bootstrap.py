@@ -241,6 +241,7 @@ async def finalize_clone(
 
     provision_report = venv_provisioning.provision_clone(
         clone_dir, python_bin=python_bin, inference_device=inference_device,
+        install_root=install_root,
     )
 
     webapp_built = False

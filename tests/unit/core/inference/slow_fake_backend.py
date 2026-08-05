@@ -16,7 +16,7 @@ DELAY_SECONDS = 0.5
 
 
 class SlowFakeBackend:
-    def load(self, model_dir: str, device: str) -> None:
+    def load(self, model_dir: str, device: str, install_root: str | None = None) -> None:
         pass
 
     def unload(self) -> None:

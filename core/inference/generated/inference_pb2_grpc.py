@@ -49,6 +49,16 @@ class InferenceServiceStub:
                 request_serializer=inference__pb2.ProvisionPresetRequest.SerializeToString,
                 response_deserializer=inference__pb2.ProvisionProgressMessage.FromString,
                 _registered_method=True)
+        self.ListExecutionProviders = channel.unary_unary(
+                '/resibo.inference.v1.InferenceService/ListExecutionProviders',
+                request_serializer=inference__pb2.ListExecutionProvidersRequest.SerializeToString,
+                response_deserializer=inference__pb2.ListExecutionProvidersResponse.FromString,
+                _registered_method=True)
+        self.SetPresetDevice = channel.unary_unary(
+                '/resibo.inference.v1.InferenceService/SetPresetDevice',
+                request_serializer=inference__pb2.SetPresetDeviceRequest.SerializeToString,
+                response_deserializer=inference__pb2.SetPresetDeviceResponse.FromString,
+                _registered_method=True)
 
 
 class InferenceServiceServicer:
@@ -77,6 +87,25 @@ class InferenceServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListExecutionProviders(self, request, context):
+        """Manual EP selection, real not just auto-detected (§8.6's own hardware-aware default
+        is a default, not a mandate) -- ListExecutionProviders reports the full, honest
+        device catalog (common/execution_provider.py's own EXECUTION_PROVIDERS, confirmed
+        live against the real PyPI index for which ones actually have an installable wheel);
+        SetPresetDevice persists an operator's explicit per-preset override, effective on the
+        next Inference process start (device_overrides.py's own module docstring has the
+        full "why not live" account).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetPresetDevice(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_InferenceServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -94,6 +123,16 @@ def add_InferenceServiceServicer_to_server(servicer, server):
                     servicer.ProvisionPreset,
                     request_deserializer=inference__pb2.ProvisionPresetRequest.FromString,
                     response_serializer=inference__pb2.ProvisionProgressMessage.SerializeToString,
+            ),
+            'ListExecutionProviders': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListExecutionProviders,
+                    request_deserializer=inference__pb2.ListExecutionProvidersRequest.FromString,
+                    response_serializer=inference__pb2.ListExecutionProvidersResponse.SerializeToString,
+            ),
+            'SetPresetDevice': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetPresetDevice,
+                    request_deserializer=inference__pb2.SetPresetDeviceRequest.FromString,
+                    response_serializer=inference__pb2.SetPresetDeviceResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -177,6 +216,60 @@ class InferenceService:
             '/resibo.inference.v1.InferenceService/ProvisionPreset',
             inference__pb2.ProvisionPresetRequest.SerializeToString,
             inference__pb2.ProvisionProgressMessage.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListExecutionProviders(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.inference.v1.InferenceService/ListExecutionProviders',
+            inference__pb2.ListExecutionProvidersRequest.SerializeToString,
+            inference__pb2.ListExecutionProvidersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetPresetDevice(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/resibo.inference.v1.InferenceService/SetPresetDevice',
+            inference__pb2.SetPresetDeviceRequest.SerializeToString,
+            inference__pb2.SetPresetDeviceResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -90,6 +90,7 @@ class InferenceModelRegistry:
         worker_factory=None,
         health_client: HealthClient | None = None,
         hardware_profile=None,
+        install_root: str | None = None,
     ) -> None:
         self._config = config or InferenceConfig()
         self._blob_store = blob_store
@@ -108,6 +109,14 @@ class InferenceModelRegistry:
         #: existing caller/test that doesn't pass this) preserves the exact prior
         #: behavior: an unconfigured preset stays on `"cpu"`, never guessed at.
         self._hardware_profile = hardware_profile
+        #: Forwarded to every `PresetWorker` this registry constructs — the real,
+        #: already-provisioned NuGet EP plugin location (`ep_plugins.py`) a device like
+        #: `"openvino"`/`"qnn"` needs registered before `og.Config` can select it by name.
+        #: `None` (a dev checkout with no install root) degrades exactly like every other
+        #: EP-plugin-aware call site: `register_ep_plugin` becomes a no-op, the device
+        #: falls back to whatever `onnxruntime_genai`'s own unregistered-provider-name
+        #: behavior is rather than failing the load.
+        self._install_root = install_root
         self._loaded_workers: dict[str, PresetWorker] = {}
         self._reservations: dict[str, str] = {}
         self._load_locks: dict[str, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
@@ -137,6 +146,7 @@ class InferenceModelRegistry:
             reasoning_marker=spec.reasoning_marker,
             reasoning_token_budget=self._config.reasoning_token_budget,
             max_concurrent_generations=self._config.max_concurrent_generations,
+            install_root=self._install_root,
         )
 
     def _device_for(self, preset_name: str) -> str:

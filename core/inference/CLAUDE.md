@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.04`
+`a03.00.05`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -225,6 +225,103 @@ several passes:
   `hardware_profile` constructor param), `"cpu"` only when neither is available —
   existing callers (no profile passed) keep the exact prior behavior. Confirmed live:
   resolves this development machine's real Intel Arc B580 to `"directml"`.
+
+**Manual EP selection, real and separate from auto-detection — a direct follow-up
+request after the above landed ("still have manual EP selection... are ALL of the
+[deep-dive's] EPs selectable and installable").** §8.6's hardware-derived default was
+never meant to be the *only* way to pick a device; the operator can now see and choose
+from the full real catalog, not just what auto-selection would have picked.
+- **`common/execution_provider.EXECUTION_PROVIDERS`** — the full deep-dive §8.1
+  vocabulary (`cpu`/`cuda`/`tensorrt`/`directml`/`openvino`/`qnn`/`migraphx`) as real,
+  checkable data (device, label, confidence tier, `pip_package`, `installable`, a
+  human-readable note), not scattered across docstrings. **Real, live-confirmed findings,
+  not assumed from the deep-dive's prose alone** (`pip index versions` against the real
+  PyPI index): `onnxruntime-genai-cuda` is real; `onnxruntime-genai-tensorrt`/`-qnn`/
+  `-rocm` do **not** exist as separate wheels at all — TensorRT genuinely installs via the
+  same CUDA-enabled wheel CUDA does (selected by provider name at runtime, not a separate
+  package, so `installable=True` for both), while OpenVINO/QNN/MIGraphX have no prebuilt
+  `onnxruntime-genai` wheel through any path (`installable=False`) — still real,
+  selectable devices for *generation* (`config.append_provider(name)` doesn't require
+  special provisioning, it just fails at load time if unsupported, the deep-dive's own
+  "a real install failure specifically is not a surprise" honesty), just not something
+  provisioning can swap a venv onto.
+- **`venv_provisioning.py`'s own `_ONNXRUNTIME_GENAI_VARIANT_BY_DEVICE` now derives from
+  that same table** (`{ep.device: ep.pip_package for ep in EXECUTION_PROVIDERS if ep.
+  pip_package is not None}`) rather than an independently-maintained duplicate — one real
+  source of truth for "which device installs which package."
+- **Two new RPCs, `ListExecutionProviders`/`SetPresetDevice`** (`inference.proto`) — the
+  first reports the real catalog above for the TUI to render; the second persists an
+  explicit per-preset override via new `device_overrides.py`
+  (`config/inference_device_overrides.json`, the same `write_hardware_profile`-shaped
+  read-modify-write pattern) — **effective on the next Inference process restart, not
+  live**, matching `settings_backend.py`'s own existing `takes_effect_on_restart`
+  precedent for a different setting rather than building a riskier hot-swap mechanism
+  this pass has no real need for. `_config_from_env()` merges a persisted override on top
+  of `RESIBO_INFERENCE_DEVICE`'s own uniform-across-presets default — the more specific,
+  explicitly-set-by-an-operator value wins, the identical "more specific wins" shape
+  `InferenceModelRegistry._device_for` already applies between `device_by_preset` and the
+  hardware-derived fallback.
+- **TUI**: `ModelProvisioningScreen` gained a real device `Select` populated from
+  `ListExecutionProviders` (confidence + a "no prebuilt wheel, generation-only" tag for
+  the non-installable three) — pre-selects a preset's current device on selection,
+  provisioning uses whatever the operator has chosen (not silently forced back to the
+  auto/configured device), and a new "Set Device" button calls `SetPresetDevice` for
+  real. Live-tested against a genuine running `InferenceServicer`, including every one of
+  the seven real devices round-tripping through the actual `Select` widget.
+
+**OpenVINO specifically re-checked against official documentation, not just PyPI probing,
+on direct request ("did you do your research?") — and then a real, working, officially-
+distributed path was found and built, on a second direct challenge ("Intel driver
+installers always install a complete OpenVINO or oneAPI... check")**. Both challenges
+led somewhere real, not just more caveats:
+
+1. No pip-only path exists. Microsoft's own install docs (`onnxruntime.ai/docs/genai/
+   howto/install`) list exactly four pip variants for `onnxruntime-genai` — bare CPU,
+   `-directml`, `-cuda` (CUDA 12), and CUDA 11 via source build — no OpenVINO or QNN
+   variant. The official build-from-source page documents only `--use_dml`/
+   `--use_trt_rtx`/`--use_cuda`, no `--use_openvino` flag.
+2. The user's instinct that a real runtime "comes with the drivers" was directionally
+   right, just not via the GPU driver itself: live-checked, Intel's Arc B580 driver only
+   bundles an NPU *compiler* DLL (`npu.inf`'s own `openvino_intel_npu_compiler.dll`), not
+   a full runtime — but a bare `pip install openvino` (no separate toolkit installer, no
+   `setupvars.bat`) genuinely detects CPU/iGPU/dGPU/NPU on this machine via `ov.Core().
+   available_devices`, live-confirmed.
+3. The user's separate correction that WinML is DirectML's real successor (like TensorRT
+   is to CUDA) is also confirmed by Microsoft's own docs (`learn.microsoft.com/windows/
+   ai/new-windows-ml`) — and following that thread found the actual official distribution
+   mechanism: Windows ML's own `ExecutionProviderCatalog` publishes real OpenVINO/QNN/
+   MIGraphX/NvTensorRtRtx EP plugin packages. Its own Python API (a real, installable pip
+   package, `wasdk-Microsoft.Windows.AI.MachineLearning`) fails immediately when called
+   from this project's own unpackaged venv processes: `OSError: The process has no
+   package identity` — a genuine MSIX requirement, not a bug on this project's side.
+4. **The real distribution channel underneath that catalog is plain NuGet — no MSIX
+   needed at all.** A NuGet package is nothing more than a downloadable zip. Live-tested
+   end to end: downloaded `Intel.ML.OnnxRuntime.EP.OpenVINO` 1.6.1 (121 MB, via a plain
+   HTTPS GET, no auth), extracted `onnxruntime_providers_openvino_plugin.dll`, called
+   `onnxruntime_genai.register_execution_provider_library("OpenVINOExecutionProvider",
+   dll_path)` — it succeeded. (A second call for the same provider name correctly raises
+   `RuntimeError: library is already registered` — a real native-layer idempotency
+   constraint `ep_plugins.py`'s own `_registered_providers` cache exists to respect.)
+
+**Built, not just documented — `core/inference/ep_plugins.py` is the real mechanism.**
+`EP_PLUGIN_SPECS` carries the real NuGet coordinates for `openvino` (live-confirmed
+end to end) and `qnn` (`Microsoft.ML.OnnxRuntime.QNN` — real package, downloaded and
+inspected, but **not** live-loaded: no Qualcomm/Snapdragon hardware on this machine, and
+live-checked, the package ships only a `runtimes/win-arm64/` native build — genuinely
+uninstallable on any x64 host, since Snapdragon's Hexagon NPU is ARM64-only hardware, not
+just unverified). `migraphx`/`tensorrt`'s own NuGet packages weren't found under the
+expected names when checked live — not confirmed absent entirely, just not identified.
+`ensure_ep_plugin()` (async, reuses Phase A's resumable `download_file()`) is called from
+`venv_provisioning.py` during provisioning — never from the generation path, matching
+`model_registry.py`'s own "per-request generation must never make a network call" rule.
+`register_ep_plugin()` (sync, no network) is called from `onnx_genai_backend.py`'s own
+`load()`, threaded through `install_root` (new optional param on `PresetWorker`/
+`InferenceModelRegistry`/`InferenceServicer`, plumbed all the way from `service.py`'s own
+`__main__`, and across the real `multiprocessing.Process` boundary `_worker_main` runs
+behind under `spawn`). `common/execution_provider.py`'s `ExecutionProviderInfo` gained a
+`nuget_package` field alongside `pip_package` — `installable` is now true for either
+channel; `openvino`/`qnn` flip from `installable=False` to `True`, `migraphx` stays
+`False` (no channel found for it at all).
 
 ## Implementation status
 

@@ -139,3 +139,47 @@ class ProvisionProgressMessage(_message.Message):
     error_code: str
     error_detail: str
     def __init__(self, preset: _Optional[str] = ..., current_file: _Optional[str] = ..., bytes_downloaded: _Optional[int] = ..., total_bytes: _Optional[int] = ..., files_completed: _Optional[int] = ..., files_total: _Optional[int] = ..., complete: _Optional[bool] = ..., ok: _Optional[bool] = ..., error_code: _Optional[str] = ..., error_detail: _Optional[str] = ...) -> None: ...
+
+class ListExecutionProvidersRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListExecutionProvidersResponse(_message.Message):
+    __slots__ = ("providers",)
+    PROVIDERS_FIELD_NUMBER: _ClassVar[int]
+    providers: _containers.RepeatedCompositeFieldContainer[ExecutionProviderMessage]
+    def __init__(self, providers: _Optional[_Iterable[_Union[ExecutionProviderMessage, _Mapping]]] = ...) -> None: ...
+
+class ExecutionProviderMessage(_message.Message):
+    __slots__ = ("device", "label", "confidence", "installable", "note")
+    DEVICE_FIELD_NUMBER: _ClassVar[int]
+    LABEL_FIELD_NUMBER: _ClassVar[int]
+    CONFIDENCE_FIELD_NUMBER: _ClassVar[int]
+    INSTALLABLE_FIELD_NUMBER: _ClassVar[int]
+    NOTE_FIELD_NUMBER: _ClassVar[int]
+    device: str
+    label: str
+    confidence: str
+    installable: bool
+    note: str
+    def __init__(self, device: _Optional[str] = ..., label: _Optional[str] = ..., confidence: _Optional[str] = ..., installable: _Optional[bool] = ..., note: _Optional[str] = ...) -> None: ...
+
+class SetPresetDeviceRequest(_message.Message):
+    __slots__ = ("preset", "device")
+    PRESET_FIELD_NUMBER: _ClassVar[int]
+    DEVICE_FIELD_NUMBER: _ClassVar[int]
+    preset: str
+    device: str
+    def __init__(self, preset: _Optional[str] = ..., device: _Optional[str] = ...) -> None: ...
+
+class SetPresetDeviceResponse(_message.Message):
+    __slots__ = ("ok", "takes_effect_on_restart", "error_code", "error_detail")
+    OK_FIELD_NUMBER: _ClassVar[int]
+    TAKES_EFFECT_ON_RESTART_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_DETAIL_FIELD_NUMBER: _ClassVar[int]
+    ok: bool
+    takes_effect_on_restart: bool
+    error_code: str
+    error_detail: str
+    def __init__(self, ok: _Optional[bool] = ..., takes_effect_on_restart: _Optional[bool] = ..., error_code: _Optional[str] = ..., error_detail: _Optional[str] = ...) -> None: ...

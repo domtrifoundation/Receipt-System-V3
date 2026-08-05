@@ -166,6 +166,7 @@ def _worker_main(
     backend_factory: Callable[[], object] = _default_backend_factory,
     reasoning_marker: str | None = None,
     reasoning_token_budget: int = 0,
+    install_root: str | None = None,
 ) -> None:
     """Runs entirely inside the child process. Module-level, not a closure — see the
     module docstring's own pickling note (this is the `multiprocessing.Process` target,
@@ -176,12 +177,17 @@ def _worker_main(
     picklable, zero-argument callable is what lets `tests/unit/core/inference/
     test_generation.py` exercise this module's *real* multiprocessing/queue/batching/
     crash-isolation mechanics against a lightweight fake backend, without needing real
-    model weights to validate the concurrency design itself."""
+    model weights to validate the concurrency design itself.
+
+    `install_root`, when given, is forwarded to `backend.load()` so a NuGet-distributed EP
+    plugin (`ep_plugins.py` — openvino/qnn, no prebuilt pip wheel exists for either) can be
+    registered before model load. A plain string, not a `Path`, since this crosses a real
+    `multiprocessing.Process` boundary under `spawn` — every argument here is pickled."""
     from .backends.onnx_genai_backend import build_prompt
 
     backend = backend_factory()
     try:
-        backend.load(model_dir, device)
+        backend.load(model_dir, device, install_root=install_root)
     except ModelLoadFailed as exc:
         control_queue.put(_LoadStatus(ok=False, detail=str(exc)))
         return
@@ -236,6 +242,7 @@ class PresetWorker:
         reasoning_marker: str | None = None,
         reasoning_token_budget: int = 0,
         max_concurrent_generations: int = 4,
+        install_root: str | None = None,
     ) -> None:
         self._preset_name = preset_name
         self._model_dir = model_dir
@@ -246,6 +253,7 @@ class PresetWorker:
         self._backend_factory = backend_factory
         self._reasoning_marker = reasoning_marker
         self._reasoning_token_budget = reasoning_token_budget
+        self._install_root = install_root
         #: Deep-dive §10's own named config value ("queue depth cap before backpressure,
         #: per preset") — a real `asyncio.Semaphore`, acquired in `submit()` around the
         #: dispatch-and-await-response span so the (N+1)th concurrent caller genuinely
@@ -274,6 +282,7 @@ class PresetWorker:
                 self._model_dir, self._device, self._request_queue, self._response_queue,
                 self._control_queue, self._batch_window_ms, self._truncation,
                 self._backend_factory, self._reasoning_marker, self._reasoning_token_budget,
+                self._install_root,
             ),
             daemon=True,
         )

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
+from common.execution_provider import EXECUTION_PROVIDERS
 from common.frozen_dict import FrozenDict
 
 from .contracts import (
@@ -58,12 +59,18 @@ class InferenceServicer:
 
     def __init__(
         self, config: InferenceConfig | None = None, blob_store=None, *,
-        worker_factory=None, hub_lister=None,
+        worker_factory=None, hub_lister=None, install_root=None,
     ) -> None:
         self._config = config or InferenceConfig()
         self._metrics = InferenceMetricsCollector()
+        #: `None` in a dev checkout — `SetPresetDevice` reports that plainly rather than
+        #: pretending a write succeeded, matching `SetupServicer`'s own `install_root=None`
+        #: posture for `GetDevMode`/`SetRunOnStartup`. Also forwarded to the registry below
+        #: so a NuGet-distributed EP plugin (`ep_plugins.py`) can be found/registered.
+        self._install_root = install_root
         self._registry = InferenceModelRegistry(
-            self._config, blob_store, self._metrics, worker_factory=worker_factory
+            self._config, blob_store, self._metrics, worker_factory=worker_factory,
+            install_root=install_root,
         )
         #: Injectable so real streaming-RPC tests (`test_a_real_client_can_...`-shaped)
         #: never touch the real Hugging Face Hub, same seam
@@ -197,12 +204,52 @@ class InferenceServicer:
         finally:
             await task
 
+    async def ListExecutionProviders(self, request, context=None):  # noqa: N802 - gRPC naming
+        """The real, honest device catalog (`common/execution_provider.EXECUTION_
+        PROVIDERS`) — manual EP selection needs the operator to see confidence and real
+        installability, not just a bare list of names."""
+        from .generated import inference_pb2 as pb
+
+        response = pb.ListExecutionProvidersResponse()
+        for ep in EXECUTION_PROVIDERS:
+            msg = response.providers.add()
+            msg.device = ep.device
+            msg.label = ep.label
+            msg.confidence = ep.confidence
+            msg.installable = ep.installable
+            msg.note = ep.note
+        return response
+
+    async def SetPresetDevice(self, request, context=None):  # noqa: N802 - gRPC naming
+        """Persists a manual per-preset override (`device_overrides.py`) — effective on
+        the *next* Inference process start, never live (that module's own docstring has
+        the full "why not live" account, matching `settings_backend.py`'s existing
+        `takes_effect_on_restart` precedent for a different setting)."""
+        from .generated import inference_pb2 as pb
+
+        if self._install_root is None:
+            return pb.SetPresetDeviceResponse(
+                ok=False, error_code="NO_INSTALL_ROOT",
+                error_detail="no install root known (a dev checkout has nowhere to persist this)",
+            )
+        if request.preset not in MODEL_PRESETS:
+            return pb.SetPresetDeviceResponse(
+                ok=False, error_code="PRESET_NOT_CONFIGURED",
+                error_detail=f"no such preset: {request.preset!r}",
+            )
+
+        from .device_overrides import write_device_override
+
+        write_device_override(self._install_root, request.preset, request.device)
+        return pb.SetPresetDeviceResponse(ok=True, takes_effect_on_restart=True)
+
 
 async def serve(
     address: str = DEFAULT_ADDRESS,
     *,
     config: InferenceConfig | None = None,
     blob_store=None,
+    install_root=None,
 ):
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
     import grpc
@@ -211,7 +258,7 @@ async def serve(
 
     server = grpc.aio.server()
     inference_pb2_grpc.add_InferenceServiceServicer_to_server(
-        InferenceServicer(config, blob_store), server
+        InferenceServicer(config, blob_store, install_root=install_root), server
     )
     port = server.add_insecure_port(address)
     host = address.rsplit(":", 1)[0]
@@ -220,7 +267,7 @@ async def serve(
     return server
 
 
-def _config_from_env() -> InferenceConfig:
+def _config_from_env(*, install_root=None) -> InferenceConfig:
     """Real, live-found gap: unlike every other service in this repo that reads an
     external-resource path from an env var (`RESIBO_CLAMAV_DATABASE_DIR`,
     `RESIBO_CLAMD_HOST`), this one had no seam at all — `InferenceConfig.models_dir`'s
@@ -251,6 +298,21 @@ def _config_from_env() -> InferenceConfig:
         config = replace(
             config, device_by_preset=FrozenDict({p: device for p in config.presets_enabled})
         )
+
+    # Manual, persisted per-preset overrides (`SetPresetDevice`/`device_overrides.py`) —
+    # applied on top of the uniform env-var default above, real per-preset precision an
+    # operator set explicitly through the TUI winning over a machine-wide default, the
+    # same "more specific wins" shape `InferenceModelRegistry._device_for` already applies
+    # between `device_by_preset` and the hardware-derived fallback (Phase D).
+    if install_root is not None:
+        from .device_overrides import read_device_overrides
+
+        overrides = read_device_overrides(install_root)
+        if overrides:
+            merged = dict(config.device_by_preset)
+            merged.update(overrides)
+            config = replace(config, device_by_preset=FrozenDict(merged))
+
     return config
 
 
@@ -259,8 +321,12 @@ if __name__ == "__main__":  # pragma: no cover
     import sys
 
     async def _main():
+        from common.install_paths import resolve_install_root
+        from pathlib import Path as _Path
+
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
-        srv = await serve(addr, config=_config_from_env())
+        install_root = resolve_install_root(_Path(__file__))
+        srv = await serve(addr, config=_config_from_env(install_root=install_root), install_root=install_root)
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)
         from common.watchdog_client import start_kicking_for_service, stop_kick_loop
