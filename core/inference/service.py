@@ -12,6 +12,7 @@ importable — and its tests meaningful — on an interpreter with no `grpcio` w
 from __future__ import annotations
 
 import json
+import sys as _sys
 from dataclasses import replace
 
 from common.execution_provider import EXECUTION_PROVIDERS
@@ -27,6 +28,7 @@ from .contracts import (
     ProvisionStatus,
     ToolSpec,
 )
+from .errors import ModelLoadFailed
 from .model_provisioning import preset_status, provision_preset
 from .model_registry import InferenceConfig, InferenceModelRegistry
 from .metrics import InferenceMetricsCollector
@@ -253,9 +255,27 @@ class InferenceServicer:
         replica load (live-measured: 5 concurrent receipts, `worker_pool_size=3`,
         332s identical stall on two of them before either failed). Calling `get_worker`
         once per enabled preset here pays that same real cost exactly once, at startup,
-        serially, before any client can connect and race it."""
+        serially, before any client can connect and race it.
+
+        **Real, live-found gap in the first version of this method, not a hypothetical**:
+        it let `ModelLoadFailed` propagate straight out, which kills the whole process on
+        the exact first real fresh-install run that exercised it — an enabled preset
+        whose weights simply have not been downloaded yet (a normal, expected state;
+        that is what `ProvisionPreset` is for) crashed startup entirely, taking every
+        *other* enabled preset's warm-up down with it. That is precisely the
+        one-degraded-component-takes-down-the-run failure `docs/PRINCIPLES.md` §4.4
+        forbids — "a missing OCR engine means that engine is unavailable, never a failed
+        run" applies identically here. A preset that fails to warm up stays unavailable
+        (its first real request will raise the same `ModelLoadFailed` `generate()`
+        already turns into a `GenerationResult.failure` — no new failure mode, just no
+        longer a crashed process), and every other enabled preset still gets its real
+        warm-up."""
         for preset_name in self._registry.enabled_presets():
-            await self._registry.get_worker(preset_name)
+            try:
+                await self._registry.get_worker(preset_name)
+            except ModelLoadFailed as exc:
+                print(f"warm_up: {preset_name!r} failed to load, staying unavailable "
+                      f"until provisioned/retried: {exc}", file=_sys.stderr, flush=True)
 
 
 async def serve(

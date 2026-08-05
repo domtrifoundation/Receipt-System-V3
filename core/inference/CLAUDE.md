@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.13`
+`a03.00.14`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -431,6 +431,19 @@ surface) — real, scoped follow-up, the config field itself is the seam already
 it. `tests/unit/core/inference/test_model_registry.py`'s own `test_worker_pool_size_*`
 tests cover both the new pool behavior and the exact-original-behavior guarantee at
 `worker_pool_size=1` directly.
+
+**Follow-up, real live-found crash on the very first real fresh-install run that
+exercised `warm_up()`: it let `ModelLoadFailed` propagate straight out of the process.**
+An enabled-but-not-yet-provisioned preset (a completely normal, expected state — that is
+what `ProvisionPreset` exists for) crashed the entire service at startup, taking every
+*other* enabled preset's own warm-up down with it — exactly the one-degraded-component-
+takes-down-the-run failure `docs/PRINCIPLES.md` §4.4 forbids. Fixed: `warm_up()` now
+catches `ModelLoadFailed` per preset and logs to stderr rather than raising; a failing
+preset stays unavailable (its first real request still raises the identical
+`ModelLoadFailed` `generate()` already turns into a `GenerationResult.failure` — no new
+failure mode introduced, just no longer a crashed process) while every other enabled
+preset still gets its real warm-up. `test_warm_up_does_not_crash_the_process_when_one_
+preset_fails_to_load` covers this directly.
 
 **Follow-up, same session: the worker-pool fix above made a fresh process's first wave
 of concurrent requests *worse*, not better — a real regression found by testing the fix

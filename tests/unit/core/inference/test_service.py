@@ -88,6 +88,36 @@ def test_warm_up_loads_the_full_pool_for_every_enabled_preset_before_returning()
     assert load_calls == ["phi4-mini", "phi4-mini", "phi4-mini"]
 
 
+@pytest.mark.slow
+def test_warm_up_does_not_crash_the_process_when_one_preset_fails_to_load():
+    """Real, live-found regression: the first version of `warm_up()` let `ModelLoadFailed`
+    propagate straight out, crashing the whole service on a completely normal state --
+    an enabled preset whose weights are not downloaded yet (confirmed live: a fresh
+    install with an enabled-but-not-yet-provisioned preset killed the entire process
+    before it could even accept the `ProvisionPreset` call that would have fixed it).
+    A failing preset must stay unavailable, never take every other enabled preset's own
+    warm-up down with it."""
+    from core.inference.errors import ModelLoadFailed
+
+    load_calls: list[str] = []
+
+    class _SelectivelyFailingWorker(_FakeWorker):
+        async def load(self) -> None:
+            load_calls.append(self.preset_name)
+            if self.preset_name == "phi4-vision":
+                raise ModelLoadFailed("weights not on disk yet")
+
+    async def go():
+        config = InferenceConfig(presets_enabled=frozenset({"phi4-mini", "phi4-vision"}))
+        servicer = InferenceServicer(
+            config, worker_factory=lambda name: _SelectivelyFailingWorker(name),
+        )
+        await servicer.warm_up()  # must not raise
+
+    asyncio.run(go())
+    assert set(load_calls) == {"phi4-mini", "phi4-vision"}
+
+
 def _empty_hub_lister(repo: str) -> tuple:
     return ()
 
