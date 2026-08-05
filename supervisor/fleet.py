@@ -18,9 +18,22 @@ all four now have real, working entrypoints (`common/blob_client.py`'s
 `GrpcBlobStoreClient` for the blob-dependent ones; direct construction of Auth's seven
 real collaborators for `auth`). Nothing excluded anymore.
 
-**No dependency ordering is modeled yet** (`depends_on=()` for every entry) — a real,
-stated limitation. Sleep policy comes from the already-built, already-tested
-classification in `sleep_wake/classification.py`.
+**No general dependency ordering is modeled yet** (`depends_on=()` for every entry not
+listed in `_KNOWN_DEPENDENCIES` below) — a real, stated limitation; a full dependency
+graph across every service is real, separate, larger design work.
+
+**`_KNOWN_DEPENDENCIES` is a targeted fix for one confirmed, live-found defect, not an
+attempt at that larger graph.** `ExecutionCoreServicer` resolves its own peer addresses
+(`preprocessing`/`ocr`/`persistence`/`review_flagging`) exactly once, at its own
+`__main__` startup, via `common/blob_client.resolve_service_address` reading whatever
+Supervisor has written to `service_addresses.json` *at that moment*. With every spec's
+`depends_on=()`, `topological_order`'s Kahn's-algorithm tie-break is plain alphabetical
+order — `execution_core` sorts before all four of its real dependencies, so it always
+started before any of them had a real address recorded, permanently locking in their
+hardcoded fallback defaults (ports nothing was ever listening on) for its entire
+process lifetime. Confirmed live: `SubmitReceipt`'s own real preprocessing gateway call
+failed with a raw connection-refused error on every single real receipt submission,
+against a real fully-booted fleet, until this fix.
 """
 
 from __future__ import annotations
@@ -36,6 +49,12 @@ __all__ = ["build_fleet_specs"]
 
 _ADDR_RE = re.compile(r'DEFAULT_ADDRESS\s*=\s*"([^"]+)"')
 _LAUNCHABLE_FILENAMES = ("service.py", "grpc_servicer.py")
+
+#: See this module's own docstring for why this exists and what it deliberately does not
+#: attempt to solve.
+_KNOWN_DEPENDENCIES: dict[str, tuple[str, ...]] = {
+    "execution_core": ("preprocessing", "ocr", "persistence", "review_flagging"),
+}
 
 
 def build_fleet_specs(clone_dir: Path) -> tuple[ServiceSpec, ...]:
@@ -57,6 +76,7 @@ def build_fleet_specs(clone_dir: Path) -> tuple[ServiceSpec, ...]:
                     name=name, import_path=svc.import_path,
                     serve_module=f"{svc.import_path}.{filename[:-3]}",
                     address=match.group(1), sleep_policy=policy_for(name),
+                    depends_on=_KNOWN_DEPENDENCIES.get(name, ()),
                 )
             )
             break
