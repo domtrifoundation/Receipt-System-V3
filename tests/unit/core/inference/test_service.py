@@ -233,7 +233,10 @@ def test_a_real_client_can_stream_provisioning_progress_over_an_actual_grpc_conn
 
 
 def test_config_from_env_defaults_match_inferenceconfig_defaults(monkeypatch):
-    for var in ("RESIBO_INFERENCE_MODELS_DIR", "RESIBO_INFERENCE_PRESETS_ENABLED", "RESIBO_INFERENCE_DEVICE"):
+    for var in (
+        "RESIBO_INFERENCE_MODELS_DIR", "RESIBO_INFERENCE_PRESETS_ENABLED", "RESIBO_INFERENCE_DEVICE",
+        "RESIBO_INFERENCE_WORKER_POOL_SIZE",
+    ):
         monkeypatch.delenv(var, raising=False)
 
     config = _config_from_env()
@@ -264,6 +267,30 @@ def test_config_from_env_device_applies_to_every_enabled_preset(monkeypatch):
     config = _config_from_env()
 
     assert dict(config.device_by_preset) == {"phi4-mini": "dml", "phi4-vision": "dml"}
+
+
+def test_config_from_env_worker_pool_size_override(monkeypatch):
+    monkeypatch.setenv("RESIBO_INFERENCE_WORKER_POOL_SIZE", "3")
+
+    config = _config_from_env()
+
+    assert config.worker_pool_size == 3
+
+
+def test_config_from_env_worker_pool_size_degrades_to_one_on_malformed_value(monkeypatch):
+    monkeypatch.setenv("RESIBO_INFERENCE_WORKER_POOL_SIZE", "not-a-number")
+
+    config = _config_from_env()
+
+    assert config.worker_pool_size == 1
+
+
+def test_config_from_env_worker_pool_size_never_goes_below_one(monkeypatch):
+    monkeypatch.setenv("RESIBO_INFERENCE_WORKER_POOL_SIZE", "0")
+
+    config = _config_from_env()
+
+    assert config.worker_pool_size == 1
 
 
 @pytest.mark.slow

@@ -298,6 +298,17 @@ def _config_from_env(*, install_root=None) -> InferenceConfig:
         config = replace(
             config, device_by_preset=FrozenDict({p: device for p in config.presets_enabled})
         )
+    worker_pool_size = os.environ.get("RESIBO_INFERENCE_WORKER_POOL_SIZE")
+    if worker_pool_size:
+        # Real knob for the real, live-found "Inference has no genuine multi-request
+        # parallelism" fix (`model_registry.py`'s own `worker_pool_size` docstring) --
+        # unparseable/non-positive values degrade to the safe default of 1 rather than
+        # crashing service startup over a malformed env var.
+        try:
+            parsed = int(worker_pool_size)
+        except ValueError:
+            parsed = 1
+        config = replace(config, worker_pool_size=max(1, parsed))
 
     # Manual, persisted per-preset overrides (`SetPresetDevice`/`device_overrides.py`) —
     # applied on top of the uniform env-var default above, real per-preset precision an
