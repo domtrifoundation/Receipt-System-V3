@@ -96,11 +96,16 @@ class TestHistoryEntry:
 @dataclass(frozen=True)
 class DownloadResult:
     """`download.py`'s own outcome — a real byte count and destination, or an error,
-    never a raise (§4.1)."""
+    never a raise (§4.1). `resumed` is `True` only when this attempt genuinely appended
+    to an existing partial file after the server honored a `Range` request — a caller
+    reporting download progress (Inference API's own provisioning stream, in particular)
+    can tell a real resume apart from a fresh start rather than assuming one or the
+    other."""
 
     ok: bool
     destination: str = ""
     bytes_written: int = 0
+    resumed: bool = False
     error_code: str = ""
     error_detail: str = ""
 
