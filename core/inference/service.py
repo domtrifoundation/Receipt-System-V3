@@ -243,6 +243,20 @@ class InferenceServicer:
         write_device_override(self._install_root, request.preset, request.device)
         return pb.SetPresetDeviceResponse(ok=True, takes_effect_on_restart=True)
 
+    async def warm_up(self) -> None:
+        """Loads every enabled preset's full worker pool before the process reports
+        itself ready — a direct, live-found fix. `get_worker()` loads a `worker_pool_size`
+        pool under one shared `asyncio.Lock` per preset (`model_registry.py`), and every
+        concurrent caller blocks on that same lock, not just the first one in. Without
+        this, the first wave of real concurrent requests against a freshly-started
+        process races each other into that lock and all stall behind one cold multi-
+        replica load (live-measured: 5 concurrent receipts, `worker_pool_size=3`,
+        332s identical stall on two of them before either failed). Calling `get_worker`
+        once per enabled preset here pays that same real cost exactly once, at startup,
+        serially, before any client can connect and race it."""
+        for preset_name in self._registry.enabled_presets():
+            await self._registry.get_worker(preset_name)
+
 
 async def serve(
     address: str = DEFAULT_ADDRESS,
@@ -257,12 +271,12 @@ async def serve(
     from .generated import inference_pb2_grpc
 
     server = grpc.aio.server()
-    inference_pb2_grpc.add_InferenceServiceServicer_to_server(
-        InferenceServicer(config, blob_store, install_root=install_root), server
-    )
+    servicer = InferenceServicer(config, blob_store, install_root=install_root)
+    inference_pb2_grpc.add_InferenceServiceServicer_to_server(servicer, server)
     port = server.add_insecure_port(address)
     host = address.rsplit(":", 1)[0]
     server.bound_address = f"{host}:{port}"  # type: ignore[attr-defined]
+    server.servicer = servicer  # type: ignore[attr-defined] -- lets __main__ warm up before announcing ready
     await server.start()
     return server
 
@@ -338,6 +352,8 @@ if __name__ == "__main__":  # pragma: no cover
         addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
         install_root = resolve_install_root(_Path(__file__))
         srv = await serve(addr, config=_config_from_env(install_root=install_root), install_root=install_root)
+        print("warming up enabled presets' worker pools before accepting real load...", file=sys.stderr, flush=True)
+        await srv.servicer.warm_up()
         print(f"BOUND_ADDRESS={srv.bound_address}", flush=True)
         print(f"listening on {srv.bound_address}", file=sys.stderr)
         from common.watchdog_client import start_kicking_for_service, stop_kick_loop

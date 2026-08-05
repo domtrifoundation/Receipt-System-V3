@@ -67,6 +67,27 @@ def test_generate_through_the_servicer_directly():
     assert response.finish_reason == "stop"
 
 
+@pytest.mark.slow
+def test_warm_up_loads_the_full_pool_for_every_enabled_preset_before_returning():
+    load_calls: list[str] = []
+
+    class _CountingWorker(_FakeWorker):
+        async def load(self) -> None:
+            load_calls.append(self.preset_name)
+
+    async def go():
+        config = InferenceConfig(
+            presets_enabled=frozenset({"phi4-mini"}), worker_pool_size=3,
+        )
+        servicer = InferenceServicer(
+            config, worker_factory=lambda name: _CountingWorker(name),
+        )
+        await servicer.warm_up()
+
+    asyncio.run(go())
+    assert load_calls == ["phi4-mini", "phi4-mini", "phi4-mini"]
+
+
 def _empty_hub_lister(repo: str) -> tuple:
     return ()
 

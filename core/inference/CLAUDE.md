@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.11`
+`a03.00.12`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -431,6 +431,24 @@ surface) — real, scoped follow-up, the config field itself is the seam already
 it. `tests/unit/core/inference/test_model_registry.py`'s own `test_worker_pool_size_*`
 tests cover both the new pool behavior and the exact-original-behavior guarantee at
 `worker_pool_size=1` directly.
+
+**Follow-up, same session: the worker-pool fix above made a fresh process's first wave
+of concurrent requests *worse*, not better — a real regression found by testing the fix
+itself live, not a hypothetical.** `get_worker()`'s double-checked-locking pattern has
+every concurrent caller for a preset block on the *same* `asyncio.Lock`, not just the
+first one in — so on a cold process, 5 receipts submitted concurrently all raced into
+that lock together and every one of them stalled behind one shared cold load of all
+`worker_pool_size` replicas in sequence, rather than just one replica as before this
+session. Live-confirmed: 5 concurrent receipts against a freshly-started process with
+`worker_pool_size=3`, two receipts failed identically at 332.32s wall-clock, both
+`reached_stage=geod outcome=failed` — the same number for both is itself the signal:
+that is a shared bottleneck firing, not two receipts organically taking the same real
+time. Fixed with `InferenceServicer.warm_up()`, called from `service.py`'s `__main__`
+after `serve()` starts but before it prints `BOUND_ADDRESS` — every enabled preset's
+full pool loads once, serially, at process startup, so real concurrent request traffic
+never arrives before the pool is ready to actually serve it. `test_service.py`'s
+`test_warm_up_loads_the_full_pool_for_every_enabled_preset_before_returning` asserts
+`worker_pool_size` real loads happen, not just one.
 
 ## Implementation status
 
