@@ -54,6 +54,14 @@ _LAUNCHABLE_FILENAMES = ("service.py", "grpc_servicer.py")
 #: attempt to solve.
 _KNOWN_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "execution_core": ("preprocessing", "ocr", "persistence", "review_flagging"),
+    #: The identical bug, one hop further out: `IngestionServicer.__main__` resolves
+    #: content_security/persistence/execution_core's real addresses once at its own
+    #: startup too (`core/ingestion/CLAUDE.md`'s own account). Declaring execution_core's
+    #: own dependencies above without also declaring this one would only move the same
+    #: defect from execution_core onto ingestion — confirmed live: after the fix above,
+    #: execution_core's later boot position meant ingestion (which alphabetically sorts
+    #: before it) locked in execution_core's own hardcoded fallback address instead.
+    "ingestion": ("content_security", "persistence", "execution_core"),
 }
 
 
