@@ -157,10 +157,14 @@ def serve(address: str = DEFAULT_ADDRESS, *, registry: ProviderRegistry | None =
     """
     import grpc
 
+    from common.grpc_limits import GRPC_MESSAGE_SIZE_OPTIONS
+
     from .generated import content_security_pb2_grpc as pb_grpc
 
     scanner = ContentScanner(registry or ProviderRegistry())
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=8))
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=8), options=GRPC_MESSAGE_SIZE_OPTIONS
+    )
     pb_grpc.add_ContentSecurityServiceServicer_to_server(
         ContentSecurityServicer(scanner), server
     )

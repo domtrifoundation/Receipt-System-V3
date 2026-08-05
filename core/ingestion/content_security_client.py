@@ -57,13 +57,16 @@ class ContentSecurityClient:
         try:
             import grpc
 
+            from common.grpc_limits import GRPC_MESSAGE_SIZE_OPTIONS
             from core.content_security.generated import content_security_pb2 as pb
             from core.content_security.generated import content_security_pb2_grpc as pb_grpc
         except ImportError as exc:
             raise ContentSecurityUnavailable(f"grpc/content_security stubs unavailable: {exc}") from exc
 
         try:
-            async with grpc.aio.insecure_channel(self._address) as channel:
+            async with grpc.aio.insecure_channel(
+                self._address, options=GRPC_MESSAGE_SIZE_OPTIONS
+            ) as channel:
                 stub = pb_grpc.ContentSecurityServiceStub(channel)
                 response = await stub.ScanFile(
                     pb.ScanRequest(

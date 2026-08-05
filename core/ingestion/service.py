@@ -453,9 +453,11 @@ async def serve(
     """Start the servicer on `address`. Imports gRPC lazily — see the module docstring."""
     import grpc
 
+    from common.grpc_limits import GRPC_MESSAGE_SIZE_OPTIONS
+
     from .generated import ingestion_pb2_grpc
 
-    server = grpc.aio.server()
+    server = grpc.aio.server(options=GRPC_MESSAGE_SIZE_OPTIONS)
     ingestion_pb2_grpc.add_IngestionServiceServicer_to_server(
         IngestionServicer(
             blob_store, execution_core_address=execution_core_address, content_security=content_security,
