@@ -199,18 +199,55 @@ async def finalize_clone(
     """
     strip_report = dev_mode_strip.strip_development_content(clone_dir, dev_mode)
 
-    provision_report = venv_provisioning.provision_clone(clone_dir, python_bin=python_bin)
+    # <install-root>/releases/<version>_<hash>/ — two levels up, not one
+    # (docs/VENV_AND_IMPORTS.md §2's own layout). `clone_dir.parent` alone is `releases/`, a
+    # directory that legitimately holds several channels' clones at once, never the real
+    # top-level install root config/data/models are siblings of. Computed here, before venv
+    # provisioning rather than after (moved up from where it originally sat, right before
+    # `copy_launcher_scripts` below) — it is a pure path computation with no I/O of its own,
+    # and provisioning now genuinely needs it first, to persist hardware detection ahead of
+    # `core.inference`'s own venv step (see immediately below).
+    install_root = clone_dir.parent.parent
+
+    # Real, live-found ordering gap closed here: hardware detection previously only ever
+    # ran from the first-run *wizard*'s own HARDWARE_TIER step, which this exact sequence
+    # always runs *after* `finalize_clone()` -- so a fresh install's very first
+    # `core.inference` venv had no way to ever see real detected hardware, only every
+    # *subsequent* update's clone could. Detecting here too, once, closes that gap for the
+    # very first clone as well; `DetectHardware`'s own RPC (`service.py`) re-detects and
+    # re-persists later regardless (always-overwrite, per `hardware/persistence.py`'s own
+    # docstring), so this is not a second, competing source of truth -- just the same real
+    # detection, run early enough to matter for this one venv-provisioning pass.
+    #
+    # Narrow except, not broad: `hardware/detect.py`'s own probes already degrade internal
+    # failures (missing `lspci`, an unreachable WMI class) to a real, zero-GPU profile
+    # rather than raising -- what remains reachable here is a genuinely unsupported OS
+    # (`NotImplementedError`) or a hard subprocess failure (`OSError`, which
+    # `subprocess.SubprocessError`/`TimeoutExpired` both are). Either degrades this one
+    # step to "stay on cpu" rather than failing the whole finalize over hardware detection
+    # specifically (`docs/PRINCIPLES.md` §4.4) -- installing on CPU is always a safe,
+    # working fallback; failing the install outright over a detection hiccup is not.
+    inference_device = "cpu"
+    try:
+        from common.execution_provider import select_execution_provider
+        from .hardware.detect import default_detector
+        from .hardware.persistence import write_hardware_profile
+
+        hardware_profile = await default_detector().detect()
+        write_hardware_profile(install_root, hardware_profile)
+        inference_device = select_execution_provider(hardware_profile.gpus)
+    except (OSError, NotImplementedError):
+        pass
+
+    provision_report = venv_provisioning.provision_clone(
+        clone_dir, python_bin=python_bin, inference_device=inference_device,
+    )
 
     webapp_built = False
     if webapp_builder is not None:
         await webapp_builder.build(clone_dir)
         webapp_built = True
 
-    # <install-root>/releases/<version>_<hash>/ — two levels up, not one
-    # (docs/VENV_AND_IMPORTS.md §2's own layout). `clone_dir.parent` alone is `releases/`, a
-    # directory that legitimately holds several channels' clones at once, never the real
-    # top-level install root config/data/models are siblings of.
-    install_root = clone_dir.parent.parent
     launchers_copied = copy_launcher_scripts(clone_dir, install_root)
     config_written = write_install_config(install_root, dev_mode)
     cleaned = cleanup_top_level_setup_files(install_root)

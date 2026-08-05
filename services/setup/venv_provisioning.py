@@ -66,6 +66,20 @@ VENVS_DIRNAME = ".venvs"
 
 _SERVICE_REQUIREMENTS_FILENAME = "requirements.txt"
 
+#: Real, live-found gap closed here: `core/inference/requirements.txt`'s own comment
+#: claims "exactly one of these three [onnxruntime-genai variants] gets installed per
+#: machine, chosen from Setup API's shared hardware detection... never guessed" -- no code
+#: anywhere ever backed that claim; every real install always got the bare CPU package.
+#: `_BARE_ONNXRUNTIME_GENAI_PACKAGE` is what `core/inference/requirements.txt` already
+#: pins; the base install always happens first (this dict is never consulted for `"cpu"`),
+#: and this is the swap performed afterward only when a real non-CPU device was resolved.
+_INFERENCE_IMPORT_PATH = "core.inference"
+_BARE_ONNXRUNTIME_GENAI_PACKAGE = "onnxruntime-genai"
+_ONNXRUNTIME_GENAI_VARIANT_BY_DEVICE = {
+    "cuda": "onnxruntime-genai-cuda",
+    "directml": "onnxruntime-genai-directml",
+}
+
 
 def venv_python(venv_dir: Path) -> Path:
     """The interpreter inside a provisioned venv.
@@ -126,6 +140,7 @@ def provision_service(
     *,
     python_bin: str | None = None,
     upgrade: bool = False,
+    inference_device: str = "cpu",
 ) -> ProvisionOutcome:
     """Create and populate one service's venv.
 
@@ -133,6 +148,10 @@ def provision_service(
     `upgrade=True`, in which case its requirements are reinstalled into the existing
     environment. Re-running after a partial failure is a normal, safe operation
     (`v3-deepdive-11-setup-api.md` §4's re-runnability property).
+
+    `inference_device` only ever affects `core.inference`'s own venv (§8.6 execution-
+    provider selection) — every other service's provisioning is completely unaffected by
+    this parameter, checked by import path, not applied globally.
     """
     interpreter = python_bin or sys.executable
 
@@ -193,9 +212,48 @@ def provision_service(
                 ),
             )
 
+    if spec.import_path == _INFERENCE_IMPORT_PATH:
+        variant_package = _ONNXRUNTIME_GENAI_VARIANT_BY_DEVICE.get(inference_device)
+        if variant_package is not None:
+            swap_result = _swap_onnxruntime_genai_variant(py, variant_package)
+            if swap_result is not None:
+                return ProvisionOutcome(
+                    import_path=spec.import_path, venv_dir=spec.venv_dir, created=created,
+                    error=swap_result,
+                )
+
     return ProvisionOutcome(
         import_path=spec.import_path, venv_dir=spec.venv_dir, created=created
     )
+
+
+def _swap_onnxruntime_genai_variant(py: Path, variant_package: str) -> ProvisionError | None:
+    """Replaces the bare CPU `onnxruntime-genai` (already installed by `core.inference`'s
+    own `requirements.txt`, the base install every install gets regardless of hardware)
+    with the hardware-matched variant — real, not a documented aspiration:
+    `onnxruntime-genai`/`onnxruntime-genai-directml`/`onnxruntime-genai-cuda` each bundle a
+    genuinely different native runtime and cannot coexist in one venv (confirmed live
+    while building this: installing the DirectML variant into a venv that already has the
+    CPU one requires the CPU one gone first, or pip's own dependency resolution leaves a
+    broken mix). Uninstall failure degrades to a real, reported error rather than silently
+    leaving the venv on the CPU-only package it started with — installing the swap without
+    confirming the old one is gone risks exactly the broken-mix state just described.
+    """
+    uninstall = _run_with_retries([str(py), "-m", "pip", "uninstall", "-y", _BARE_ONNXRUNTIME_GENAI_PACKAGE])
+    if uninstall.returncode != 0:
+        return ProvisionError(
+            code=ProvisionErrorCode.DEPENDENCY_INSTALL_FAILED,
+            detail=f"removing {_BARE_ONNXRUNTIME_GENAI_PACKAGE} before installing {variant_package}: {_stderr_of(uninstall)}",
+        )
+
+    install = _run_with_retries([str(py), "-m", "pip", "install", variant_package])
+    if install.returncode != 0:
+        return ProvisionError(
+            code=ProvisionErrorCode.DEPENDENCY_INSTALL_FAILED,
+            detail=f"installing {variant_package}: {_stderr_of(install)}",
+        )
+
+    return None
 
 
 def provision_clone(
@@ -204,6 +262,7 @@ def provision_clone(
     python_bin: str | None = None,
     upgrade: bool = False,
     max_workers: int | None = None,
+    inference_device: str = "cpu",
 ) -> ProvisionReport:
     """Provision every service venv in a clone.
 
@@ -214,6 +273,9 @@ def provision_clone(
 
     Never raises for a service-level failure. The caller decides what an incomplete report
     means; `ProvisionReport.fully_provisioned` is the gate Supervisor needs before cutover.
+
+    `inference_device` (§8.6) only ever changes `core.inference`'s own venv — see
+    `provision_service`'s own docstring.
     """
     specs = discover_services(clone_root)
     if not specs:
@@ -223,13 +285,17 @@ def provision_clone(
     if workers <= 1:
         return ProvisionReport(
             outcomes=tuple(
-                provision_service(s, python_bin=python_bin, upgrade=upgrade) for s in specs
+                provision_service(s, python_bin=python_bin, upgrade=upgrade, inference_device=inference_device)
+                for s in specs
             )
         )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(provision_service, s, python_bin=python_bin, upgrade=upgrade): s
+            pool.submit(
+                provision_service, s, python_bin=python_bin, upgrade=upgrade,
+                inference_device=inference_device,
+            ): s
             for s in specs
         }
         by_path = {futures[f].import_path: f.result() for f in futures}
