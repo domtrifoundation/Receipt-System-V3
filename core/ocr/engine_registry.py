@@ -261,11 +261,26 @@ class OcrEngineRegistry:
 
     async def run(self, request: OcrRequest) -> OcrResult:
         """Fans out to every engine in `request.engines` concurrently — the caller's own
-        choice of which engines to run, never a policy decision made here (deep-dive §1)."""
+        choice of which engines to run, never a policy decision made here (deep-dive §1).
+
+        A real, live-found gap, fixed here: an *empty* `request.engines` was silently
+        treated as "run zero engines" rather than the contract every caller actually
+        relies on. `Execution Core's own `build_receipt_work()` docstring already
+        documents `ocr_engines=()` as "the real production default... asks for every
+        enabled engine, never one hardcoded choice" — but nothing here ever resolved
+        that promise, so every real receipt through the full fleet silently got zero
+        OCR readings and an empty `merged_text`, with no error anywhere in the chain
+        (`asyncio.gather()` over zero coroutines just returns `()`). An explicit empty
+        request (as opposed to unset/default) has no way to say "truly zero engines" as
+        a result — that was never a real use case this API's own contract distinguishes
+        (`request.engines` has one meaning: which engines to run), so resolving empty to
+        `enabled_engines()` is the correct fix, not a special case.
+        """
+        engines = request.engines or await self.enabled_engines()
         if self._blob_store is None:
             error = OcrError(OcrErrorCode.BLOB_NOT_FOUND, "no blob store configured")
             readings = tuple(
-                EngineReading.failure(name, error) for name in request.engines
+                EngineReading.failure(name, error) for name in engines
             )
             return merge_readings(readings)
 
@@ -274,7 +289,7 @@ class OcrEngineRegistry:
         except Exception as exc:  # noqa: BLE001 - a missing/unreadable blob fails every engine
             error = OcrError(OcrErrorCode.BLOB_NOT_FOUND, str(exc))
             readings = tuple(
-                EngineReading.failure(name, error) for name in request.engines
+                EngineReading.failure(name, error) for name in engines
             )
             return merge_readings(readings)
 
@@ -287,7 +302,7 @@ class OcrEngineRegistry:
         readings = await asyncio.gather(
             *(
                 self._read_one(request.run_id, name, image_bytes, effective_timeout_ms)
-                for name in request.engines
+                for name in engines
             )
         )
         result = merge_readings(tuple(readings))
