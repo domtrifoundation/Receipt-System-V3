@@ -1,0 +1,14 @@
+# Telemetrees' own dependencies, on top of common/requirements.txt's shared base.
+#
+# Live-found gap: this file didn't exist at all before this fix, even though
+# diagnostics/github_status_client.py, diagnostics/github_app_auth.py, and
+# diagnostics/issue_filer.py all import httpx, and github_app_auth.py signs real RS256
+# JWTs via `cryptography` directly (no PyJWT dependency). A fresh install's
+# core.telemetrees venv only ever got common/requirements.txt's base set, so the real
+# running service crashed at import time with a raw ModuleNotFoundError before this fix.
+
+# --- HTTP client for the GitHub REST/Timeline APIs and installation-token exchange ---
+httpx>=0.27
+
+# --- RS256 JWT signing for GitHub App authentication ---------------------------------
+cryptography>=42.0
