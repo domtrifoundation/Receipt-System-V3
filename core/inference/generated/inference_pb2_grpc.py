@@ -44,6 +44,11 @@ class InferenceServiceStub:
                 request_serializer=inference__pb2.ListPresetsRequest.SerializeToString,
                 response_deserializer=inference__pb2.ListPresetsResponse.FromString,
                 _registered_method=True)
+        self.ProvisionPreset = channel.unary_stream(
+                '/resibo.inference.v1.InferenceService/ProvisionPreset',
+                request_serializer=inference__pb2.ProvisionPresetRequest.SerializeToString,
+                response_deserializer=inference__pb2.ProvisionProgressMessage.FromString,
+                _registered_method=True)
 
 
 class InferenceServiceServicer:
@@ -62,6 +67,16 @@ class InferenceServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ProvisionPreset(self, request, context):
+        """Real model provisioning -- the "downloader" that never existed until this pass
+        (core/inference/model_provisioning.py's own module docstring has the full account).
+        Server-streaming, matching supervisor.proto's StreamBootProgress: one reused message,
+        `complete` is the terminal-update sentinel, same shape family as BootProgressUpdate.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_InferenceServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -74,6 +89,11 @@ def add_InferenceServiceServicer_to_server(servicer, server):
                     servicer.ListPresets,
                     request_deserializer=inference__pb2.ListPresetsRequest.FromString,
                     response_serializer=inference__pb2.ListPresetsResponse.SerializeToString,
+            ),
+            'ProvisionPreset': grpc.unary_stream_rpc_method_handler(
+                    servicer.ProvisionPreset,
+                    request_deserializer=inference__pb2.ProvisionPresetRequest.FromString,
+                    response_serializer=inference__pb2.ProvisionProgressMessage.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -130,6 +150,33 @@ class InferenceService:
             '/resibo.inference.v1.InferenceService/ListPresets',
             inference__pb2.ListPresetsRequest.SerializeToString,
             inference__pb2.ListPresetsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ProvisionPreset(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/resibo.inference.v1.InferenceService/ProvisionPreset',
+            inference__pb2.ProvisionPresetRequest.SerializeToString,
+            inference__pb2.ProvisionProgressMessage.FromString,
             options,
             channel_credentials,
             insecure,

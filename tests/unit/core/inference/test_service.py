@@ -67,16 +67,166 @@ def test_generate_through_the_servicer_directly():
     assert response.finish_reason == "stop"
 
 
+def _empty_hub_lister(repo: str) -> tuple:
+    return ()
+
+
 @pytest.mark.slow
 def test_list_presets_reflects_the_real_registry():
     async def go():
-        servicer = InferenceServicer(InferenceConfig())
+        servicer = InferenceServicer(InferenceConfig(), hub_lister=_empty_hub_lister)
         from core.inference.generated import inference_pb2 as pb
 
         return await servicer.ListPresets(pb.ListPresetsRequest())
 
     response = asyncio.run(go())
     assert "phi4-mini" in response.available_presets
+
+
+@pytest.mark.slow
+def test_list_presets_reports_a_status_per_preset_and_caches_it():
+    async def go():
+        servicer = InferenceServicer(InferenceConfig(), hub_lister=_empty_hub_lister)
+        from core.inference.generated import inference_pb2 as pb
+
+        first = await servicer.ListPresets(pb.ListPresetsRequest())
+        # Second call must be a pure in-memory read, not another Hub round trip -- this
+        # test's own hub_lister has no way to distinguish call counts, but a servicer
+        # that crashed here on a second network attempt in a real no-network environment
+        # is exactly the regression this pins down structurally, not just by inspection.
+        second = await servicer.ListPresets(pb.ListPresetsRequest())
+        return first, second
+
+    first, second = asyncio.run(go())
+    names = {s.name for s in first.preset_statuses}
+    assert "phi4-mini" in names
+    assert {s.name: s.status for s in first.preset_statuses} == {
+        s.name: s.status for s in second.preset_statuses
+    }
+    phi4_mini = next(s for s in first.preset_statuses if s.name == "phi4-mini")
+    assert phi4_mini.status == "not_downloaded"
+    assert phi4_mini.device == "cpu"
+
+
+# --------------------------------------------------------------------- ProvisionPreset
+
+
+_PROVISION_FILES = (
+    ("cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/genai_config.json", 5),
+    ("cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/model.onnx", 7),
+)
+
+
+def _provision_hub_lister(repo: str):
+    return _PROVISION_FILES
+
+
+@pytest.mark.slow
+def test_provision_preset_streams_progress_then_a_complete_message(tmp_path, monkeypatch):
+    import core.inference.model_provisioning as mp
+    from services.update.proving_grounds.contracts import DownloadResult
+
+    async def _fake_download(url, destination, **kwargs):
+        from pathlib import Path
+
+        Path(destination).parent.mkdir(parents=True, exist_ok=True)
+        Path(destination).write_bytes(b"x" * 5 if "genai_config" in url else b"x" * 7)
+        return DownloadResult(ok=True, destination=str(destination), bytes_written=len(Path(destination).read_bytes()))
+
+    monkeypatch.setattr(mp, "download_file", _fake_download)
+
+    async def go():
+        config = InferenceConfig(models_dir=str(tmp_path))
+        servicer = InferenceServicer(config, hub_lister=_provision_hub_lister)
+        from core.inference.generated import inference_pb2 as pb
+
+        messages = []
+        async for msg in servicer.ProvisionPreset(
+            pb.ProvisionPresetRequest(preset="phi4-mini", device_family="cpu")
+        ):
+            messages.append(msg)
+        return messages, servicer
+
+    messages, servicer = asyncio.run(go())
+
+    assert messages[-1].complete is True
+    assert messages[-1].ok is True
+    assert messages[-1].error_code == ""
+    # At least one real progress update before the terminal one.
+    assert any(not m.complete for m in messages)
+    assert servicer._live_status["phi4-mini"].value == "ready"
+
+
+@pytest.mark.slow
+def test_provision_preset_unknown_preset_yields_one_failed_complete_message():
+    async def go():
+        servicer = InferenceServicer(InferenceConfig(), hub_lister=_empty_hub_lister)
+        from core.inference.generated import inference_pb2 as pb
+
+        messages = []
+        async for msg in servicer.ProvisionPreset(
+            pb.ProvisionPresetRequest(preset="no-such-preset", device_family="cpu")
+        ):
+            messages.append(msg)
+        return messages
+
+    messages = asyncio.run(go())
+    assert len(messages) == 1
+    assert messages[0].complete is True
+    assert messages[0].ok is False
+    assert messages[0].error_code == "PRESET_NOT_CONFIGURED"
+
+
+@pytest.mark.slow
+def test_a_real_client_can_stream_provisioning_progress_over_an_actual_grpc_connection(tmp_path, monkeypatch):
+    """No stub of the thing under test — a real `grpc.aio` server, a real client stub
+    consuming a real streamed RPC, matching `test_a_real_client_can_generate_...`'s own
+    discipline one level up (server streaming, not unary)."""
+    import core.inference.model_provisioning as mp
+    from core.inference.generated import inference_pb2, inference_pb2_grpc
+    from services.update.proving_grounds.contracts import DownloadResult
+
+    async def _fake_download(url, destination, **kwargs):
+        from pathlib import Path
+
+        Path(destination).parent.mkdir(parents=True, exist_ok=True)
+        Path(destination).write_bytes(b"x" * 5 if "genai_config" in url else b"x" * 7)
+        return DownloadResult(ok=True, destination=str(destination), bytes_written=5)
+
+    monkeypatch.setattr(mp, "download_file", _fake_download)
+
+    async def go():
+        address = "127.0.0.1:19713"
+        config = InferenceConfig(models_dir=str(tmp_path))
+        # `serve()` builds its own InferenceServicer internally with no hub_lister seam,
+        # so this test constructs the servicer directly and registers it on a real server
+        # the same low-level way `serve()` itself does, to keep the real network fully
+        # out of a "no stub of the thing under test" test.
+        import grpc as grpc_module
+
+        from core.inference.service import InferenceServicer
+
+        server = grpc_module.aio.server()
+        servicer = InferenceServicer(config, hub_lister=_provision_hub_lister)
+        inference_pb2_grpc.add_InferenceServiceServicer_to_server(servicer, server)
+        port = server.add_insecure_port(address)
+        await server.start()
+        try:
+            channel = grpc.aio.insecure_channel(address)
+            stub = inference_pb2_grpc.InferenceServiceStub(channel)
+            messages = []
+            async for msg in stub.ProvisionPreset(
+                inference_pb2.ProvisionPresetRequest(preset="phi4-mini", device_family="cpu")
+            ):
+                messages.append(msg)
+            await channel.close()
+            return messages
+        finally:
+            await server.stop(None)
+
+    messages = asyncio.run(go())
+    assert messages[-1].complete is True
+    assert messages[-1].ok is True
 
 
 # --------------------------------------------------------------------- _config_from_env

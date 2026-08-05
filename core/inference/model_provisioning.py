@@ -53,7 +53,16 @@ class HubFilesLister(Protocol):
 
 
 def _default_hub_lister(repo: str) -> tuple[tuple[str, int], ...]:
-    from huggingface_hub import HfApi  # noqa: PLC0415 - lazy, same reasoning as presets.py
+    try:
+        from huggingface_hub import HfApi  # noqa: PLC0415 - lazy, same reasoning as presets.py
+    except ImportError:
+        # `huggingface_hub` is an Inference-specific dependency (`requirements.txt`), not
+        # guaranteed present on every interpreter that happens to import this module
+        # (`docs/PRINCIPLES.md` §3.3 point 5) -- degrades to "no remote files known" rather
+        # than crashing, the same posture every other optional/heavy dependency in this
+        # repo takes. `preset_status()`'s own empty-remote-files branch already reads this
+        # correctly as `NOT_DOWNLOADED`, not a false `READY`.
+        return ()
 
     info = HfApi().model_info(repo, files_metadata=True)
     return tuple((s.rfilename, s.size or 0) for s in info.siblings)

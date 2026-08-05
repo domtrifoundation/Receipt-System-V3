@@ -19,6 +19,11 @@ package resibo.inference.v1;
 service InferenceService {
   rpc Generate(GenerateRequest) returns (GenerateResponse);
   rpc ListPresets(ListPresetsRequest) returns (ListPresetsResponse);  // for Interface API's settings menu
+  // Real model provisioning -- the "downloader" that never existed until this pass
+  // (core/inference/model_provisioning.py's own module docstring has the full account).
+  // Server-streaming, matching supervisor.proto's StreamBootProgress: one reused message,
+  // `complete` is the terminal-update sentinel, same shape family as BootProgressUpdate.
+  rpc ProvisionPreset(ProvisionPresetRequest) returns (stream ProvisionProgressMessage);
 }
 
 message GenerateRequest {
@@ -72,4 +77,30 @@ message ListPresetsRequest {
 message ListPresetsResponse {
   repeated string available_presets = 1;
   repeated string enabled_presets = 2;
+  repeated PresetStatusMessage preset_statuses = 3;   // appended field, §"only append" rule
+}
+
+message PresetStatusMessage {
+  string name = 1;
+  string status = 2;    // "not_downloaded" | "partial" | "ready" | "downloading" | "failed"
+  string device = 3;    // the device this preset would load/is loaded on, e.g. "cpu"/"directml"
+}
+
+message ProvisionPresetRequest {
+  string preset = 1;
+  string device_family = 2;   // "cpu" | "cuda" | "directml" -- caller's choice, not policy, same
+                               // convention GenerationRequest.preset already establishes
+}
+
+message ProvisionProgressMessage {
+  string preset = 1;
+  string current_file = 2;
+  int64 bytes_downloaded = 3;
+  int64 total_bytes = 4;
+  int32 files_completed = 5;
+  int32 files_total = 6;
+  bool complete = 7;      // true on the final update -- every file has a result
+  bool ok = 8;             // only meaningful when complete is true
+  string error_code = 9;
+  string error_detail = 10;
 }

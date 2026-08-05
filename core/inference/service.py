@@ -23,10 +23,13 @@ from .contracts import (
     GenerationRequest,
     Message,
     MessageRole,
+    ProvisionStatus,
     ToolSpec,
 )
+from .model_provisioning import preset_status, provision_preset
 from .model_registry import InferenceConfig, InferenceModelRegistry
 from .metrics import InferenceMetricsCollector
+from .presets import MODEL_PRESETS
 
 DEFAULT_ADDRESS = "127.0.0.1:50073"
 
@@ -54,13 +57,26 @@ class InferenceServicer:
     stubs is `serve()`'s business and this class stays importable without them."""
 
     def __init__(
-        self, config: InferenceConfig | None = None, blob_store=None, *, worker_factory=None
+        self, config: InferenceConfig | None = None, blob_store=None, *,
+        worker_factory=None, hub_lister=None,
     ) -> None:
         self._config = config or InferenceConfig()
         self._metrics = InferenceMetricsCollector()
         self._registry = InferenceModelRegistry(
             self._config, blob_store, self._metrics, worker_factory=worker_factory
         )
+        #: Injectable so real streaming-RPC tests (`test_a_real_client_can_...`-shaped)
+        #: never touch the real Hugging Face Hub, same seam
+        #: `model_provisioning.HubFilesLister` already establishes.
+        from .model_provisioning import _default_hub_lister
+
+        self._hub_lister = hub_lister or _default_hub_lister
+        #: `ProvisionStatus.DOWNLOADING`/`FAILED` overlay on top of `preset_status()`'s
+        #: own pure disk check (`contracts.ProvisionStatus`'s own docstring) — real,
+        #: in-memory, this-process-lifetime state, the same scope Execution Core's
+        #: `RunRegistry` already documents for its own live tracking. Reset to whatever
+        #: the disk actually says on every process restart, never assumed persistent.
+        self._live_status: dict[str, ProvisionStatus] = {}
 
     async def Generate(self, request, context=None):  # noqa: N802 - gRPC naming
         from .generated import inference_pb2 as pb
@@ -97,12 +113,89 @@ class InferenceServicer:
         return response
 
     async def ListPresets(self, request, context=None):  # noqa: N802 - gRPC naming
+        """`preset_statuses` never makes a real network call *per request* — `presets.py`'s
+        own `model_registry.py` docstring already establishes this rule for model-directory
+        resolution ("must never make a network call... a one-time provisioning step"),
+        and the identical reasoning applies here. The one real Hub round trip
+        `preset_status()` needs happens at most once per preset per process lifetime,
+        cached into `self._live_status` afterward — every later call, and every call once
+        a real `ProvisionPreset` stream has run, is a pure in-memory read.
+        """
         from .generated import inference_pb2 as pb
 
         response = pb.ListPresetsResponse()
         response.available_presets.extend(sorted(self._registry.available_presets()))
         response.enabled_presets.extend(sorted(self._registry.enabled_presets()))
+        for name in sorted(MODEL_PRESETS):
+            device = self._registry.device_for(name)
+            if name not in self._live_status:
+                self._live_status[name] = preset_status(
+                    name, device, self._registry.models_dir(), hub_lister=self._hub_lister,
+                )
+            msg = response.preset_statuses.add()
+            msg.name = name
+            msg.status = self._live_status[name].value
+            msg.device = device
         return response
+
+    async def ProvisionPreset(self, request, context=None):  # noqa: N802 - gRPC naming
+        """Server-streaming, matching Supervisor's `StreamBootProgress` exactly (§ this
+        module's own `.proto` comment): a background task runs the real download, an
+        `asyncio.Queue` bridges its per-file progress to this generator, a `complete`
+        sentinel update ends the stream. Real, resumable, retrying downloads underneath
+        (`model_provisioning.provision_preset`) — this method's own job stops at
+        translating that into wire messages and tracking the live status overlay
+        `ListPresets` reads.
+        """
+        import asyncio
+
+        from .generated import inference_pb2 as pb
+
+        preset = request.preset
+        device_family = request.device_family or "cpu"
+
+        if preset not in MODEL_PRESETS:
+            yield pb.ProvisionProgressMessage(
+                preset=preset, complete=True, ok=False,
+                error_code="PRESET_NOT_CONFIGURED", error_detail=f"no such preset: {preset!r}",
+            )
+            return
+
+        self._live_status[preset] = ProvisionStatus.DOWNLOADING
+        queue: asyncio.Queue = asyncio.Queue()
+        _DONE = object()
+
+        def on_progress(progress) -> None:
+            queue.put_nowait(progress)
+
+        async def _run() -> None:
+            report = await provision_preset(
+                preset, device_family, self._registry.models_dir(),
+                on_progress=on_progress, hub_lister=self._hub_lister,
+            )
+            queue.put_nowait((_DONE, report))
+
+        task = asyncio.ensure_future(_run())
+        try:
+            while True:
+                item = await queue.get()
+                if isinstance(item, tuple) and item and item[0] is _DONE:
+                    report = item[1]
+                    self._live_status[preset] = (
+                        ProvisionStatus.READY if report.ok else ProvisionStatus.FAILED
+                    )
+                    yield pb.ProvisionProgressMessage(
+                        preset=preset, complete=True, ok=report.ok,
+                        error_code=report.error_code, error_detail=report.error_detail,
+                    )
+                    break
+                yield pb.ProvisionProgressMessage(
+                    preset=item.preset, current_file=item.current_file,
+                    bytes_downloaded=item.bytes_downloaded, total_bytes=item.total_bytes,
+                    files_completed=item.files_completed, files_total=item.files_total,
+                )
+        finally:
+            await task
 
 
 async def serve(

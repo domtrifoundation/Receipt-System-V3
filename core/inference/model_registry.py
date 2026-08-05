@@ -135,6 +135,16 @@ class InferenceModelRegistry:
     def _device_for(self, preset_name: str) -> str:
         return self._config.device_by_preset.get(preset_name, "cpu")
 
+    def device_for(self, preset_name: str) -> str:
+        """Public wrapper over `_device_for` — the effective device a preset would load
+        on, real config today (§8.6's own hardware-aware fallback lands in a later pass).
+        `service.py`'s `ListPresets` reports this per preset rather than reaching into a
+        private method."""
+        return self._device_for(preset_name)
+
+    def models_dir(self) -> str:
+        return self._config.models_dir
+
     def _model_dir_for(self, preset_name: str) -> str:
         return os.path.join(self._config.models_dir, preset_name)
 

@@ -89,9 +89,53 @@ class ListPresetsRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class ListPresetsResponse(_message.Message):
-    __slots__ = ("available_presets", "enabled_presets")
+    __slots__ = ("available_presets", "enabled_presets", "preset_statuses")
     AVAILABLE_PRESETS_FIELD_NUMBER: _ClassVar[int]
     ENABLED_PRESETS_FIELD_NUMBER: _ClassVar[int]
+    PRESET_STATUSES_FIELD_NUMBER: _ClassVar[int]
     available_presets: _containers.RepeatedScalarFieldContainer[str]
     enabled_presets: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, available_presets: _Optional[_Iterable[str]] = ..., enabled_presets: _Optional[_Iterable[str]] = ...) -> None: ...
+    preset_statuses: _containers.RepeatedCompositeFieldContainer[PresetStatusMessage]
+    def __init__(self, available_presets: _Optional[_Iterable[str]] = ..., enabled_presets: _Optional[_Iterable[str]] = ..., preset_statuses: _Optional[_Iterable[_Union[PresetStatusMessage, _Mapping]]] = ...) -> None: ...
+
+class PresetStatusMessage(_message.Message):
+    __slots__ = ("name", "status", "device")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    DEVICE_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    status: str
+    device: str
+    def __init__(self, name: _Optional[str] = ..., status: _Optional[str] = ..., device: _Optional[str] = ...) -> None: ...
+
+class ProvisionPresetRequest(_message.Message):
+    __slots__ = ("preset", "device_family")
+    PRESET_FIELD_NUMBER: _ClassVar[int]
+    DEVICE_FAMILY_FIELD_NUMBER: _ClassVar[int]
+    preset: str
+    device_family: str
+    def __init__(self, preset: _Optional[str] = ..., device_family: _Optional[str] = ...) -> None: ...
+
+class ProvisionProgressMessage(_message.Message):
+    __slots__ = ("preset", "current_file", "bytes_downloaded", "total_bytes", "files_completed", "files_total", "complete", "ok", "error_code", "error_detail")
+    PRESET_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_FILE_FIELD_NUMBER: _ClassVar[int]
+    BYTES_DOWNLOADED_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_BYTES_FIELD_NUMBER: _ClassVar[int]
+    FILES_COMPLETED_FIELD_NUMBER: _ClassVar[int]
+    FILES_TOTAL_FIELD_NUMBER: _ClassVar[int]
+    COMPLETE_FIELD_NUMBER: _ClassVar[int]
+    OK_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_DETAIL_FIELD_NUMBER: _ClassVar[int]
+    preset: str
+    current_file: str
+    bytes_downloaded: int
+    total_bytes: int
+    files_completed: int
+    files_total: int
+    complete: bool
+    ok: bool
+    error_code: str
+    error_detail: str
+    def __init__(self, preset: _Optional[str] = ..., current_file: _Optional[str] = ..., bytes_downloaded: _Optional[int] = ..., total_bytes: _Optional[int] = ..., files_completed: _Optional[int] = ..., files_total: _Optional[int] = ..., complete: _Optional[bool] = ..., ok: _Optional[bool] = ..., error_code: _Optional[str] = ..., error_detail: _Optional[str] = ...) -> None: ...
