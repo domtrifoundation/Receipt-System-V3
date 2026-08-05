@@ -166,6 +166,27 @@ mechanical pattern applied to Update/Logs/Ingestion (each gets its own `Get`/`Se
 pair backed by `LocalConfigStore`); `gateway.set_tunnel_enabled` is blocked on Gateway not
 existing as a package at all yet.
 
+**`inference_models`, a new root-menu screen, is a real, considered exception to the
+closed 8-item custom-screen list — recorded here and in the screen's own module
+docstring, not snuck in.** A direct follow-up audit on Inference API found the whole
+operational layer around real generation (proven working the same session) missing: no
+model downloader was ever called, no execution-provider auto-selection existed, and the
+venv installer always shipped CPU-only regardless of hardware — see `core/inference/
+CLAUDE.md` for the full account of what got built to close each gap (`model_
+provisioning.py`, the new `ProvisionPreset` streaming RPC, `common/execution_provider.py`,
+EP-aware venv provisioning). The TUI side needed the identical justification `boot_
+sequence`/`restart_screen` already establish: a preset's real status can only be known by
+a live `ListPresets` call, and a real multi-gigabyte download's progress cannot be
+expressed as static menu data. `custom_screens/model_provisioning_screen.py` (a
+`FleetScreen`-shaped `ListView` of presets with live status) pushes `custom_screens/
+model_provisioning_progress_screen.py` (a `RestartScreen`-shaped fullscreen streaming
+client of `ProvisionPreset`) for any preset that isn't ready — both thin gRPC clients of
+Inference's own surface, no business logic living in either. Live-tested against a
+genuine running `InferenceServicer` (`tests/unit/services/interface/
+test_model_provisioning_screen.py`), never a mocked stub — including a real, faked-network
+download actually landing bytes on disk through the full screen -> stream -> provisioning
+path.
+
 **`run_monitor` and `groups` are now real, closing two of the four remaining gaps from
 the previous pass.** `run_monitor` (`custom_screens/run_monitor_screen.py`) needed
 Execution Core's new `ListActiveRuns` RPC (the actual missing piece — `GetRunStatus`

@@ -71,6 +71,16 @@ ROOT_MENU: tuple[MenuItemSpec, ...] = (
         docs_ref="v3-deepdive-41-groups.md",
     ),
     MenuItemSpec(
+        path="inference_models",
+        label="Inference Models",
+        tooltip="Which local LLM presets are downloaded, their execution provider/device, "
+                "and real, resumable download progress for a preset that isn't ready yet "
+                "(v3-deepdive-02-inference-api.md §4.4, §8.6).",
+        target="interface.open_screen.inference_models",
+        kind="action",
+        docs_ref="v3-deepdive-02-inference-api.md",
+    ),
+    MenuItemSpec(
         path="find_a_setting",
         label="Find a Setting...",
         tooltip="Fuzzy-search every setting by name or description (V2's find_setting, "

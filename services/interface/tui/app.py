@@ -28,6 +28,7 @@ from services.interface.tui.custom_screens.filed_issues_screen import FiledIssue
 from services.interface.tui.custom_screens.find_setting import FindSettingScreen
 from services.interface.tui.custom_screens.fleet_screen import FleetScreen
 from services.interface.tui.custom_screens.groups_screen import GroupsScreen
+from services.interface.tui.custom_screens.model_provisioning_screen import ModelProvisioningScreen
 from services.interface.tui.custom_screens.monitor_screen import MonitorScreen
 from services.interface.tui.custom_screens.run_monitor_screen import RunMonitorScreen
 from services.interface.tui.custom_screens.setting_value_screen import SettingValueScreen
@@ -104,6 +105,9 @@ class InterfaceApp(App):
                 return ""
             if item.target == "interface.open_screen.groups":
                 self.push_screen(GroupsScreen())
+                return ""
+            if item.target == "interface.open_screen.inference_models":
+                self.push_screen(ModelProvisioningScreen(locale=self._locale))
                 return ""
             if item.target in _BUILT_CUSTOM_SCREENS:
                 self.push_screen(_BUILT_CUSTOM_SCREENS[item.target](self._locale))
