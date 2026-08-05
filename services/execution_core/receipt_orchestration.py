@@ -99,6 +99,39 @@ def _first_line(text: str) -> str:
     return ""
 
 
+#: Real, live-measured cap: this hardware's prefill time scales badly with prompt
+#: length (`inferred()`'s own docstring), so `_select_distinct_readings()` bounds how
+#: many full readings ever reach the LLM regardless of how many real variants exist.
+_MAX_READINGS_FOR_LLM = 3
+#: Two readings scoring above this on `difflib.SequenceMatcher.ratio()` are treated as
+#: near-duplicates -- real corroborating disagreement is kept, readings that only differ
+#: by OCR noise on a handful of characters are not worth a second full copy in the prompt.
+_NEAR_DUPLICATE_RATIO = 0.92
+
+
+def _select_distinct_readings(readings: list[dict]) -> list[dict]:
+    """Highest-confidence first, greedily kept only if genuinely different from every
+    reading already selected -- real corroboration value (readings that actually
+    disagree) without the prompt scaling with variant count. Exact-duplicate text
+    (common: several variants/engines legitimately agreeing) is the cheapest case this
+    already rejects; near-duplicates (OCR noise on a few characters) are the real reason
+    this uses similarity rather than a plain set of exact strings."""
+    import difflib
+
+    ordered = sorted(readings, key=lambda r: r["confidence"], reverse=True)
+    selected: list[dict] = []
+    for reading in ordered:
+        if len(selected) >= _MAX_READINGS_FOR_LLM:
+            break
+        is_near_duplicate = any(
+            difflib.SequenceMatcher(None, reading["text"], kept["text"]).ratio() >= _NEAR_DUPLICATE_RATIO
+            for kept in selected
+        )
+        if not is_near_duplicate:
+            selected.append(reading)
+    return selected
+
+
 def build_receipt_work(
     *,
     receipt_id: str,
@@ -258,21 +291,23 @@ def build_receipt_work(
 
     async def inferred() -> dict:
         """The real LLM-structured extraction (deep-dive §4.4/§9) -- corroborated with
-        `matched()`'s own real candidate, never blind to it, and now with every real OCR
+        `matched()`'s own real candidate, never blind to it, and with every real OCR
         reading (`ocrd()`'s own `readings`, not just its `best_text`) -- a live-found
         fix: this orchestrator picking one "best" reading before the LLM ever saw the
         rest discarded real corroborating signal an LLM's own deliberation is a better
         fit for (e.g. a lower-confidence variant reading a TIN correctly that the
-        higher-confidence one garbled). Readings with identical text are deduplicated
-        (multiple variants/engines legitimately agree often) so the prompt scales with
-        genuine disagreement, not with variant count."""
+        higher-confidence one garbled).
+
+        `_select_distinct_readings()` bounds this real benefit against a real, live-
+        measured cost: this hardware's prefill time scales badly with prompt length,
+        and handing the LLM all 5 full variant readings (rather than 1) was a direct,
+        measured contributor to inference regularly exceeding the real generation
+        timeout under concurrent load. Near-duplicate readings (multiple variants/
+        engines legitimately agree often) are filtered, not just exact-text ones, and
+        the result is capped -- most of the real corroboration benefit for a bounded,
+        predictable prompt size."""
         ocr_result = await _ocr_result()
-        seen_texts: set[str] = set()
-        distinct_readings = []
-        for reading in ocr_result["readings"]:
-            if reading["text"] not in seen_texts:
-                seen_texts.add(reading["text"])
-                distinct_readings.append(reading)
+        distinct_readings = _select_distinct_readings(ocr_result["readings"])
         readings_block = "\n\n".join(
             f"--- Reading {i + 1} (variant={r['variant']!r}, confidence={r['confidence']:.2f}, "
             f"agreement={r['agreement']!r}) ---\n{r['text']}"

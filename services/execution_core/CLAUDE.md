@@ -17,7 +17,7 @@ commits that got there.
 
 ## Current API version
 
-`a01.00.08`
+`a01.00.09`
 
 The **running** value, distinct from the Zircon target above. The target states where this API
 lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp` in the
@@ -275,6 +275,21 @@ overlaps with Inference of receipt A — real, working pipelining — but Infere
 Inference concurrency across receipts does not exist yet. Flagged here as the honest,
 unresolved half of "is inference concurrent," not silently claimed fixed alongside the
 real wins above.
+
+**Follow-up in the same session, once real concurrent-receipt testing confirmed the
+above with real numbers: `ocrd()`'s own OCR-fix (real, confirmed working — timing
+dropped from 52-135s to 17-38s) surfaced a second real cost from `inferred()`'s "hand
+the LLM every reading" fix — the prompt got long enough, often enough, that prefill
+time became a real, measured contributor to inference regularly exceeding the timeout
+under concurrent load.** `_select_distinct_readings()` (`difflib.SequenceMatcher`-based
+near-duplicate filtering, not just exact-text dedup, capped at `_MAX_READINGS_FOR_LLM=3`)
+bounds this: highest-confidence readings kept first, a reading only added if it's
+genuinely different from every one already kept. Real, deliberate tradeoff, not free —
+most of the corroboration benefit for a bounded, predictable prompt size, at the cost of
+not showing the LLM every single one of 5 real variant readings when several happen to
+agree closely. `tests/unit/services/execution_core/test_receipt_orchestration_helpers.py`
+covers the real selection logic directly (confidence ordering, near-duplicate rejection,
+the real cap, empty input) without needing gRPC or a real model.
 
 ## Real, live-tested integration — the actual missing piece, closed
 
