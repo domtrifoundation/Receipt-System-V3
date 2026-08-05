@@ -152,3 +152,58 @@ def test_variant_executor_respects_config_across_the_process_boundary(blob_dir):
     # alpha=0.2 on a constant-100 image should land near 100*0.2=20, not the default alpha=0.6's
     # own ~60 — proving the configured value, not a hardcoded default, actually ran.
     assert output_img.mean() < 30
+
+
+def test_opencl_jobs_are_bounded_by_the_gate_but_cpu_jobs_are_not(monkeypatch, blob_dir):
+    """Real, live-found regression test: 5 concurrent receipts x up to 5 variants each, all
+    `device_preference="auto"`, drove the real installed OpenCL driver to `CL_OUT_OF_RESOURCES`
+    (`std::terminate()` inside OpenCV's C++ layer -- uncatchable from Python, kills the worker
+    process outright). No real OpenCL/multiprocessing involved here on purpose: `_run_one_variant`
+    and `resolve_device` are monkeypatched so this test exercises only the gate's own concurrency
+    bound, fast and platform-independent, never risking the exact real crash it guards against."""
+    import asyncio
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    import core.preprocessing.generation as generation_module
+    from core.preprocessing.contracts import Variant
+
+    state_lock = threading.Lock()
+    state = {"concurrent": 0, "max_concurrent": 0}
+
+    def fake_run_one_variant(job):
+        with state_lock:
+            state["concurrent"] += 1
+            state["max_concurrent"] = max(state["max_concurrent"], state["concurrent"])
+        time.sleep(0.05)
+        with state_lock:
+            state["concurrent"] -= 1
+        return Variant(kind=job.kind, image_ref=None, duration_ms=0, device=resolve_device_stub(job.device_preference))
+
+    def resolve_device_stub(preference: str) -> str:
+        return "cpu" if preference == "cpu" else "opencl"
+
+    monkeypatch.setattr(generation_module, "_run_one_variant", fake_run_one_variant)
+    monkeypatch.setattr(generation_module, "resolve_device", resolve_device_stub)
+
+    async def go():
+        executor = VariantExecutor(_make_test_blob_store, worker_count=6, max_concurrent_opencl_jobs=2)
+        executor._pool = ThreadPoolExecutor(max_workers=6)
+        try:
+            request = VariantRequest(
+                run_id="r1", user_id="u1", image_ref=BlobRef(logical_id="x"),
+                kinds=frozenset({
+                    VariantKind.STANDARD, VariantKind.BW_THRESHOLD, VariantKind.DESKEW,
+                    VariantKind.HIGH_CONTRAST, VariantKind.COLOR,
+                }),
+                device_preference="auto",
+            )
+            return await executor.generate(request)
+        finally:
+            executor._pool.shutdown(wait=True)
+
+    result = asyncio.run(go())
+
+    assert len(result.variants) == 5
+    assert state["max_concurrent"] <= 2, "opencl jobs exceeded the configured gate"

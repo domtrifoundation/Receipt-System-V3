@@ -108,14 +108,44 @@ class VariantExecutor:
         *,
         config: PreprocessingConfig | None = None,
         worker_count: int | None = None,
+        max_concurrent_opencl_jobs: int = 2,
     ) -> None:
         """`worker_count=None` lets `ProcessPoolExecutor` pick its own default (CPU count) —
         §7's own `worker_pool_size: 0` config meaning "auto-detect from Setup API's hardware
         profile" is a future refinement once that profile is actually wired through here, not
-        invented as a guess in this constructor."""
+        invented as a guess in this constructor.
+
+        `max_concurrent_opencl_jobs`, a real, live-found correction to this package's own
+        `CLAUDE.md` gotcha ("UMat's OpenCL buffers are small and short-lived per-image... a
+        per-image reserve/release round trip to Health API would be real, disproportionate
+        overhead") — that reasoning assumed one receipt's worth of OpenCL usage at a time.
+        Under real concurrent-receipt load (`docs/PRINCIPLES.md`-driven live pipeline testing,
+        not a synthetic benchmark) every `"auto"`-resolved variant job across every in-flight
+        receipt independently opens its own OpenCL context against the same physical GPU in
+        its own `ProcessPoolExecutor` worker process, with nothing bounding how many run at
+        once — confirmed live: 5 concurrent receipts x up to 5 variants each drove the real
+        installed OpenCL driver to `CL_OUT_OF_RESOURCES`, which OpenCV's C++ layer reports via
+        `std::terminate()` — **uncatchable from Python**, killing the worker process outright,
+        not a `cv2.error` this module's own existing `except Exception` in `_run_one_variant`
+        could ever catch. A full Health-API-shaped reservation ledger (§6.7's own heavier
+        mechanism, deliberately not built for this package) is more machinery than this needs;
+        a plain `asyncio.Semaphore` gating only the jobs `resolve_device` actually resolves to
+        `"opencl"` is enough to keep real concurrent GPU contexts bounded, while `"cpu"`-
+        resolved jobs stay fully unbounded across the real worker pool. `2`, a conservative,
+        reasoned starting point (this project's own `estimated_vram_mb` fields elsewhere carry
+        the identical "reasoned placeholder, not bench-measured" caveat), not the literal
+        highest concurrency this GPU can sustain — refine from real measurement once a bench
+        exists, the same posture as those VRAM estimates."""
         self._blob_store_factory = blob_store_factory
         self._config = config or PreprocessingConfig()
         self._pool = ProcessPoolExecutor(max_workers=worker_count)
+        self._opencl_gate = asyncio.Semaphore(max(1, max_concurrent_opencl_jobs))
+
+    async def _dispatch(self, loop: asyncio.AbstractEventLoop, job: _WorkerJob) -> Variant:
+        if resolve_device(job.device_preference) == "opencl":
+            async with self._opencl_gate:
+                return await loop.run_in_executor(self._pool, _run_one_variant, job)
+        return await loop.run_in_executor(self._pool, _run_one_variant, job)
 
     async def generate(self, request: VariantRequest) -> VariantResult:
         loop = asyncio.get_running_loop()
@@ -129,9 +159,7 @@ class VariantExecutor:
             )
             for kind in request.kinds
         ]
-        variants = await asyncio.gather(
-            *(loop.run_in_executor(self._pool, _run_one_variant, job) for job in jobs)
-        )
+        variants = await asyncio.gather(*(self._dispatch(loop, job) for job in jobs))
         return VariantResult(variants=tuple(variants))
 
     def shutdown(self) -> None:

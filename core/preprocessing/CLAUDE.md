@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a02.00.02`
+`a02.00.03`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -88,6 +88,32 @@ Variant generation runs in a `ProcessPoolExecutor`, not threads, because OpenCV'
   (a periodic usage metric push, not a reservation) than the ledger this session built
   for the other two APIs. Left as a real, named, still-open item rather than forced into
   the reservation shape it doesn't actually need.
+
+  **That reasoning's "small and short-lived, doesn't need gating" half is real, live-found
+  wrong under concurrent-receipt load, not merely theoretical — found and fixed the same
+  session real end-to-end pipeline testing (`services/execution_core/CLAUDE.md`'s own
+  worker-pool-fix account) finally exercised more than one receipt at a time.** 5 real
+  concurrent receipts, `device_preference="auto"` (this package's own default,
+  `contracts.VariantRequest.device_preference`), up to 5 variants each, drove the real
+  installed OpenCL driver on real Arc B580 hardware to `CL_OUT_OF_RESOURCES` —
+  every `"auto"`-resolved variant job independently opens its own OpenCL context in its
+  own `ProcessPoolExecutor` worker process, with nothing bounding how many run at once
+  against one shared physical GPU. Worse: OpenCV reports this specific failure via
+  `std::terminate()` inside its own C++ layer — **uncatchable from Python**, so
+  `generation.py`'s own existing `except Exception` in `_run_one_variant` (correct for an
+  ordinary `cv2.error`) never gets a chance to run; the worker process dies outright.
+  Fixed with `VariantExecutor`'s own new `max_concurrent_opencl_jobs` (default `2`, a
+  reasoned starting point, not a bench-measured one — same caveat this file's own
+  `estimated_vram_mb`-shaped fields carry elsewhere) — a plain `asyncio.Semaphore` gating
+  only the jobs `resolve_device` actually resolves to `"opencl"`, leaving `"cpu"`-resolved
+  jobs fully unbounded across the real worker pool. Real, deliberately smaller than a full
+  Health-API reservation ledger: §6.7's own "doesn't need the same urgency" conclusion
+  still holds for *why not build the heavier mechanism*, it just needed *some* real bound,
+  which is what was actually missing. `tests/unit/core/preprocessing/test_generation.py`'s
+  `test_opencl_jobs_are_bounded_by_the_gate_but_cpu_jobs_are_not` covers the gate directly
+  (monkeypatched device resolution and worker function — deliberately never exercises real
+  OpenCL/multiprocessing, so the test can't itself trigger the exact crash it guards
+  against).
 - **`PreprocessingMetricsCollector` was built and independently tested
   (`test_metrics.py`) but never instantiated anywhere in `PreprocessingServicer` at
   all** — every `Rasterize`/`GenerateVariants` call went uncounted, the same
