@@ -28,6 +28,7 @@ import concurrent.futures
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .contracts import (
@@ -180,7 +181,7 @@ def provision_service(
         )
 
     for req in spec.requirement_files:
-        result = _run([str(py), "-m", "pip", "install", "-r", str(req)])
+        result = _run_with_retries([str(py), "-m", "pip", "install", "-r", str(req)])
         if result.returncode != 0:
             return ProvisionOutcome(
                 import_path=spec.import_path,
@@ -236,6 +237,29 @@ def provision_clone(
     # Reported in discovery order, not completion order — a report whose ordering shifts run to
     # run is far harder to diff against a previous one when chasing a regression.
     return ProvisionReport(outcomes=tuple(by_path[s.import_path] for s in specs))
+
+
+#: Live-found: a bare PyPI network blip (a CDN edge returning the wrong Content-Type for
+#: one index page, mid a concurrent 8-way provisioning run) failed `pip install` outright
+#: with no retry, taking the whole finalize down over something that succeeded on the very
+#: next attempt with no code change at all. `pip install` is safe to re-run -- partially
+#: installed packages are left in a state the next invocation resolves correctly, the same
+#: idempotent-and-safely-re-runnable guarantee this module's own docstring already claims
+#: for the outer `provision_service` call. A genuinely broken requirement (a real missing
+#: wheel, an unsatisfiable pin) fails identically on every attempt, so retrying never masks
+#: that -- it only costs the bounded extra time below before surfacing the same real error.
+PIP_INSTALL_ATTEMPTS = 3
+PIP_INSTALL_RETRY_DELAY_SECONDS = 3.0
+
+
+def _run_with_retries(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    result = _run(cmd)
+    attempt = 1
+    while result.returncode != 0 and attempt < PIP_INSTALL_ATTEMPTS:
+        time.sleep(PIP_INSTALL_RETRY_DELAY_SECONDS)
+        result = _run(cmd)
+        attempt += 1
+    return result
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
