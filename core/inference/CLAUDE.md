@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.05`
+`a03.00.06`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -322,6 +322,29 @@ behind under `spawn`). `common/execution_provider.py`'s `ExecutionProviderInfo` 
 `nuget_package` field alongside `pip_package` — `installable` is now true for either
 channel; `openvino`/`qnn` flip from `installable=False` to `True`, `migraphx` stays
 `False` (no channel found for it at all).
+
+**DirectML generation timing is genuinely unstable on real hardware — a real, live-
+confirmed finding, not a code bug, found while running real receipts through the full
+pipeline for the first time.** The exact same `OnnxGenAiBackend.generate()` call — same
+prompt, same 10-token cap, `do_sample=False` (fully deterministic) — produced byte-
+identical output across four separate real runs on this machine's Arc B580, but took
+1.6s, 16.5s, 85.5s, and 146.5s wall-clock respectively. Ruled out as a code bug by direct
+comparison: a bare script replicating `_run_one_pass()`'s exact `og` API call sequence
+(`generate_next_token()` -> `get_next_tokens()` -> `tokenizer_stream.decode()`) was
+sometimes fast, sometimes exactly as slow as the real backend class — same code, same
+inputs, wildly different wall-clock cost. The leading candidate is real DirectML/driver-
+level resource pressure (GPU memory not fully released between repeated model
+load/unload cycles across separate processes within one session, plausible given the
+model is 3.4GB and this machine ran five-plus separate real loads in quick succession
+during this diagnosis) — not confirmed with full certainty, flagged honestly as the
+leading hypothesis rather than a proven root cause. **Practical fix applied**:
+`services/execution_core/gateways.py`'s `GrpcInferenceGateway.generate()` now defaults
+`timeout_ms` to 300000 (5 minutes) instead of `InferenceConfig`'s own 30-second default —
+a real, correct generation must not fail outright just because this specific hardware's
+worst-case observed latency is ~150s. IOBinding (§8.2, still genuinely unimplemented) was
+the first suspect and is ruled out as the *sole* cause by this same evidence — it may
+still be worth implementing for raw throughput, but it would not explain a 90x variance
+between two runs of the identical code.
 
 ## Implementation status
 

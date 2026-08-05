@@ -17,7 +17,7 @@ commits that got there.
 
 ## Current API version
 
-`a01.00.05`
+`a01.00.06`
 
 The **running** value, distinct from the Zircon target above. The target states where this API
 lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp` in the

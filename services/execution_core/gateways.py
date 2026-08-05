@@ -218,8 +218,13 @@ class GrpcInferenceGateway:
 
     async def generate(
         self, *, run_id: str, user_id: str, preset: str, prompt: str, response_schema_json: str,
-        max_tokens: int = 1024, temperature: float = 0.0, timeout_ms: int = 30000,
+        max_tokens: int = 1024, temperature: float = 0.0, timeout_ms: int = 300000,
     ):
+        """`timeout_ms` defaults to a generous 5 minutes, not `InferenceConfig`'s own
+        30-second default -- real, live-observed DirectML wall-clock variance on real
+        hardware (`core/inference/CLAUDE.md`'s own "DirectML generation timing is
+        genuinely unstable" account) means a 30s budget fails a real, correct generation
+        outright on a slow run, not just a genuinely-stuck one."""
         import grpc
 
         from core.inference.generated import inference_pb2 as pb

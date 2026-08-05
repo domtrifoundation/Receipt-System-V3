@@ -191,7 +191,7 @@ def build_receipt_work(
             response_schema_json=json.dumps(RECEIPT_EXTRACTION_SCHEMA),
         )
         if response.finish_reason == "error":
-            raise RuntimeError(f"inference failed: {response.finish_reason}")
+            raise RuntimeError(f"inference failed: {response.error_code}: {response.error_detail}")
         try:
             return json.loads(response.text)
         except json.JSONDecodeError:
