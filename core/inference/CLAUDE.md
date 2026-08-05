@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.14`
+`a03.00.15`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -481,6 +481,21 @@ sites (`list_remote_variant_files`, `provision_preset`) both needed the matching
 with, silently excluding every file rather than including all of them. Existing nested-repo
 behavior (`phi4-mini`, `phi4-vision`) is unchanged — the fallback only triggers when zero
 subfolders exist anywhere, never when tags simply don't match a real multi-variant repo.
+
+**Real, live-found follow-up the same session: the flat-repo fix above was incomplete —
+a third call site building the actual download URL had the identical bug.** Confirmed
+live provisioning `qwen2.5-3b` for real against the real fresh install: `ok=False`,
+every one of 13 real files failed, nothing written to disk, despite
+`list_remote_variant_files` already resolving the repo correctly (the two spots fixed
+first). `provision_preset()`'s own download loop built the request URL as
+`f"…/resolve/main/{variant}/{relative_path}"` unconditionally — for `variant == ""` this
+produces a real double-slash URL (`…/resolve/main//model.onnx`) that Hugging Face's
+server does not normalize and simply 404s on. Fixed with the same
+`f"{variant}/" if variant else ""` guard as the other two spots.
+`test_provision_preset_downloads_a_flat_repo_without_a_double_slash_url` serves against
+a real local HTTP server matching the real repo's own path shape, so a regression here
+fails exactly the way the real provisioning call did — confirmed by running it against
+the pre-fix code first.
 
 ## Implementation status
 

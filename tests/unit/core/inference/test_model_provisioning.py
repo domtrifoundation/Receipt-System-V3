@@ -221,6 +221,73 @@ def test_provision_preset_downloads_every_missing_file(tmp_path: Path, monkeypat
         _stop(httpd)
 
 
+def test_provision_preset_downloads_a_flat_repo_without_a_double_slash_url(tmp_path: Path, monkeypatch):
+    """Real, live-found bug: a flat repo's own `variant == ""` (`resolve_variant_path`'s
+    root fallback) made the download URL builder emit `.../resolve/main//model.onnx` --
+    a real double slash Hugging Face's server does not normalize, 404s on, and which
+    made every single file in a real `qwen2.5-3b` provisioning attempt fail (confirmed
+    live: `ok=False`, nothing written to disk, despite `list_remote_variant_files`
+    already resolving the identical repo correctly). This test's own handler strips a
+    fixed, no-double-slash prefix and 404s on anything else, so a regression here fails
+    exactly the way the real provisioning call did."""
+    flat_files = (("genai_config.json", 5), ("model.onnx", 7))
+
+    class _FlatFileServingHandler(_FileServingHandler):
+        """Same lookup-by-exact-relative-path logic as the base handler, just against
+        the real qwen repo's own path prefix. A double-slash URL naturally 404s here
+        without any extra detection: `removeprefix` leaves a stray leading `/` that
+        never matches a real registered key."""
+
+        content_by_path = {
+            "genai_config.json": b"AAAAA",
+            "model.onnx": b"BBBBBBB",
+        }
+        requests_seen: list[str] = []
+
+        def do_GET(self):  # noqa: N802
+            type(self).requests_seen.append(self.path)
+            prefix = "/keisuke-miyako/Qwen2.5-3B-Instruct-onnx-int4/resolve/main/"
+            relative = self.path.removeprefix(prefix)
+            body = type(self).content_by_path.get(relative)
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):  # noqa: A002
+            pass
+
+    httpd = _start(_FlatFileServingHandler)
+    try:
+        port = httpd.server_address[1]
+
+        import core.inference.model_provisioning as mp
+
+        real_download_file = mp.download_file
+
+        async def _redirecting_download_file(url, destination, **kwargs):
+            redirected = url.replace("https://huggingface.co", f"http://127.0.0.1:{port}")
+            return await real_download_file(redirected, destination, **kwargs)
+
+        monkeypatch.setattr(mp, "download_file", _redirecting_download_file)
+
+        report = run(provision_preset(
+            "qwen2.5-3b", "cpu", tmp_path, hub_lister=_fake_qwen_lister(flat_files),
+        ))
+
+        assert report.ok is True, report
+        assert all(f.ok for f in report.files), report.files
+        preset_dir = tmp_path / "qwen2.5-3b"
+        assert (preset_dir / "genai_config.json").read_bytes() == b"AAAAA"
+        assert (preset_dir / "model.onnx").read_bytes() == b"BBBBBBB"
+    finally:
+        _stop(httpd)
+
+
 def test_provision_preset_skips_files_already_correct_on_disk(tmp_path: Path, monkeypatch):
     small_files = (("cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/genai_config.json", 5),)
     preset_dir = tmp_path / "phi4-mini"

@@ -187,7 +187,17 @@ async def provision_preset(
             _emit(remote.relative_path, remote.size_bytes, remote.size_bytes, index + 1)
             continue
 
-        url = f"https://huggingface.co/{spec.repo}/resolve/main/{variant}/{remote.relative_path}"
+        # `variant == ""` means "the repo root itself" (`resolve_variant_path`'s own
+        # flat-repo case) -- an unconditional `f"{variant}/"` produces a real, live-found
+        # double-slash URL (`.../resolve/main//model.onnx`) that Hugging Face's server does
+        # not normalize and simply 404s, which is exactly what made every single file in a
+        # flat repo fail to download (confirmed live: `ok=False` on all 13 real files,
+        # nothing written to disk) despite `list_remote_variant_files` already correctly
+        # resolving the same repo. The same `variant`-truthiness guard as the two
+        # prefix-stripping call sites above, applied here for the one that actually builds
+        # the URL a request goes out to.
+        variant_segment = f"{variant}/" if variant else ""
+        url = f"https://huggingface.co/{spec.repo}/resolve/main/{variant_segment}{remote.relative_path}"
         result = await download_file(
             url, target, hf_token=hf_token,
             on_chunk=lambda n, _r=remote, _i=index: _emit(_r.relative_path, n, _r.size_bytes, _i),
