@@ -215,6 +215,27 @@ def test_retries_a_transient_server_error_and_eventually_succeeds(tmp_path: Path
         _stop(httpd)
 
 
+def test_on_chunk_reports_real_cumulative_progress(tmp_path: Path):
+    _RangeAwareHandler.response_body = b"x" * 50
+    _RangeAwareHandler.request_log = []
+    httpd = _start(_RangeAwareHandler)
+    try:
+        port = httpd.server_address[1]
+        seen: list[int] = []
+
+        result = run(
+            download_file(
+                f"http://127.0.0.1:{port}/file", tmp_path / "out.bin",
+                chunk_size=10, on_chunk=seen.append,
+            )
+        )
+
+        assert result.ok is True
+        assert seen == [10, 20, 30, 40, 50]
+    finally:
+        _stop(httpd)
+
+
 def test_gives_up_after_max_attempts_on_a_persistently_failing_server(tmp_path: Path):
     _FlakyThenOkHandler.response_body = b"unreachable"
     _FlakyThenOkHandler.fail_count = 99

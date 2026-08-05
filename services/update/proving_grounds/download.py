@@ -32,6 +32,7 @@ are deliberately the same shape, not independently reinvented.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -65,6 +66,7 @@ async def download_file(
     resume: bool = True,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS,
+    on_chunk: Callable[[int], None] | None = None,
 ) -> DownloadResult:
     """Streams `url` to `destination`, creating parent directories as needed. Never
     raises — a network failure, a non-2xx status, or a filesystem error are all a
@@ -76,19 +78,24 @@ async def download_file(
     `resume=False` for content where a partial file is never a valid resume point (there
     is none in this repo today, but the caller's choice belongs to the caller, not a
     hardcoded assumption here).
+
+    `on_chunk`, if given, is called after every chunk write with the file's own current
+    total byte count (not just this chunk's size) — real, per-chunk progress for a
+    caller streaming that back over its own RPC (Inference API's `ProvisionPreset`, in
+    particular), sized once per `chunk_size` rather than only once per whole file.
     """
     destination = Path(destination)
     attempt = 1
     result = await _attempt_download(
         url, destination, hf_token=hf_token, timeout_seconds=timeout_seconds,
-        chunk_size=chunk_size, resume=resume,
+        chunk_size=chunk_size, resume=resume, on_chunk=on_chunk,
     )
     while not result.ok and attempt < max_attempts:
         await asyncio.sleep(retry_delay_seconds)
         attempt += 1
         result = await _attempt_download(
             url, destination, hf_token=hf_token, timeout_seconds=timeout_seconds,
-            chunk_size=chunk_size, resume=resume,
+            chunk_size=chunk_size, resume=resume, on_chunk=on_chunk,
         )
     return result
 
@@ -101,6 +108,7 @@ async def _attempt_download(
     timeout_seconds: float,
     chunk_size: int,
     resume: bool,
+    on_chunk: Callable[[int], None] | None = None,
 ) -> DownloadResult:
     existing_bytes = destination.stat().st_size if resume and destination.exists() else 0
     headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
@@ -120,7 +128,7 @@ async def _attempt_download(
                     destination.unlink(missing_ok=True)
                     return await _attempt_download(
                         url, destination, hf_token=hf_token, timeout_seconds=timeout_seconds,
-                        chunk_size=chunk_size, resume=False,
+                        chunk_size=chunk_size, resume=False, on_chunk=on_chunk,
                     )
 
                 response.raise_for_status()
@@ -137,6 +145,8 @@ async def _attempt_download(
                     async for chunk in response.aiter_bytes(chunk_size):
                         fh.write(chunk)
                         bytes_written += len(chunk)
+                        if on_chunk is not None:
+                            on_chunk(bytes_written)
     except httpx.HTTPError as exc:
         return DownloadResult(ok=False, error_code="DOWNLOAD_FAILED", error_detail=str(exc))
     except OSError as exc:

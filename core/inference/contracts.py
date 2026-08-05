@@ -135,6 +135,72 @@ class BlobStoreGateway(Protocol):
     async def read_blob(self, ref: BlobRef) -> bytes: ...
 
 
+class ProvisionStatus(str, Enum):
+    """A preset's real, disk-derived provisioning state — `model_provisioning.
+    preset_status()`'s own return value, and what `ListPresets` reports per preset
+    (`service.py`). Only the first three are ever produced by that pure disk check;
+    `DOWNLOADING` and `FAILED` are live, in-memory overlay states the gRPC layer applies
+    while a `ProvisionPreset` stream is actually running or just finished with an error —
+    the same "kept in memory, not yet a persistence adapter" posture Execution Core's own
+    `RunRegistry` documents for its own live state, not silently different from it."""
+
+    NOT_DOWNLOADED = "not_downloaded"
+    PARTIAL = "partial"
+    READY = "ready"
+    DOWNLOADING = "downloading"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class RemoteFile:
+    """One file inside a preset's resolved variant folder on the Hugging Face Hub —
+    `model_provisioning.list_remote_variant_files()`'s own return shape. `relative_path`
+    is already stripped of the variant-folder prefix, i.e. exactly the path this file
+    should occupy under `<models_dir>/<preset_name>/` locally."""
+
+    relative_path: str
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class FileProvisionOutcome:
+    relative_path: str
+    ok: bool
+    bytes_written: int = 0
+    resumed: bool = False
+    error_detail: str = ""
+
+
+@dataclass(frozen=True)
+class ProvisionReport:
+    """`model_provisioning.provision_preset()`'s own return value. One file's failure
+    does not stop the others (§ this module's own docstring) — `ok` is `True` only when
+    every file in `files` succeeded; a caller inspects `files` for the real per-file
+    picture rather than treating this as all-or-nothing."""
+
+    preset: str
+    device_family: str
+    ok: bool
+    files: tuple[FileProvisionOutcome, ...] = ()
+    error_code: str = ""
+    error_detail: str = ""
+
+
+@dataclass(frozen=True)
+class ProvisionProgress:
+    """One `on_progress` callback payload during `provision_preset()` — real, per-chunk
+    granularity (via `download_file`'s own `on_chunk`), not just once per file. This is
+    what a streaming gRPC caller (`InferenceServicer.ProvisionPreset`) forwards to its own
+    client roughly as-is."""
+
+    preset: str
+    current_file: str
+    bytes_downloaded: int
+    total_bytes: int
+    files_completed: int
+    files_total: int
+
+
 @dataclass(frozen=True)
 class InferenceMetrics:
     generations_succeeded: int = 0
@@ -151,6 +217,7 @@ __all__ = [
     "BlobStoreGateway",
     "ContentBlock",
     "ContentBlockType",
+    "FileProvisionOutcome",
     "FinishReason",
     "GenerationRequest",
     "GenerationResult",
@@ -159,6 +226,10 @@ __all__ = [
     "InferenceMetrics",
     "Message",
     "MessageRole",
+    "ProvisionProgress",
+    "ProvisionReport",
+    "ProvisionStatus",
+    "RemoteFile",
     "ToolCall",
     "ToolSpec",
 ]

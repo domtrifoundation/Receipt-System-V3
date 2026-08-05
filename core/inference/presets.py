@@ -1,16 +1,17 @@
 """Named model presets (deep-dive §4.4) — Hugging Face repo + Model Builder config, with
 live-resolved quantization variants rather than a hardcoded subfolder path.
 
-**Not live-resolved against the real Hugging Face Hub this session.** `resolve_variant_
-path()` below calls `huggingface_hub`'s own repo-listing API, lazily imported and never
-invoked during this session (no model download happened — downloading is one of this
-project's own "ask the user first" actions, and there was nothing to download for since no
-preset was actually loaded). The self-healing *design* mirrors OCR API's own model-currency
-technique exactly; the *live network call* itself is unverified, the same honesty posture
-`backends/onnx_genai_backend.py`'s own module docstring takes.
+**Live-resolved against the real Hugging Face Hub**, given explicit permission for a real
+model-download test — `resolve_variant_path()` below is what actually caught its own two
+real bugs (see its docstring), confirmed live against `microsoft/Phi-4-mini-instruct-onnx`
+and `microsoft/Phi-4-multimodal-instruct-onnx`'s real file listings, not left unverified.
+`model_provisioning.py` is the real provisioning path this module's own resolution feeds —
+see that module's own docstring for the "who downloads it" side of this design.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 from common.frozen_dict import FrozenDict
 
@@ -105,7 +106,9 @@ class PresetSpec:
         return self._raw["variant_hints"].get(device_family)
 
 
-def resolve_variant_path(preset_name: str, device_family: str) -> str:
+def resolve_variant_path(
+    preset_name: str, device_family: str, *, list_repo_files_fn: Callable[[str], list[str]] | None = None
+) -> str:
     """Resolves the real subfolder inside a preset's repo for the given device family,
     from the **live repo listing**, never a hardcoded path (deep-dive §4.4's own
     self-healing technique, matching OCR API's model-currency approach).
@@ -114,6 +117,13 @@ def resolve_variant_path(preset_name: str, device_family: str) -> str:
     family, or an entirely unreachable repo listing) — this is a startup-time resolution
     step, not a per-request one, so a failure here belongs to `model_registry.py`'s own
     `ModelLoadFailed` path rather than a per-generation error.
+
+    `list_repo_files_fn`, if given, replaces the real Hub call — real reason, not just
+    testability: `model_provisioning.list_remote_variant_files()` already fetches every
+    file's name *and size* from the Hub in one call of its own, and re-deriving the
+    variant folder from that same already-fetched list (rather than this function making
+    its own second, redundant Hub round trip) is both cheaper and the only way for that
+    caller's own tests to exercise this resolution without a real network call either.
     """
     spec = PresetSpec(preset_name)
     hint = spec.variant_hint(device_family)
@@ -121,9 +131,12 @@ def resolve_variant_path(preset_name: str, device_family: str) -> str:
         raise ValueError(f"preset {preset_name!r} has no variant hint for device family {device_family!r}")
     precision_tag, quant_tag = hint
 
-    from huggingface_hub import list_repo_files  # noqa: PLC0415
+    if list_repo_files_fn is not None:
+        files = list_repo_files_fn(spec.repo)
+    else:
+        from huggingface_hub import list_repo_files  # noqa: PLC0415
 
-    files = list_repo_files(spec.repo)
+        files = list_repo_files(spec.repo)
     # Real, live-found bug, caught only by actually calling this against the real Hub
     # (permission granted, not hypothetical): `f.split("/")[0]` returns the repo's
     # top-level folder ("cpu_and_mobile"), never the actual model directory one level
