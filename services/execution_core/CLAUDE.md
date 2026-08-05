@@ -17,7 +17,7 @@ commits that got there.
 
 ## Current API version
 
-`a01.00.09`
+`a01.00.10`
 
 The **running** value, distinct from the Zircon target above. The target states where this API
 lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp` in the
@@ -290,6 +290,20 @@ not showing the LLM every single one of 5 real variant readings when several hap
 agree closely. `tests/unit/services/execution_core/test_receipt_orchestration_helpers.py`
 covers the real selection logic directly (confidence ordering, near-duplicate rejection,
 the real cap, empty input) without needing gRPC or a real model.
+
+**Follow-up in the same session: the reading cap is a real, caller-configurable
+parameter now, not a fixed module constant — a direct request, and it turned out
+the cap wasn't the dominant cost after all.** `_select_distinct_readings()` now takes
+`max_readings` explicitly; `build_receipt_work()`'s own new `max_ocr_readings_for_llm`
+parameter (`DEFAULT_MAX_READINGS_FOR_LLM = 5`, raised back from the first pass's `3`)
+is the real seam a future TUI/settings surface threads through — not yet wired to one,
+real scoped follow-up, same posture as `core/inference/CLAUDE.md`'s own
+`worker_pool_size`. Live concurrent-receipt testing after the cap fix landed showed
+inference *still* regularly hitting the generation timeout — real evidence the reading
+count was never the dominant cost; genuine single-worker queueing (see `core/inference/
+CLAUDE.md`'s own account of the real `worker_pool_size` fix) was. The reading cap stays
+because it's still a real, correct bound on prompt size, not because it turned out to be
+the fix.
 
 ## Real, live-tested integration — the actual missing piece, closed
 

@@ -69,6 +69,44 @@ def test_concurrent_get_worker_calls_result_in_exactly_one_load():
     assert all(w is workers[0] for w in workers)
 
 
+def test_worker_pool_size_loads_exactly_n_replicas_and_round_robins():
+    """Real fix for the real, live-found "Inference has no genuine multi-request
+    parallelism" gap (`core/inference/CLAUDE.md`) -- `worker_pool_size=1` (every other
+    test in this file) preserves the original single-worker contract exactly;
+    `worker_pool_size>1` is what unlocks genuinely concurrent generations for the same
+    preset."""
+    _FakeWorker.load_call_count = 0
+    config = InferenceConfig(worker_pool_size=3)
+    registry = InferenceModelRegistry(config, worker_factory=lambda name: _FakeWorker(name))
+
+    async def go():
+        return await asyncio.gather(*(registry.get_worker("phi4-mini") for _ in range(9)))
+
+    workers = run(go())
+    assert _FakeWorker.load_call_count == 3
+    distinct_workers = {id(w) for w in workers}
+    assert len(distinct_workers) == 3
+    # Real round-robin, not "always the first replica" -- each distinct worker is used
+    # the same number of times across 9 calls over a 3-worker pool.
+    from collections import Counter
+
+    counts = Counter(id(w) for w in workers)
+    assert set(counts.values()) == {3}
+
+
+def test_worker_pool_size_one_is_the_exact_original_single_worker_behavior():
+    _FakeWorker.load_call_count = 0
+    config = InferenceConfig(worker_pool_size=1)
+    registry = InferenceModelRegistry(config, worker_factory=lambda name: _FakeWorker(name))
+
+    async def go():
+        return await asyncio.gather(*(registry.get_worker("phi4-mini") for _ in range(5)))
+
+    workers = run(go())
+    assert _FakeWorker.load_call_count == 1
+    assert all(w is workers[0] for w in workers)
+
+
 def test_different_presets_load_independently_without_serializing():
     calls = []
 
@@ -221,7 +259,9 @@ def test_default_worker_stays_on_gpu_when_health_grants(monkeypatch):
     run(registry.get_worker("phi4-mini"))
 
     assert captured_device["device"] == "cuda"
-    assert registry._reservations == {"phi4-mini": "res-1"}
+    # One reservation per pool replica -- a list now, not a single id, since a pool can
+    # hold more than one real worker (`worker_pool_size`), each with its own reservation.
+    assert dict(registry._reservations) == {"phi4-mini": ["res-1"]}
 
 
 def test_shutdown_releases_every_tracked_reservation(monkeypatch):

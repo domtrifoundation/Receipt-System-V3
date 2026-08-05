@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.09`
+`a03.00.10`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -408,14 +408,29 @@ same time." Halving the thread count measurably slowed every single request for 
 concurrency benefit that was never real. Corrected to three-quarters, which still leaves
 real headroom for concurrent OCR without starving the one thing actually running.
 
-**The real, larger, still-open question this surfaces: Inference has no genuine
-multi-request parallelism today, by design, not by oversight.** Five receipts submitted
-concurrently at the Execution Core level do NOT get five parallel generations — they
-queue behind each other at the one shared `PresetWorker`. `core/inference/CLAUDE.md`
-(this file) does not yet have a resolved answer for whether that's acceptable (a single
-model instance is the honest cost of the multi-gigabyte weights involved) or whether a
-real multi-worker-replica pool is warranted follow-up work — flagged here explicitly
-rather than silently treated as solved because the thread-count number moved.
+**Follow-up, same session: that "still-open question" is now answered — a real,
+opt-in worker pool.** Live concurrent-receipt testing confirmed the queueing directly
+(5 receipts concurrently, real per-stage timing: `geod -> inferred` alone cost
+234-293s per receipt, several exceeding the generation timeout) even after the OCR
+parallelization and thread-count fixes — the actual bottleneck was never thread
+starvation, it was that every request for one preset shares exactly one `PresetWorker`.
+`InferenceModelRegistry` now supports `InferenceConfig.worker_pool_size` (default `1`,
+byte-for-byte identical behavior and test contract to every prior session — the
+double-checked-locking regression test still gets exactly one load) — a value above `1`
+loads that many real, independent `PresetWorker` replicas (each its own
+`multiprocessing.Process`, own full model copy, own Health VRAM reservation) and
+`get_worker()` round-robins across them, so concurrent requests for the same preset
+genuinely run in parallel instead of queueing behind each other. Replicas load
+sequentially at pool warm-up, deliberately not via `asyncio.gather` — this session's own
+DirectML findings above are reason enough not to risk concurrent cold loads compounding
+real EP/driver instability, and warm-up is a one-time cost, not a per-request one. Real,
+live-confirmed headroom on this session's own test hardware: 95GB RAM, a 3.4GB int4
+model — several replicas are affordable, not reckless, on hardware like this. **Not yet
+done**: exposing `worker_pool_size` as a real, operator-facing setting (TUI/settings
+surface) — real, scoped follow-up, the config field itself is the seam already built for
+it. `tests/unit/core/inference/test_model_registry.py`'s own `test_worker_pool_size_*`
+tests cover both the new pool behavior and the exact-original-behavior guarantee at
+`worker_pool_size=1` directly.
 
 ## Implementation status
 

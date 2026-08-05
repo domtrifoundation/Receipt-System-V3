@@ -99,17 +99,22 @@ def _first_line(text: str) -> str:
     return ""
 
 
-#: Real, live-measured cap: this hardware's prefill time scales badly with prompt
-#: length (`inferred()`'s own docstring), so `_select_distinct_readings()` bounds how
-#: many full readings ever reach the LLM regardless of how many real variants exist.
-_MAX_READINGS_FOR_LLM = 3
+#: Real, live-measured default cap: this hardware's prefill time scales badly with
+#: prompt length (`inferred()`'s own docstring), so `_select_distinct_readings()` bounds
+#: how many full readings ever reach the LLM regardless of how many real variants exist.
+#: A real, direct request asked for this to become an operator-configurable setting
+#: (surfaced in the TUI's own inference/performance settings) rather than a fixed
+#: constant -- `build_receipt_work()`'s own `max_ocr_readings_for_llm` parameter below is
+#: that real seam; wiring a `settings_backend.py` entry + TUI control onto it is real,
+#: scoped follow-up work, not done in this pass.
+DEFAULT_MAX_READINGS_FOR_LLM = 5
 #: Two readings scoring above this on `difflib.SequenceMatcher.ratio()` are treated as
 #: near-duplicates -- real corroborating disagreement is kept, readings that only differ
 #: by OCR noise on a handful of characters are not worth a second full copy in the prompt.
 _NEAR_DUPLICATE_RATIO = 0.92
 
 
-def _select_distinct_readings(readings: list[dict]) -> list[dict]:
+def _select_distinct_readings(readings: list[dict], max_readings: int) -> list[dict]:
     """Highest-confidence first, greedily kept only if genuinely different from every
     reading already selected -- real corroboration value (readings that actually
     disagree) without the prompt scaling with variant count. Exact-duplicate text
@@ -121,7 +126,7 @@ def _select_distinct_readings(readings: list[dict]) -> list[dict]:
     ordered = sorted(readings, key=lambda r: r["confidence"], reverse=True)
     selected: list[dict] = []
     for reading in ordered:
-        if len(selected) >= _MAX_READINGS_FOR_LLM:
+        if len(selected) >= max_readings:
             break
         is_near_duplicate = any(
             difflib.SequenceMatcher(None, reading["text"], kept["text"]).ratio() >= _NEAR_DUPLICATE_RATIO
@@ -150,6 +155,7 @@ def build_receipt_work(
     inference_preset: str = "phi4-mini",
     ocr_engines: tuple[str, ...] = (),
     ocr_source: str = "preprocessed",
+    max_ocr_readings_for_llm: int = DEFAULT_MAX_READINGS_FOR_LLM,
 ) -> ReceiptWork:
     """`ocr_engines=()` is the real production default: OCR's own multi-engine
     corroboration is the point of this API (`v3-deepdive-01-ocr-api.md`), so the normal
@@ -307,7 +313,7 @@ def build_receipt_work(
         the result is capped -- most of the real corroboration benefit for a bounded,
         predictable prompt size."""
         ocr_result = await _ocr_result()
-        distinct_readings = _select_distinct_readings(ocr_result["readings"])
+        distinct_readings = _select_distinct_readings(ocr_result["readings"], max_ocr_readings_for_llm)
         readings_block = "\n\n".join(
             f"--- Reading {i + 1} (variant={r['variant']!r}, confidence={r['confidence']:.2f}, "
             f"agreement={r['agreement']!r}) ---\n{r['text']}"

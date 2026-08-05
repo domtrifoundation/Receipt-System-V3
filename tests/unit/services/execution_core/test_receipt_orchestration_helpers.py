@@ -6,7 +6,7 @@ actually contains.
 from __future__ import annotations
 
 from services.execution_core.receipt_orchestration import (
-    _MAX_READINGS_FOR_LLM,
+    DEFAULT_MAX_READINGS_FOR_LLM,
     _first_line,
     _select_distinct_readings,
 )
@@ -29,7 +29,7 @@ def test_select_distinct_readings_keeps_genuinely_different_readings():
         _reading("JOLLIBEE FOODS CORP\nTOTAL 645.00", 0.95, "standard"),
         _reading("MERCURY DRUG\nTOTAL 167.00", 0.80, "bw_threshold"),
     ]
-    selected = _select_distinct_readings(readings)
+    selected = _select_distinct_readings(readings, DEFAULT_MAX_READINGS_FOR_LLM)
     assert len(selected) == 2
     assert selected[0]["confidence"] == 0.95  # highest-confidence first
 
@@ -40,16 +40,25 @@ def test_select_distinct_readings_drops_near_duplicates():
         _reading("JOLLIBEE FOODS CORPORATION\nTOTAL 645.00\nTIN 123-456-789", 0.95),
         _reading("JOLLIBEE FOODS CORPORATI0N\nTOTAL 645.00\nTIN 123-456-789", 0.60),
     ]
-    selected = _select_distinct_readings(readings)
+    selected = _select_distinct_readings(readings, DEFAULT_MAX_READINGS_FOR_LLM)
     assert len(selected) == 1
     assert selected[0]["confidence"] == 0.95
 
 
-def test_select_distinct_readings_caps_at_the_real_limit():
+def test_select_distinct_readings_caps_at_the_default_limit():
     readings = [_reading(f"totally different receipt text number {i} " * 5, 0.5 + i * 0.01) for i in range(10)]
-    selected = _select_distinct_readings(readings)
-    assert len(selected) == _MAX_READINGS_FOR_LLM
+    selected = _select_distinct_readings(readings, DEFAULT_MAX_READINGS_FOR_LLM)
+    assert len(selected) == DEFAULT_MAX_READINGS_FOR_LLM
+
+
+def test_select_distinct_readings_respects_a_real_caller_supplied_cap():
+    """The real, direct request this seam exists for: an operator-configurable cap,
+    not a fixed constant -- `build_receipt_work()`'s own `max_ocr_readings_for_llm`
+    parameter is what a future TUI setting would thread through to here."""
+    readings = [_reading(f"totally different receipt text number {i} " * 5, 0.5 + i * 0.01) for i in range(10)]
+    selected = _select_distinct_readings(readings, max_readings=2)
+    assert len(selected) == 2
 
 
 def test_select_distinct_readings_handles_empty_input():
-    assert _select_distinct_readings([]) == []
+    assert _select_distinct_readings([], DEFAULT_MAX_READINGS_FOR_LLM) == []

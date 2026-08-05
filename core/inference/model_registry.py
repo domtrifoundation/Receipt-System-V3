@@ -78,6 +78,17 @@ class InferenceConfig:
     reasoning_token_budget: int = 1024
     truncation_retry_multiplier: float = 2.0
     per_request_timeout_ms: int = 30_000
+    #: Real fix for a real, live-found architecture gap: `generation.py`'s own
+    #: `_worker_main` processes one preset's requests strictly sequentially through a
+    #: single worker process, so concurrent receipts submitted at Execution Core's own
+    #: `RunScheduler` level (real, working pipelining there) still queue behind each
+    #: other for Inference specifically once they reach it. `1` (the safe default,
+    #: identical behavior to every prior session/test) never loads more than one real
+    #: model copy; raising this trades real memory (each replica is a full model load,
+    #: `estimated_vram_mb`/RAM-equivalent per copy) for real concurrent generation
+    #: throughput -- a machine with real headroom (confirmed live: 95GB RAM on this
+    #: session's own test hardware, a 3.4GB int4 model) can afford several replicas.
+    worker_pool_size: int = 1
 
 
 class InferenceModelRegistry:
@@ -117,8 +128,14 @@ class InferenceModelRegistry:
         #: falls back to whatever `onnxruntime_genai`'s own unregistered-provider-name
         #: behavior is rather than failing the load.
         self._install_root = install_root
-        self._loaded_workers: dict[str, PresetWorker] = {}
-        self._reservations: dict[str, str] = {}
+        #: One entry per preset, each a real *list* of workers (the pool -- `[worker]`
+        #: for the default `worker_pool_size=1`, identical shape and behavior to every
+        #: prior session). `_worker_cursor` round-robins across a pool with more than
+        #: one entry so concurrent requests for the same preset genuinely spread across
+        #: replicas instead of all landing on the same one.
+        self._loaded_workers: dict[str, list[PresetWorker]] = {}
+        self._worker_cursor: dict[str, int] = collections.defaultdict(int)
+        self._reservations: dict[str, list[str]] = collections.defaultdict(list)
         self._load_locks: dict[str, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
 
     async def _default_worker(self, preset_name: str) -> PresetWorker:
@@ -133,7 +150,7 @@ class InferenceModelRegistry:
                 "inference", configured_device, spec.estimated_vram_mb
             )
             if outcome.granted:
-                self._reservations[preset_name] = outcome.reservation_id
+                self._reservations[preset_name].append(outcome.reservation_id)
             else:
                 device = "cpu"
 
@@ -174,17 +191,39 @@ class InferenceModelRegistry:
         return os.path.join(self._config.models_dir, preset_name)
 
     async def get_worker(self, preset_name: str) -> PresetWorker:
-        """The deep-dive's own §6.2 double-checked-locking pattern, verbatim in shape."""
-        if preset_name in self._loaded_workers:
-            return self._loaded_workers[preset_name]
+        """The deep-dive's own §6.2 double-checked-locking pattern, verbatim in shape --
+        extended to load a real *pool* of `worker_pool_size` workers instead of exactly
+        one, then round-robin across them. `worker_pool_size=1` (the default) preserves
+        the exact original behavior and test contract (`test_concurrent_get_worker_calls
+        _result_in_exactly_one_load`) byte for byte -- this is additive, not a rewrite
+        of the existing guarantee."""
+        workers = self._loaded_workers.get(preset_name)
+        if workers:
+            return self._next_worker(preset_name, workers)
         async with self._load_locks[preset_name]:
-            if preset_name in self._loaded_workers:
-                return self._loaded_workers[preset_name]
-            result = self._worker_factory(preset_name)
-            worker = await result if inspect.isawaitable(result) else result
-            await worker.load()
-            self._loaded_workers[preset_name] = worker
-            return worker
+            workers = self._loaded_workers.get(preset_name)
+            if workers:
+                return self._next_worker(preset_name, workers)
+            pool_size = max(1, self._config.worker_pool_size)
+            new_workers: list[PresetWorker] = []
+            for _ in range(pool_size):
+                # Sequential, deliberately, not `asyncio.gather` -- real model loads are
+                # heavy (multi-GB, real EP/driver initialization), and this project's
+                # own live testing found real EP-driver instability under concurrent
+                # load (`core/inference/CLAUDE.md`'s DirectML account); one real cold
+                # load at a time during this one-time pool warm-up is a small, safe
+                # startup cost, not a repeated per-request one.
+                result = self._worker_factory(preset_name)
+                worker = await result if inspect.isawaitable(result) else result
+                await worker.load()
+                new_workers.append(worker)
+            self._loaded_workers[preset_name] = new_workers
+            return self._next_worker(preset_name, new_workers)
+
+    def _next_worker(self, preset_name: str, workers: list[PresetWorker]) -> PresetWorker:
+        index = self._worker_cursor[preset_name] % len(workers)
+        self._worker_cursor[preset_name] += 1
+        return workers[index]
 
     def available_presets(self) -> frozenset[str]:
         return frozenset(MODEL_PRESETS)
@@ -279,9 +318,11 @@ class InferenceModelRegistry:
             self._metrics.increment(counter)
 
     async def shutdown(self) -> None:
-        for worker in self._loaded_workers.values():
-            await worker.shutdown()
+        for workers in self._loaded_workers.values():
+            for worker in workers:
+                await worker.shutdown()
         self._loaded_workers.clear()
-        for reservation_id in self._reservations.values():
-            await self._health_client.release(reservation_id)
+        for reservation_ids in self._reservations.values():
+            for reservation_id in reservation_ids:
+                await self._health_client.release(reservation_id)
         self._reservations.clear()
