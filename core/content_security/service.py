@@ -182,6 +182,8 @@ if __name__ == "__main__":  # pragma: no cover
     import sys
 
     from .providers.clamav_provider import ClamAVProvider
+    from .providers.clamd_provider import DEFAULT_PORT as CLAMD_DEFAULT_PORT
+    from .providers.clamd_provider import ClamdProvider
 
     #: Real, previously-live-found gap: `serve()`'s own empty-registry default is a
     #: deliberate, correct fail-closed *fallback* (see its docstring), but nothing ever
@@ -199,9 +201,32 @@ if __name__ == "__main__":  # pragma: no cover
     #: runs as, so `freshclam` has nowhere it can put current definitions without an
     #: operator explicitly redirecting both tools at a directory the service account owns.
     default_registry = ProviderRegistry()
-    default_registry.register(
-        ClamAVProvider(database_dir=os.environ.get("RESIBO_CLAMAV_DATABASE_DIR"))
-    )
+    clamd_host = os.environ.get("RESIBO_CLAMD_HOST")
+    if clamd_host:
+        #: `RESIBO_CLAMD_HOST` opts into an already-running `clamd` daemon instead of
+        #: per-call `clamscan` — see `clamd_provider.py`'s own module docstring for the
+        #: real, live-found reason (a ~11s full-database reload on every `clamscan`
+        #: invocation, which a real concurrent-submission test found blows straight past
+        #: this service's client-facing timeout under real load). `clamscan` and `clamd`
+        #: share one signature database, so registering both would add no real
+        #: corroboration (unlike ClamAV vs. VirusTotal's independent heuristics) — only
+        #: clamscan's own reload cost on every scan. Kept registered but disabled, not
+        #: removed, so an operator can flip it back on with `ProviderRegistry.enable()`
+        #: if `clamd` becomes unreachable, without a restart.
+        default_registry.register(
+            ClamdProvider(
+                host=clamd_host,
+                port=int(os.environ.get("RESIBO_CLAMD_PORT", CLAMD_DEFAULT_PORT)),
+            )
+        )
+        default_registry.register(
+            ClamAVProvider(database_dir=os.environ.get("RESIBO_CLAMAV_DATABASE_DIR")),
+            enabled=False,
+        )
+    else:
+        default_registry.register(
+            ClamAVProvider(database_dir=os.environ.get("RESIBO_CLAMAV_DATABASE_DIR"))
+        )
 
     addr = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ADDRESS
     srv = serve(addr, registry=default_registry)

@@ -57,6 +57,26 @@ depend on it.
 reached only when every enabled, *available* provider returned `CLEAN`. Nothing in `service.py`
 constructs it. If you find yourself adding a second place that can set it, that is the bug.
 
+**`clamscan` reloads its entire signature database from disk on every single invocation —
+confirmed live at ~11 seconds just to load, before scanning anything — and a full-fleet
+concurrent-submission test found that's a real capacity ceiling, not a theoretical one.**
+8 concurrent scans (this service's own `ThreadPoolExecutor(max_workers=8)`) contending for
+CPU/memory to each reload the database blew straight past Ingestion's 15-second client
+timeout, and most of a real concurrent batch failed closed with `content_security_unavailable`
+as a direct result. `providers/clamd_provider.py`'s new `ClamdProvider` is the fix: it talks
+to an already-running `clamd` daemon over its own TCP `INSTREAM` protocol instead (no new
+dependency — a small adapter over the wire protocol, matching `clamav_provider.py`'s own
+"the adapter is this file, not a wrapper library" stance), so the database loads once at the
+daemon's own startup and every scan after that only pays for the actual scan (confirmed live:
+~1s warm vs. ~11s cold). Set `RESIBO_CLAMD_HOST` (and optionally `RESIBO_CLAMD_PORT`, default
+3310) to opt in — `service.py`'s `__main__` then registers `ClamdProvider` enabled and
+`ClamAVProvider` registered-but-disabled as a manually-flippable fallback, never both enabled
+at once: they share one signature database, so running both adds no real corroboration (unlike
+ClamAV vs. VirusTotal's independent heuristics), only `clamscan`'s own reload cost on every
+scan. **This adapter does not start, manage, or configure the `clamd` process itself** — an
+operator points it at an already-running daemon, the same relationship every other provider in
+this package has with its own external service.
+
 **A provider that ran and failed poisons the whole verdict, not just its own share of it.** A
 caller cannot tell a verdict reached despite a failure apart from one that would have been
 different had that provider actually run, so `SCAN_PROVIDER_FAILED` is a deny even when another
