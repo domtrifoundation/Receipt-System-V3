@@ -33,13 +33,16 @@ def test_unrecognized_provider_gets_no_options():
     assert _provider_options("dml", "/models/phi4-mini") == {}
 
 
-def test_session_thread_overlay_uses_half_the_detected_cores():
-    """Real fix for real, live-observed CPU contention between Inference and
-    concurrently-running OCR (`core/inference/CLAUDE.md`) -- half, not all, of the
-    detected core count."""
+def test_session_thread_overlay_uses_three_quarters_of_the_detected_cores():
+    """Corrected real number, not the original guess: `_worker_main`'s own batch-drain
+    loop processes one preset's requests strictly sequentially through one worker
+    process (confirmed live -- see `_session_thread_overlay`'s own docstring), so
+    there is no real "Inference vs. Inference" concurrency to reserve half the
+    machine for; three-quarters leaves real room for concurrently-running OCR without
+    starving the one generation that is actually active at any moment."""
     overlay = _session_thread_overlay(cpu_count=24)
     session_options = overlay["model"]["decoder"]["session_options"]
-    assert session_options["intra_op_num_threads"] == 12
+    assert session_options["intra_op_num_threads"] == 18
     assert session_options["inter_op_num_threads"] == 1
 
 
@@ -50,9 +53,9 @@ def test_session_thread_overlay_never_goes_below_one_thread():
 
 def test_session_thread_overlay_degrades_to_four_cores_worth_when_cpu_count_unknown(monkeypatch):
     """`os.cpu_count()` can return `None` on some platforms -- degrade to a real,
-    reasoned default rather than crashing on `None // 2`."""
+    reasoned default rather than crashing on `None * 3 // 4`."""
     import os
 
     monkeypatch.setattr(os, "cpu_count", lambda: None)
     overlay = _session_thread_overlay()
-    assert overlay["model"]["decoder"]["session_options"]["intra_op_num_threads"] == 2
+    assert overlay["model"]["decoder"]["session_options"]["intra_op_num_threads"] == 3

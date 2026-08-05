@@ -6,16 +6,22 @@ own docstring used to describe — a receipt used to reach `WRITTEN` with real O
 nothing else; it now carries a real vendor match, a real geocode attempt, and a real
 LLM-structured extraction.
 
-**`RECEIPT_EXTRACTION_SCHEMA` is a deliberately scoped v1**, not the full field set every
-deep-dive eventually wants extracted (line-item-level detail, the full BIR identifier
-vocabulary). It covers the first-class `Receipt` columns (`core/persistence/contracts.py`),
-the two most common Architect-seeded identifier kinds (`tin`, `or_number`), and the
-address/VAT-treatment fields Reconciliation's own `ReceiptSnapshot` needs — real,
-extendable later, not a placeholder standing in for something unbuilt.
+**`RECEIPT_EXTRACTION_SCHEMA` covers the first-class `Receipt` columns
+(`core/persistence/contracts.py`), the identifier kinds Architect seeds (`tin`,
+`or_number`), the address/VAT-treatment fields Reconciliation's own `ReceiptSnapshot`
+needs, franchiser/franchiser_tin (real, direct request — a franchise branch's own TIN
+often differs from its franchiser's), and `items` (real line-item detail). **Extraction
+alone is not learning** — these fields land in the persisted record every run, but
+nothing here yet calls Architect's real `temporal_learning` pipeline to actually learn
+the franchiser-serves-vendor / TIN-belongs-to-vendor / address-belongs-to-vendor
+associations a direct request named explicitly; that wiring is real, separate, larger
+follow-up work (`core/architect/temporal_learning/` is the real, already-built mechanism
+to call, not something to invent here).
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from services.execution_core.contracts import CheckpointStore, ReceiptStage
@@ -38,6 +44,7 @@ RECEIPT_EXTRACTION_SCHEMA = {
     "type": "object",
     "properties": {
         "vendor_name": {"type": "string"},
+        "franchiser": {"type": "string", "description": "parent franchising company, if this vendor is a franchise branch; empty if not"},
         "transaction_date": {"type": "string", "description": "ISO-8601 date, e.g. 2026-07-13"},
         "currency": {"type": "string", "default": "PHP"},
         "total_amount": {"type": "number"},
@@ -45,8 +52,21 @@ RECEIPT_EXTRACTION_SCHEMA = {
         "subtotal_amount": {"type": "number"},
         "vat_treatment": {"type": "string", "description": "vatable | zero_rated | vat_exempt | unknown"},
         "tin": {"type": "string"},
+        "franchiser_tin": {"type": "string", "description": "the franchiser's own TIN, only if separately printed from the vendor's"},
         "or_number": {"type": "string", "description": "the Official Receipt / Sales Invoice number"},
         "address": {"type": "string"},
+        "items": {
+            "type": "array",
+            "description": "individual line items -- never subtotal/tax/total lines",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "amount": {"type": "number"},
+                },
+                "required": ["description", "amount"],
+            },
+        },
     },
     "required": ["vendor_name", "total_amount"],
 }
@@ -125,14 +145,32 @@ def build_receipt_work(
             raise RuntimeError(f"preprocessing failed: {response.error_code}: {response.error_detail}")
         return response.image_blob_ref
 
-    async def ocrd() -> str:
+    async def ocrd() -> dict:
+        """Returns every real reading, not just one -- `inferred()` below is the real
+        consumer that needs the full corroboration surface to deliberate over (a direct,
+        live-found requirement: an LLM cross-referencing multiple real OCR readings is a
+        better use of its own reasoning than this orchestrator pre-picking a single
+        "best" one before the LLM ever sees the rest). `matched()`/`geod()` still use
+        just `best_text` -- their own cheap, deterministic heuristics have no real use
+        for multiple candidate texts the way a deliberating LLM does.
+
+        The N variant reads run **concurrently** (`asyncio.gather`), not sequentially --
+        a real, live-found bug: a prior sequential-for-loop version measured 52-135s for
+        this one stage alone (5 variants x however many OCR engines, one full round trip
+        after another), the single largest real contributor to "embarrassingly slow"
+        found while testing real receipts end to end.
+        """
         if ocr_source == "source":
             # A genuinely digital PDF's own embedded text layer -- variant image
             # transforms are meaningless here (there is no rasterized image to
             # transform), the same real reasoning `text_layer` engine's own docstring
             # already states for why this path reads `source_blob_ref` directly.
             response = await ocr.read(run_id=run_id, user_id=user_id, blob_ref=source_blob_ref, engines=ocr_engines)
-            return response.merged_text
+            return {
+                "best_text": response.merged_text,
+                "readings": [{"variant": "source", "text": response.merged_text,
+                              "confidence": response.confidence, "agreement": response.agreement}],
+            }
 
         checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.PREPROCESSED)
         if checkpoint is None:
@@ -147,24 +185,33 @@ def build_receipt_work(
         variants_response = await preprocessing.generate_variants(
             run_id=run_id, user_id=user_id, image_blob_ref=base_blob_ref, kinds=_OCR_VARIANT_KINDS,
         )
-        variant_blob_refs = [v.image_blob_ref for v in variants_response.variants if not v.error_code]
-        if not variant_blob_refs:
+        real_variants = [(v.kind, v.image_blob_ref) for v in variants_response.variants if not v.error_code]
+        if not real_variants:
             # Every real variant failed (or `GenerateVariants` itself degraded to
             # nothing) -- fall back to the one base image `preprocessed()` already
             # produced, rather than failing the whole receipt over a corroboration
             # enhancement that has no working input to enhance.
-            variant_blob_refs = [base_blob_ref]
+            real_variants = [("standard", base_blob_ref)]
 
-        best_response = None
-        for blob_ref in variant_blob_refs:
-            response = await ocr.read(run_id=run_id, user_id=user_id, blob_ref=blob_ref, engines=ocr_engines)
-            if best_response is None or response.confidence > best_response.confidence:
-                best_response = response
-        return best_response.merged_text
+        responses = await asyncio.gather(*[
+            ocr.read(run_id=run_id, user_id=user_id, blob_ref=blob_ref, engines=ocr_engines)
+            for _kind, blob_ref in real_variants
+        ])
+
+        readings = [
+            {"variant": kind, "text": response.merged_text, "confidence": response.confidence,
+             "agreement": response.agreement}
+            for (kind, _blob_ref), response in zip(real_variants, responses, strict=True)
+        ]
+        best = max(readings, key=lambda r: r["confidence"])
+        return {"best_text": best["text"], "readings": readings}
+
+    async def _ocr_result() -> dict:
+        ocr_checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.OCRD)
+        return ocr_checkpoint.stage_output_ref if ocr_checkpoint is not None else {"best_text": "", "readings": []}
 
     async def _raw_ocr_text() -> str:
-        ocr_checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.OCRD)
-        return ocr_checkpoint.stage_output_ref if ocr_checkpoint is not None else ""
+        return (await _ocr_result())["best_text"]
 
     async def matched() -> dict:
         """Cheap, deterministic vendor resolution against Architect's real directory,
@@ -211,8 +258,27 @@ def build_receipt_work(
 
     async def inferred() -> dict:
         """The real LLM-structured extraction (deep-dive §4.4/§9) -- corroborated with
-        `matched()`'s own real candidate, never blind to it."""
-        raw_text = await _raw_ocr_text()
+        `matched()`'s own real candidate, never blind to it, and now with every real OCR
+        reading (`ocrd()`'s own `readings`, not just its `best_text`) -- a live-found
+        fix: this orchestrator picking one "best" reading before the LLM ever saw the
+        rest discarded real corroborating signal an LLM's own deliberation is a better
+        fit for (e.g. a lower-confidence variant reading a TIN correctly that the
+        higher-confidence one garbled). Readings with identical text are deduplicated
+        (multiple variants/engines legitimately agree often) so the prompt scales with
+        genuine disagreement, not with variant count."""
+        ocr_result = await _ocr_result()
+        seen_texts: set[str] = set()
+        distinct_readings = []
+        for reading in ocr_result["readings"]:
+            if reading["text"] not in seen_texts:
+                seen_texts.add(reading["text"])
+                distinct_readings.append(reading)
+        readings_block = "\n\n".join(
+            f"--- Reading {i + 1} (variant={r['variant']!r}, confidence={r['confidence']:.2f}, "
+            f"agreement={r['agreement']!r}) ---\n{r['text']}"
+            for i, r in enumerate(distinct_readings)
+        ) or ocr_result["best_text"]
+
         matched_checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.MATCHED)
         vendor_hint = ""
         if matched_checkpoint is not None and matched_checkpoint.stage_output_ref.get("included"):
@@ -220,22 +286,31 @@ def build_receipt_work(
 
         hint_line = f"A fuzzy vendor-directory match suggests this may be: {vendor_hint!r}.\n" if vendor_hint else ""
         prompt = (
-            "Extract the following fields from this Philippine receipt's OCR text as JSON "
-            "matching the given schema. Use your own reading of the vendor name even if it "
-            "differs from the suggested match below -- the suggestion is a hint, not ground "
-            "truth.\n"
+            "Below are multiple independent OCR readings of the same Philippine receipt "
+            "(different image preprocessing and/or different OCR engines) -- they may "
+            "disagree on some characters or fields. Cross-reference them and use your own "
+            "judgement about which reading is correct for each field; extract the "
+            "following fields as JSON matching the given schema. Use your own reading of "
+            "the vendor name even if it differs from the suggested match below -- the "
+            "suggestion is a hint, not ground truth.\n"
             "Real, live-confirmed extraction mistakes to specifically avoid: "
             "(1) vendor_name must be ONLY the business/company name (e.g. 'Jollibee Foods "
             "Corporation') -- never include the street address, branch location, or store "
             "number; put those in the separate address field instead. "
-            "(2) tin is the BIR Tax Identification Number, usually printed near a 'VAT REG "
+            "(2) franchiser is the parent/franchising company if this vendor is a branch "
+            "of one (e.g. vendor_name='7-Eleven Ortigas Branch', franchiser='Philippine "
+            "Seven Corporation') -- leave empty if the vendor is not part of a franchise. "
+            "(3) tin is the BIR Tax Identification Number, usually printed near a 'VAT REG "
             "TIN' or 'TIN' label as a series of digits, often with dashes (e.g. "
-            "'123-456-789-000'); look for it specifically rather than leaving it blank if "
-            "any digit sequence resembling one appears. "
-            "(3) or_number is the Official Receipt or Sales Invoice number, usually near an "
+            "'123-456-789-000'); franchiser_tin is the franchiser's own TIN if a different "
+            "one is separately printed (rare; leave empty if only one TIN appears). "
+            "(4) or_number is the Official Receipt or Sales Invoice number, usually near an "
             "'OR#'/'SI#'/'Invoice No.' label. "
-            "Leave a field as an empty string only if it is genuinely not present in the "
-            f"text below, not as a default.\n{hint_line}\nOCR text:\n{raw_text}"
+            "(5) items is every individual line item with a real description and amount -- "
+            "omit subtotal/tax/total lines from this list, those go in their own fields. "
+            "Leave a field as an empty string (or empty list for items) only if it is "
+            f"genuinely not present in the readings below, not as a default.\n{hint_line}\n"
+            f"{readings_block}"
         )
         response = await inference.generate(
             run_id=run_id, user_id=user_id, preset=inference_preset, prompt=prompt,
@@ -244,8 +319,10 @@ def build_receipt_work(
             # compact single object, not free-form prose -- 1024 tokens was the generic
             # Inference-wide default, not reasoned for this specific call, and let a
             # struggling generation run 2-3x longer than a genuinely complete answer
-            # ever needs before finish_reason=LENGTH would even kick in.
-            max_tokens=400,
+            # ever needs before finish_reason=LENGTH would even kick in. Raised from an
+            # earlier 400 once `items` (real line-item detail, potentially several per
+            # receipt) joined the schema -- 400 was sized for the smaller v1 schema.
+            max_tokens=600,
         )
         if response.finish_reason == "error":
             raise RuntimeError(f"inference failed: {response.error_code}: {response.error_detail}")
@@ -261,12 +338,15 @@ def build_receipt_work(
     async def written() -> str:
         from core.persistence.generated import persistence_pb2 as pb
 
-        raw_text = await _raw_ocr_text()
+        ocr_result = await _ocr_result()
         inferred_checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.INFERRED)
         matched_checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.MATCHED)
         geod_checkpoint = await store.get_checkpoint(receipt_id, ReceiptStage.GEOD)
 
-        fields: dict = {"raw_ocr_text": raw_text}
+        # `ocr_readings` (every real reading `inferred()` deliberated over), not just
+        # `raw_ocr_text` (the single best one) -- real audit trail for why the LLM
+        # extracted what it did, not silently discarded once the receipt is written.
+        fields: dict = {"raw_ocr_text": ocr_result["best_text"], "ocr_readings": ocr_result["readings"]}
         if inferred_checkpoint is not None:
             fields.update(inferred_checkpoint.stage_output_ref)
         if matched_checkpoint is not None:

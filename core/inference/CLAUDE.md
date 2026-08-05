@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.08`
+`a03.00.09`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -385,13 +385,37 @@ observed cause of some of Phase 1's own real timeout failures (`services/executi
 CLAUDE.md`), not just DirectML/OpenVINO-GPU's own separate instability. `og.Config` has
 no dedicated thread-count setter, but `overlay()` (confirmed live: accepts a JSON string
 merged into the exact same schema `genai_config.json` itself uses) does —
-`onnx_genai_backend.py`'s new `_session_thread_overlay()` sets `intra_op_num_threads` to
-half the detected core count (never all of them, never a fixed guess) and
+`onnx_genai_backend.py`'s new `_session_thread_overlay()` sets `intra_op_num_threads` and
 `inter_op_num_threads=1` (this is one sequential decode loop, not a multi-branch graph —
 no benefit from inter-op parallelism here). Applied to every load path, not just the
 non-CPU ones — `og.Config(model_dir)` is now always constructed and overlaid before
 `og.Model(config)`, replacing the old `og.Model(model_dir)` bare-string-path shortcut for
 the CPU-default case, since that shortcut had no `Config` object to overlay onto at all.
+
+**The `intra_op_num_threads` number itself was corrected the same session, from half the
+detected cores to three-quarters — a real architecture finding, not a re-guess.** Real
+concurrent-receipt testing (raising Execution Core's `per_user_limit` to prove genuine
+pipelining, `services/execution_core/CLAUDE.md`) surfaced that `core/inference/
+generation.py`'s own `_worker_main` processes its batch-drain loop with a plain `for item
+in batch:` — every request for one loaded preset runs through **one single worker
+process, strictly sequentially**. `max_concurrent_generations` (the semaphore gating how
+many requests can be dispatched at once) was never a true parallel-compute knob; it only
+bounds how many can be *queued* at the same worker. So "half the cores, to leave room for
+concurrent Inference requests" was solving a contention that doesn't exist — there is
+never more than one active generation drawing on this session's threads at any moment,
+only ever "this one generation vs. whatever OCR is doing for a *different* receipt at the
+same time." Halving the thread count measurably slowed every single request for a
+concurrency benefit that was never real. Corrected to three-quarters, which still leaves
+real headroom for concurrent OCR without starving the one thing actually running.
+
+**The real, larger, still-open question this surfaces: Inference has no genuine
+multi-request parallelism today, by design, not by oversight.** Five receipts submitted
+concurrently at the Execution Core level do NOT get five parallel generations — they
+queue behind each other at the one shared `PresetWorker`. `core/inference/CLAUDE.md`
+(this file) does not yet have a resolved answer for whether that's acceptable (a single
+model instance is the honest cost of the multi-gigabyte weights involved) or whether a
+real multi-worker-replica pool is warranted follow-up work — flagged here explicitly
+rather than silently treated as solved because the thread-count number moved.
 
 ## Implementation status
 

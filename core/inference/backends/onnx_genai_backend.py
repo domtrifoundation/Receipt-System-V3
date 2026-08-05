@@ -112,21 +112,26 @@ def _session_thread_overlay(cpu_count: int | None = None) -> dict:
     dedicated setter exists). `cpu_count` is injectable for tests; real callers get
     `os.cpu_count()`.
 
-    Half the detected core count, not all of them and not a fixed small number —
-    real, live-confirmed reasoning: this project's own `SubmitReceipt` pipeline runs
-    Inference concurrently with OCR (and Preprocessing) on the same machine, and an
-    unbounded ONNX Runtime session claiming every core starves OCR for the same
-    threads it needs, worsening exactly the wall-clock slowness this was written to
-    fix. `inter_op_num_threads=1` matches ONNX Runtime's own documented default
-    recommendation for a single-graph inference session (no benefit from inter-op
-    parallelism here — one model, one sequential decode loop, not a multi-branch
-    graph) freeing the reserved intra-op budget for the actual per-op parallelism
-    that matters.
+    Three-quarters of the detected core count, not half — a real, corrected number,
+    not the original guess. The first version of this function reserved half the
+    cores, reasoning that concurrent Inference requests needed room alongside
+    concurrent OCR. That reasoning was wrong in a way live testing caught directly:
+    `generation.py`'s own `_worker_main` processes its batch-drain loop with a plain
+    `for item in batch:` — one preset's requests run through **one single worker
+    process, strictly sequentially**, never truly in parallel with each other no
+    matter how many are queued (`max_concurrent_generations` bounds how many can be
+    *in flight*, not how many run *at once*). So the real contention was never
+    "Inference vs. Inference" — it was always "this one active generation vs.
+    whatever OCR is doing for a different receipt at the same moment," and giving the
+    one active generation only half the machine's cores measurably slowed every
+    single request for no real concurrency benefit in return. `inter_op_num_threads=1`
+    is unchanged — still a single-graph, single sequential decode loop with no
+    inter-op parallelism to exploit.
     """
     import os
 
     detected = cpu_count if cpu_count is not None else os.cpu_count()
-    intra_op = max(1, (detected or 4) // 2)
+    intra_op = max(1, (detected or 4) * 3 // 4)
     return {
         "model": {
             "decoder": {

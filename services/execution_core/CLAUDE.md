@@ -17,7 +17,7 @@ commits that got there.
 
 ## Current API version
 
-`a01.00.07`
+`a01.00.08`
 
 The **running** value, distinct from the Zircon target above. The target states where this API
 lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp` in the
@@ -228,10 +228,53 @@ Balara M.E."`) and `tin`/`or_number` left empty on every single real receipt tes
 prompt now explicitly names both mistakes and states the fix (`vendor_name` is the
 business name only, address goes in the separate `address` field; look specifically near
 `"VAT REG TIN"`/`"TIN"`/`"OR#"`/`"SI#"` labels). `max_tokens` for this specific call also
-dropped from Inference's generic 1024 default to 400 — this schema's own output is one
-compact JSON object, and letting a struggling generation run 2-3x longer than a complete
-answer ever needs was real, unnecessary latency on top of the real timeout problem the
-thread-limiting fix (`core/inference/CLAUDE.md`) addresses from the other side.
+dropped from Inference's generic 1024 default to 400 (later raised to 600 once `items`
+joined the schema, see below) — this schema's own output is one compact JSON object, and
+letting a struggling generation run 2-3x longer than a complete answer ever needs was
+real, unnecessary latency on top of the real timeout problem the thread-limiting fix
+(`core/inference/CLAUDE.md`) addresses from the other side.
+
+**Two more real fixes the same session, found by testing real concurrent receipts and
+reading the actual output quality, not by guessing:**
+
+- **`ocrd()`'s own variant reads were sequential — a real, measured 52-135 seconds per
+  receipt for this one stage alone**, the single largest real contributor to
+  "embarrassingly slow" once Inference's own timeout was fixed. Fixed with
+  `asyncio.gather` over the real variant list instead of a `for` loop awaiting each one
+  in turn — the 5 variants' OCR reads now genuinely run concurrently.
+- **`inferred()` used to see only the single highest-confidence OCR reading — a real,
+  live-found architecture gap, not a deliberate simplification.** A direct request asked
+  whether the LLM was "properly receiving the full outputs of all the OCR for
+  deliberating the final output" — it was not; this orchestrator picked one "best"
+  reading and discarded the rest before the LLM ever saw them, which is exactly backward
+  for a model whose own real strength is cross-referencing disagreeing sources.
+  `ocrd()`'s own stage output changed shape (`{"best_text": ..., "readings": [...]}` —
+  `matched()`/`geod()` still use `best_text` for their own cheap heuristics, which have
+  no real use for multiple candidates) and `inferred()`'s prompt now includes every
+  distinct real reading, labeled with its own variant/confidence/agreement, explicitly
+  asking the model to cross-reference them.
+
+**`RECEIPT_EXTRACTION_SCHEMA` grew real fields on direct request: `franchiser`,
+`franchiser_tin`, and `items` (real line-item detail).** Extraction alone is not
+learning, stated plainly rather than implied solved: nothing here yet calls Architect's
+own real `temporal_learning` pipeline to actually learn which franchisers serve which
+vendors, which TINs/addresses belong to which vendor or franchiser — that association
+work is real, separate, larger follow-up against an already-built mechanism (`core/
+architect/temporal_learning/`), not something this pass invented or wired.
+
+**Real architecture finding, not yet a fix: Inference itself has no genuine
+multi-request parallelism.** Raising `RunScheduler`'s `per_user_limit` (previously
+defaulted to 1, which fully serialized one user's own receipts end to end — the direct
+answer to "are we waiting rather than pipelining the next receipt") proved real
+concurrency benefit at the *run* level (5 receipts submitted concurrently: 550s
+wall-clock vs. 2039s summed individually, live-measured) — but every one of those
+receipts' own `inferred()` calls still queues behind the others at the single shared
+`PresetWorker` process (`core/inference/CLAUDE.md`'s own account of `_worker_main`'s
+strictly-sequential batch-drain loop). Preprocessing/OCR of receipt B now genuinely
+overlaps with Inference of receipt A — real, working pipelining — but Inference-vs-
+Inference concurrency across receipts does not exist yet. Flagged here as the honest,
+unresolved half of "is inference concurrent," not silently claimed fixed alongside the
+real wins above.
 
 ## Real, live-tested integration — the actual missing piece, closed
 
