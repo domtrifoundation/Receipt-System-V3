@@ -20,5 +20,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
+      - name: Install common/'s runtime deps
+        # Real, live-found gap: this check imports services.setup.dev_mode_strip, which
+        # transitively imports common/frozen_dict.py -- on Python <3.15 that needs the
+        # `frozendict` package, and this job never installed it, so the check failed with
+        # a raw ModuleNotFoundError on every run regardless of whether classification was
+        # actually complete. common/requirements.txt is the one file every service already
+        # installs first (docs/VENV_AND_IMPORTS.md §4); installing just that here is the
+        # minimal real fix, not the whole repo's dependency surface.
+        run: pip install -r common/requirements.txt
       - name: Check every top-level entry is classified
         run: python .github/scripts/check_stripped_content_list.py

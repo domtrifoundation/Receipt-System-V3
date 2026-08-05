@@ -45,9 +45,9 @@
   "core/notifications/preferences.py:62",
   "core/notifications/service.py:69",
   "core/notifications/service.py:90",
-  "core/ocr/engine_registry.py:166",
-  "core/ocr/engine_registry.py:227",
-  "core/ocr/engine_registry.py:259",
+  "core/ocr/engine_registry.py:181",
+  "core/ocr/engine_registry.py:242",
+  "core/ocr/engine_registry.py:289",
   "core/ocr/engines/tesseract_engine.py:75",
   "core/ocr/engines/text_layer_engine.py:53",
   "core/ocr/engines/text_layer_engine.py:83",
@@ -100,5 +100,5 @@
   "services/execution_core/retry_policy.py:106",
   "services/execution_core/watchdog_hooks.py:56",
   "services/update/proving_grounds/changelog_watcher.py:41",
-  "supervisor/service.py:52"
+  "supervisor/service.py:59"
 ]
