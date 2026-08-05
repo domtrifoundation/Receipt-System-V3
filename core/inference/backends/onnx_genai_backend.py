@@ -1,15 +1,17 @@
 """The one and only backend: `onnxruntime-genai` (deep-dive §4.1-§4.2, §5, §8).
 
-**Not live-tested against real model weights this session.** Downloading a real ONNX
-GenAI model directory (multi-GB, per §4.3) is an action this session does not take without
-explicit user permission (downloading files is one of this project's own "ask first"
-actions) — so this module is built directly from `onnxruntime-genai`'s own published
-Python API and release notes (`og.Model`/`og.Config`/`og.Tokenizer`/`og.GeneratorParams`/
-`og.Generator`, and the library's own LLGuidance-based `set_guidance(type, data)`
-constrained-decoding call), not verified end-to-end the way Preprocessing's and OCR's own
-engines were against real hardware and real receipts. This is the same honesty posture
-this package already applies to `core/ocr/engines/apple_vision_engine.py` — say plainly
-what was and wasn't run for real, rather than imply parity with the modules that were.
+**Live-confirmed against real model weights, real hardware, and a real receipt** —
+this module was originally built directly from `onnxruntime-genai`'s own published
+Python API and release notes without a real model to test against (downloading one is
+one of this project's own "ask first" actions), and a later session, given explicit
+permission, downloaded real weights and ran the full pipeline for real. Text generation
+(`phi4-mini`, CPU and DirectML) and structured/schema-constrained output are confirmed
+working end to end against real weights with correct, coherent results. The
+vision/multimodal path (`phi4-vision`) is confirmed to *run* end to end after two real
+API-shape bugs found this same session were fixed (see the vision section below);
+extraction *quality* from a real receipt image is still genuinely unverified — flagged
+honestly rather than implied solved, the same posture this package already applies to
+`core/ocr/engines/apple_vision_engine.py`.
 
 **Execution-provider selection (deep-dive §8.1) — implemented, confidence varies by
 provider, stated explicitly rather than left implicit.** `onnxruntime-genai`'s own
@@ -40,17 +42,36 @@ verifying the exact JSON schema keys needs a real model directory to test agains
 own `device_id`, and TensorRT's own engine-cache path/enable flags (§8.1's own "mandatory,
 not optional" requirement) — same confidence caveat as the provider-name mapping itself.
 
-**Vision/multimodal input (deep-dive §7) and the reasoning-model two-phase budget
-(§4.5) are both implemented, neither verified against real weights.** `generate()` takes
-`images`/`reasoning_marker`/`reasoning_token_budget` and `_run_one_pass()` branches to
-`og.MultiModalProcessor`/`og.Images.open_bytes()` when images are present (a genuinely
-different input path from the plain-text `tokenizer.encode()` one, not an optional extra
-parameter bolted onto it) and runs a real two-call thinking-then-answer sequence when a
-reasoning marker is configured. No preset actually shipped today uses either path
-(`presets.py`'s own `reasoning_marker: None` on both current entries) — these exist so a
-future vision/reasoning preset has real, callable logic behind it rather than a config
-field with nothing wired to it, which is exactly what `reasoning_token_budget` was before
-this was caught and fixed: a real field, read by nothing.
+**Vision/multimodal input (deep-dive §7) is now live-confirmed end to end** — a real
+full-fleet concurrent-submission test's follow-up validation session downloaded a real
+`microsoft/Phi-4-multimodal-instruct-onnx` (int4, DirectML) and ran it against a real
+receipt image through this exact code path. Two real API-shape bugs were found and fixed
+in the process, both from this module's own earlier draft having been written against
+`onnxruntime-genai`'s published example scripts rather than the actual installed
+library's real signatures:
+1. `og.MultiModalProcessor(self._model)` raised `TypeError: ... No constructor defined!`
+   — the real constructor is a factory method on the loaded model itself,
+   `self._model.create_multimodal_processor()` (confirmed via `dir(og.Model)`).
+2. `params.set_inputs(model_inputs)` raised `AttributeError` — `set_inputs` belongs to
+   `Generator`, not `GeneratorParams` (confirmed via `dir(og.Generator)`), and must be
+   called after `og.Generator(model, params)` is constructed, not before.
+
+After both fixes, the full pipeline ran without error: a real image tokenized into a real
+`NamedTensors` input, a real DirectML generation loop, and real decoded text back out.
+**What is still genuinely unverified is extraction quality, not code correctness** — the
+one receipt image tried this session got a "this looks corrupted/unreadable" response
+from the model rather than a real extraction, which is a prompt-format/image-preprocessing
+question (image resolution, the exact `<|image_N|>` placeholder convention this specific
+model build expects, DPI/contrast of the rasterized input) genuinely unresolved and
+worth real follow-up, not glossed over as solved because the code stopped crashing.
+
+The reasoning-model two-phase budget (§4.5) remains implemented but unverified — no
+reasoning-tuned preset exists to test against (`presets.py`'s own `reasoning_marker: None`
+on both current entries), and nothing in this session's real-model testing exercised that
+path. `generate()` takes `images`/`reasoning_marker`/`reasoning_token_budget`; these exist
+so a future reasoning preset has real, callable logic behind it rather than a config field
+with nothing wired to it, which is exactly what `reasoning_token_budget` was before this
+was caught and fixed: a real field, read by nothing.
 
 `onnxruntime_genai` is imported lazily inside `load()`/`generate()`, never at module level
 — an install without it (the common case for a fresh checkout before Setup API's wizard
@@ -215,14 +236,26 @@ class OnnxGenAiBackend:
             import onnxruntime_genai as og  # noqa: PLC0415
 
             if images:
-                # Multimodal input path (deep-dive §7) — unverified against a real
-                # vision-capable model this session (see module docstring). The
-                # `MultiModalProcessor`/`Images.open_bytes` shape is per
-                # onnxruntime-genai's own published Phi-3/Phi-4-vision example scripts;
-                # a text-only tokenizer.encode() call cannot feed image content at all,
-                # so this is a genuinely different input path, not an optional extra
-                # parameter bolted onto the text one.
-                processor = og.MultiModalProcessor(self._model)
+                # Multimodal input path (deep-dive §7). A text-only tokenizer.encode()
+                # call cannot feed image content at all, so this is a genuinely
+                # different input path, not an optional extra parameter bolted onto the
+                # text one.
+                #
+                # Real, live-found bug, fixed here: `og.MultiModalProcessor(self._model)`
+                # -- the shape this module's own comment previously cited from
+                # onnxruntime-genai's published example scripts -- raises `TypeError: ...
+                # No constructor defined!` against the real installed library
+                # (confirmed live, onnxruntime-genai-directml 0.13.1, against a real
+                # downloaded microsoft/Phi-4-multimodal-instruct-onnx model and a real
+                # receipt image). The real constructor is a factory method on the loaded
+                # model itself: `self._model.create_multimodal_processor()` (confirmed
+                # live via `dir(og.Model)`).
+                #
+                # A second real bug in the same pass: `params.set_inputs(...)` does not
+                # exist on `GeneratorParams` in this version -- `set_inputs` is a method
+                # of `Generator` itself (confirmed live via `dir(og.Generator)`), called
+                # after construction, not before it.
+                processor = self._model.create_multimodal_processor()
                 og_images = og.Images.open_bytes(*images)
                 model_inputs = processor(prompt, images=og_images)
                 params = og.GeneratorParams(self._model)
@@ -233,8 +266,8 @@ class OnnxGenAiBackend:
                 )
                 if grammar_schema is not None:
                     params.set_guidance("json_schema", json.dumps(grammar_schema))
-                params.set_inputs(model_inputs)
                 generator = og.Generator(self._model, params)
+                generator.set_inputs(model_inputs)
                 tokenizer_stream = processor.create_stream()
             else:
                 input_ids = self._tokenizer.encode(prompt)

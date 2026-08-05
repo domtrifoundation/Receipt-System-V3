@@ -171,6 +171,27 @@ Yes. This folder's contracts are `@dataclass(frozen=True)` with dict-typed field
      exactly once for a request that truncates and retries, not at all for one that
      completes normally (`test_on_retry_fires_only_when_a_real_retry_happened`).
 
+**This package is now live-confirmed against real model weights, real hardware, and real
+receipts — a real full-fleet concurrent-submission test's follow-up validation session,
+given explicit permission to download models.** `phi4-mini` text generation and
+schema-constrained structured output both work correctly end to end on CPU and DirectML
+(a real Intel Arc GPU); DirectML's own first real generation call pays a one-time ~39s
+JIT/shader-compilation cost (confirmed live via per-token timing — token 1 and tokens 3+
+are ~0.01s, token 2 alone is ~39s), not a hang, worth knowing before assuming a stuck
+DirectML load is broken. Two real `onnxruntime-genai` API-shape bugs were found and fixed
+in the vision/multimodal path this same session — see `backends/onnx_genai_backend.py`'s
+own module docstring for the full account (`og.MultiModalProcessor(model)` should be
+`model.create_multimodal_processor()`; `GeneratorParams.set_inputs(...)` should be
+`Generator.set_inputs(...)`, called after construction). After both fixes the vision path
+runs without error against a real downloaded `phi4-vision`; real receipt *extraction
+quality* through it is still unverified and a real, open follow-up, not solved just
+because the code stopped crashing. `resolve_variant_path()` (`presets.py`) had two more
+real, previously-unverified bugs of its own, also live-found and fixed this session — see
+that module's own docstring. `service.py`'s `__main__` had no environment-variable seam
+to point a real install at real downloaded models at all (unlike every other service with
+an external resource dependency); `RESIBO_INFERENCE_MODELS_DIR`/
+`RESIBO_INFERENCE_PRESETS_ENABLED`/`RESIBO_INFERENCE_DEVICE` close that gap.
+
 ## Implementation status
 
 Implemented this session — `contracts.py`, `errors.py`, `backends/` (Protocol + the one
