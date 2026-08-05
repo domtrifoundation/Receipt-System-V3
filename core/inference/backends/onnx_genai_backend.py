@@ -125,6 +125,19 @@ def _provider_options(provider_name: str, model_dir: str) -> dict[str, str]:
             "trt_engine_cache_enable": "1",
             "trt_engine_cache_path": os.path.join(model_dir, "trt_cache"),
         }
+    if provider_name == "OpenVINOExecutionProvider":
+        # `"CPU"`, not `"GPU"`/`"NPU"` -- real, live-confirmed finding, not a cautious
+        # default: this project's own int4-quantized Microsoft-exported ONNX models use
+        # fully dynamic sequence-length shapes, which OpenVINO's GPU/NPU compiler path
+        # cannot compile (`IE::FrontEnd::importNetwork` "Upper bounds are not specified"
+        # errors, confirmed live against a real phi4-mini load on a real Arc B580) --
+        # `device_type=GPU` doesn't fail loudly, it silently falls back to `model.
+        # device_type == "CPU"` internally, so defaulting to GPU here would be a lie a
+        # caller has no way to detect. CPU-via-OpenVINO was also, in the same live test,
+        # both faster and more stable than DirectML's own real, live-confirmed wall-clock
+        # instability (0.05s/token vs. 0.16s-28.6s/token) -- not merely a fallback, the
+        # actual best real option found for this hardware/model combination tonight.
+        return {"device_type": "CPU"}
     return {}
 
 

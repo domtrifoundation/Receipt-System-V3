@@ -14,7 +14,7 @@ any subsequent breaking change to this API within V3's lifetime.
 
 ## Current API version
 
-`a03.00.06`
+`a03.00.07`
 
 The **running** value, distinct from the Zircon target above. The target states where this
 API lands when `x03.00.00` ships; this states where it actually is today. It ticks its `pp`
@@ -345,6 +345,36 @@ worst-case observed latency is ~150s. IOBinding (§8.2, still genuinely unimplem
 the first suspect and is ruled out as the *sole* cause by this same evidence — it may
 still be worth implementing for raw throughput, but it would not explain a 90x variance
 between two runs of the identical code.
+
+**Follow-up same session: neither real GPU path actually works for this preset on this
+hardware — a clean, complete, real comparison, not a partial one.** Direct testing of
+`device_id`/hardware-ID GPU targeting for DirectML made things *worse* (28.6s/token
+explicitly targeting the Arc B580 by its real `OrtHardwareDevice` id/vendor_id, ruling out
+"wrong adapter" as the explanation). A clean CPU-only control run was fast and perfectly
+linear — 0.092s/token, zero variance across all 10 tokens — isolating the instability to
+DirectML specifically, not general system contention. OpenVINO's GPU path was tried next
+(the real NuGet-distributed plugin built earlier this session, `ep_plugins.py`) and found
+to **silently fail to compile for GPU/NPU and fall back to CPU internally**:
+`device_type=GPU` produced `IE::FrontEnd::importNetwork` "Upper bounds are not specified"
+errors across all 32 transformer layers, and the loaded model's own `device_type` property
+reported `"CPU"` regardless of the `GPU` request — no exception, no error surfaced to the
+caller, just a silent downgrade. Root cause: this project's Microsoft-exported int4 ONNX
+models use fully dynamic sequence-length shapes, which OpenVINO's CPU plugin tolerates but
+its GPU/NPU compiler cannot. OpenVINO's own CPU execution, however, was both fast *and*
+stable — 0.047-0.051s/token, marginally faster than plain ONNX Runtime CPU (0.092s/token)
+and dramatically more reliable than DirectML. **`_provider_options()` now defaults
+`OpenVINOExecutionProvider` to `device_type=CPU`** for exactly this reason — not a
+cautious fallback, the actual best real result found. Net, honest conclusion: on this
+machine, for this preset, **no GPU acceleration path currently works** — CPU (plain, or
+via the OpenVINO EP) is the only fast, stable option tonight. This is a real, unresolved
+hardware/driver-level limitation (Intel Arc DirectML driver instability; this ONNX
+export's dynamic shapes being GPU/NPU-incompatible for OpenVINO), not a gap in this
+package's own code — both EP integrations load, register, and generate correctly; they
+simply cannot get real acceleration out of this specific hardware for this specific model
+export tonight. Real follow-up, not done here: a statically-shaped model export (Model
+Builder can target this) might unlock OpenVINO's GPU/NPU compiler; DirectML's own
+instability needs either a driver update or an upstream Intel/Microsoft bug report to
+actually resolve.
 
 ## Implementation status
 
