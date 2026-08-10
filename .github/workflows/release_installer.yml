@@ -60,7 +60,7 @@ jobs:
             installer/setup.bat installer/setup-dev.bat installer/common.bat
 
       - name: Publish the GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.value }}
           name: "Installer ${{ steps.tag.outputs.value }}"
